@@ -20,3 +20,9 @@ contracts/artifacts
 contracts/cache
 contracts/typechain-types
 README.md
+**/.venv-py/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/*.egg-info

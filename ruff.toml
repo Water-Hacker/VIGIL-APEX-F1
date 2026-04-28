@@ -1,0 +1,54 @@
+# ruff (lint + format) workspace-wide config.
+# Mirrors the TS-side discipline: strict, no unused, no any-equivalents.
+
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+  "**/.venv/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/*.pyi",
+  "docs/source/_generated/**",
+]
+
+[lint]
+select = [
+  "E", "F", "W",     # pycodestyle / pyflakes
+  "I",               # isort
+  "N",               # pep8-naming
+  "UP",              # pyupgrade
+  "ANN",             # flake8-annotations (force type hints)
+  "S",               # flake8-bandit (security)
+  "B",               # flake8-bugbear
+  "A",               # flake8-builtins
+  "C4",              # comprehensions
+  "DTZ",             # datetime-zoneinfo correctness
+  "PT",              # pytest style
+  "PIE",             # misc
+  "PL",              # pylint
+  "RUF",             # ruff-native
+  "SIM",             # simplify
+  "TID",             # tidy-imports
+  "TRY",             # tryceratops (exception hygiene)
+]
+ignore = [
+  "ANN101",          # type for self
+  "ANN102",          # type for cls
+  "TRY003",          # long messages in raise are fine here
+  "PLR0913",         # too many args (dataclasses are exempt)
+  "PLR0912",         # too many branches in adapter logic
+  "PLR2004",         # magic value compare — too aggressive
+  "S101",            # asserts ok in tests
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S", "PLR2004", "ANN", "D"]
+"**/__init__.py" = ["F401"]
+
+[lint.isort]
+known-first-party = ["vigil_satellite", "vigil_forensics", "vigil_common"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

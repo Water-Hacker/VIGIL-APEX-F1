@@ -44,3 +44,17 @@ docs/source/_generated/
 contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
+
+# Python
+.venv-py/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+

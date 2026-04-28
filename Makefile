@@ -54,7 +54,43 @@ licenses: ## Summarise license types of production deps
 	pnpm run audit:licenses
 
 .PHONY: gates
-gates: lint typecheck test secrets ## Run every blocking quality gate
+gates: lint typecheck test secrets py-gates ## Run every blocking quality gate
+
+# --- Python gates -------------------------------------------------------------
+PY_VENV ?= .venv-py
+PY ?= python3.12
+
+.PHONY: py-setup
+py-setup: ## Create a venv with vigil-common + both python workers installed
+	$(PY) -m venv $(PY_VENV)
+	$(PY_VENV)/bin/pip install --upgrade pip wheel setuptools
+	$(PY_VENV)/bin/pip install -e packages/py-common[test]
+	$(PY_VENV)/bin/pip install -e apps/worker-satellite[test]
+	$(PY_VENV)/bin/pip install -e apps/worker-image-forensics[test]
+	$(PY_VENV)/bin/pip install ruff mypy
+
+.PHONY: py-lint
+py-lint: ## Ruff lint over the Python tree
+	$(PY_VENV)/bin/ruff check packages/py-common apps/worker-satellite apps/worker-image-forensics
+	$(PY_VENV)/bin/ruff format --check packages/py-common apps/worker-satellite apps/worker-image-forensics
+
+.PHONY: py-typecheck
+py-typecheck: ## mypy --strict
+	$(PY_VENV)/bin/mypy packages/py-common/src apps/worker-satellite/src apps/worker-image-forensics/src
+
+.PHONY: py-test
+py-test: ## Run pytest for the Python workers
+	$(PY_VENV)/bin/pytest \
+	  --cov=vigil_common --cov=vigil_satellite --cov=vigil_forensics \
+	  apps/worker-satellite/tests apps/worker-image-forensics/tests
+
+.PHONY: py-format
+py-format: ## ruff format (auto-fix)
+	$(PY_VENV)/bin/ruff format packages/py-common apps/worker-satellite apps/worker-image-forensics
+	$(PY_VENV)/bin/ruff check --fix packages/py-common apps/worker-satellite apps/worker-image-forensics
+
+.PHONY: py-gates
+py-gates: py-lint py-typecheck py-test ## Run every blocking Python quality gate
 
 # --- Compose stack ------------------------------------------------------------
 .PHONY: compose-up

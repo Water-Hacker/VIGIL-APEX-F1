@@ -53,3 +53,23 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Expected calibration error above alarm threshold"
+
+      - alert: PyWorkerUnhealthy
+        expr: up{job="vigil-py-workers"} == 0
+        for: 5m
+        labels: { severity: warning }
+
+      - alert: SatelliteWorkerStarved
+        expr: rate(vigil_satellite_scenes_total[1h]) == 0 and vigil_worker_inflight{worker="worker-satellite"} == 0
+        for: 6h
+        labels: { severity: info }
+        annotations:
+          summary: "worker-satellite has processed no scenes in 6h"
+          description: "Either no vigil:satellite:request events arrived or the STAC API is unreachable."
+
+      - alert: ForensicsWorkerStarved
+        expr: rate(vigil_forensics_documents_total[1h]) == 0 and vigil_worker_inflight{worker="worker-image-forensics"} == 0
+        for: 6h
+        labels: { severity: info }
+        annotations:
+          summary: "worker-image-forensics has processed no documents in 6h"

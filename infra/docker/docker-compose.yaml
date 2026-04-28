@@ -61,6 +61,10 @@ secrets:
     file: /run/vigil/secrets/vault_token_worker
   anthropic_api_key:
     file: /run/vigil/secrets/anthropic_api_key
+  sentinelhub_client_id:
+    file: /run/vigil/secrets/sentinelhub_client_id
+  sentinelhub_client_secret:
+    file: /run/vigil/secrets/sentinelhub_client_secret
 
 # ============================================================================
 # YAML anchors — common env + restart policy
@@ -482,6 +486,100 @@ services:
       <<: *worker-env
       WORKER_NAME: worker-governance
       OTEL_SERVICE_NAME: worker-governance
+
+  # ==========================================================================
+  # Python workers (Ring 1.5 — satellite + image forensics)
+  # ==========================================================================
+  worker-satellite:
+    build:
+      context: ../..
+      dockerfile: infra/docker/dockerfiles/PythonWorker.Dockerfile
+      args:
+        APP_NAME: worker-satellite
+        APP_MODULE: vigil_satellite.main
+    image: vigil-apex/worker-satellite:0.1.0
+    container_name: worker-satellite
+    hostname: worker-satellite
+    <<: [*restart, *logging]
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.40 }
+    depends_on:
+      vigil-postgres: { condition: service_healthy }
+      vigil-redis:    { condition: service_healthy }
+      vigil-vault:    { condition: service_healthy }
+      vigil-ipfs:     { condition: service_healthy }
+    secrets: [pg_password, redis_password, vault_token_worker, sentinelhub_client_id, sentinelhub_client_secret]
+    environment:
+      <<: *common-env
+      WORKER_NAME: worker-satellite
+      OTEL_SERVICE_NAME: worker-satellite
+      POSTGRES_HOST: vigil-postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      REDIS_HOST: vigil-redis
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      VAULT_ADDR: http://vigil-vault:8200
+      VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
+      IPFS_API_URL: http://vigil-ipfs:5001
+      SENTINELHUB_CLIENT_ID_FILE: /run/secrets/sentinelhub_client_id
+      SENTINELHUB_CLIENT_SECRET_FILE: /run/secrets/sentinelhub_client_secret
+      STAC_CATALOG_URL: https://planetarycomputer.microsoft.com/api/stac/v1
+      PROMETHEUS_PORT: "9100"
+    deploy:
+      resources:
+        limits: { memory: 6g, cpus: "3.0" }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9100/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    user: "1000:1000"
+    security_opt: [ "no-new-privileges:true" ]
+
+  worker-image-forensics:
+    build:
+      context: ../..
+      dockerfile: infra/docker/dockerfiles/PythonWorker.Dockerfile
+      args:
+        APP_NAME: worker-image-forensics
+        APP_MODULE: vigil_forensics.main
+        EXTRA_APT: "tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng"
+    image: vigil-apex/worker-image-forensics:0.1.0
+    container_name: worker-image-forensics
+    hostname: worker-image-forensics
+    <<: [*restart, *logging]
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.41 }
+    depends_on:
+      vigil-postgres: { condition: service_healthy }
+      vigil-redis:    { condition: service_healthy }
+      vigil-vault:    { condition: service_healthy }
+      vigil-ipfs:     { condition: service_healthy }
+    secrets: [pg_password, redis_password, vault_token_worker]
+    environment:
+      <<: *common-env
+      WORKER_NAME: worker-image-forensics
+      OTEL_SERVICE_NAME: worker-image-forensics
+      POSTGRES_HOST: vigil-postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      REDIS_HOST: vigil-redis
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      VAULT_ADDR: http://vigil-vault:8200
+      VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
+      IPFS_API_URL: http://vigil-ipfs:5001
+      TESSERACT_DATA_PATH: /usr/share/tesseract-ocr/5/tessdata
+      PROMETHEUS_PORT: "9100"
+    deploy:
+      resources:
+        limits: { memory: 4g, cpus: "2.0" }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9100/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    user: "1000:1000"
+    security_opt: [ "no-new-privileges:true" ]
 
   # ==========================================================================
   # Observability

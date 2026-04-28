@@ -66,6 +66,10 @@ module.exports = {
         'worker-conac-sftp',
         'worker-minfi-api',
         'worker-adapter-repair',
+        // Python apps + shared
+        'worker-satellite',
+        'worker-image-forensics',
+        'py-common',
         // ring-level (cross-package commits)
         'ring-0',
         'ring-1',

@@ -19,16 +19,20 @@
 |---|---|---|---|
 | Adapters | 26 | **26** | ✅ |
 | Patterns | 43 across 8 categories | **43 / 8** | ✅ |
-| Foundation packages | 12 | 12 | ✅ |
-| Worker apps | 11 | 11 | ✅ |
+| Foundation packages (TS) | 12 | 12 | ✅ |
+| Foundation packages (Python) | 1 (`vigil-common`) | **1** | ✅ |
+| Worker apps (TypeScript) | 11 | 11 | ✅ |
+| Worker apps (Python) | 2 (`worker-satellite`, `worker-image-forensics`) | **2** | ✅ |
 | Smart contracts | 2 | 2 | ✅ |
-| Compose services | 16 | 16 | ✅ |
+| Compose services | 18 | 18 | ✅ |
 | Anti-hallucination guard layers | 12 | 12 | ✅ |
 | Source registry entries | 26 | 26 | ✅ |
 | Synthetic-hallucination corpus rows | ≥ 7 | 7 | ✅ |
+| Producers for satellite/forensics-dependent patterns (P-D-001..005, P-G-002, P-G-004) | 6 of 6 | **6 / 6** | ✅ |
 | Pattern test fixtures | ≥ 2 per pattern | scheduled (follow-up) | ⏳ |
+| Python typecheck (mypy --strict) | green | green on first `make py-setup` | ⏳ |
 
-## Apps (14)
+## Apps (16 — 14 TypeScript, 2 Python)
 
 | App | Ring | Role |
 |---|---|---|
@@ -46,6 +50,8 @@
 | `worker-anchor` | 4 | Hourly Polygon-mainnet hash-chain anchor |
 | `worker-governance` | 5 | Polygon contract event watcher → Postgres projection |
 | `audit-verifier` | 5 | Hourly CT-01 hash-chain integrity + CT-02 ledger match |
+| `worker-satellite` (Python) | 1.5 | Sentinel-2 / Landsat fetch via STAC; activity_score for P-D-001..005 |
+| `worker-image-forensics` (Python) | 1.5 | OpenCV + scikit-image; signature similarity + font anomaly + EXIF strip |
 
 ## Packages (12)
 
