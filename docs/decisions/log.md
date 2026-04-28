@@ -1074,6 +1074,65 @@ This deliverable does NOT trigger an actual cutover. Phase-1 ops
 continue on Compose. The chart is the on-ramp the Phase-2 ops team
 finds in tree when they arrive.
 
+## 2026-04-28 — Institutional artefact templates
+
+Three template documents land at `docs/institutional/` covering the
+non-technical Phase-2 entry preconditions identified in ROADMAP.md.
+The architect personalises each template's `<<FILL: ...>>` markers,
+runs the result past counsel, sends, and tracks reply state in
+`docs/decisions/log.md`. Templates are intentionally bilingual where
+the destination is bilingual (council members, CONAC) and FR-primary
+where the destination is monolingual French (ANTIC).
+
+- `docs/institutional/INDEX.md` — directory overview, sequencing,
+  where signed copies live (architect's institutional file, NOT this
+  repo).
+- `docs/institutional/conac-engagement-letter.md` — FR-binding
+  letter to the Commission Nationale Anti-Corruption proposing
+  formal engagement under v5.1 §1, §3, §11, §22 with the four
+  asks (technical PoC, friendly read of first three dossiers,
+  optional judicial pillar seat, halt mechanism). EN companion
+  copy retained for architect records. Counsel review mandatory
+  before send.
+- `docs/institutional/antic-declaration.md` — formal declaration
+  under Loi n° 2010/012 art. 41 (cybersecurity / personal data),
+  with the seven sections ANTIC's portal requires (responsible-
+  party, system, data categories, technical safeguards,
+  international transfers, commitments, attachments). Lists every
+  personal-data category VIGIL APEX touches with retention
+  windows and lawful basis. **Counsel review is mandatory** —
+  Loi 2010/012 violations are criminal, fines start at CFA 5 M.
+- `docs/institutional/council-pillar-candidate-brief.md` — bespoke
+  per-candidate brief used to recruit one council member per pillar
+  (judicial / civil society / academic / technical / religious).
+  Covers what the platform is, what the pillar represents, the
+  ~30-hour annual time commitment, the indemnity calibration band,
+  the legal protections, and the exit. The architect's handling
+  notes warn explicitly against group-send (pillar independence is
+  structural).
+
+These three templates are intentionally NOT "ready to ship":
+- CONAC letter requires the ANTIC declaration receipt as an
+  attachment; ANTIC files first.
+- ANTIC declaration requires counsel review and the
+  processing-activity registry under art. 41 al. 7.
+- Council briefs require the architect's personal candidate list
+  and pillar-specific compensation calibration.
+
+The Phase-2 entry critical path is now:
+1. Counsel-reviewed ANTIC declaration filed → receipt back.
+2. CONAC engagement letter sent (with receipt attached) →
+   countersigned engagement reply.
+3. Council pillars filled, one at a time, easiest-first → 3+
+   active members signed in.
+4. MINFI / BEAC / ANIF MOUs negotiated by counsel against the
+   already-shipped placeholder adapters (R7).
+
+Each step independently flips one Phase-2 ROADMAP precondition. The
+technical platform is ready to absorb each transition the day it
+lands; no further code work is required from the architect to
+unlock Phase 2.
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
