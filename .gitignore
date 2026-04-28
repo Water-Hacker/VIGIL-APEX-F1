@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+/run/vigil/secrets/
+/etc/vigil/
+
+# Personal architect-only material — NEVER commit
+personal/calibration-seed/seed.csv
+personal/calibration-seed/*.csv
+personal/council-candidates/
+personal/prompts/*.local.md
+
+# Logs & runtime data
+*.log
+/srv/vigil/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Documentation extracts (kept under /tmp during work, not in repo)
+/tmp/
+
+# Generated PDFs (regenerated from docx-js)
+docs/source/_generated/
+*.pdf
+
+# Hardhat / contract artefacts
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/

@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+.next
+out
+coverage
+.turbo
+.git
+docs/source/_generated
+docs/archive
+*.md.lock
+pnpm-lock.yaml
+contracts/artifacts
+contracts/cache
+contracts/typechain-types
+infra/docker/grafana/dashboards/*.json

@@ -1,0 +1,33 @@
+{
+  "name": "@vigil/dossier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic bilingual PDF dossier renderer + signing.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "templates"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/observability": "workspace:*",
+    "@vigil/security": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "docx": "^9.0.2",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/qrcode": "^1.5.5",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

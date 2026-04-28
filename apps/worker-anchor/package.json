@@ -1,0 +1,30 @@
+{
+  "name": "worker-anchor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Periodic anchor of audit-chain tail to Polygon mainnet via Unix-socket signer.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

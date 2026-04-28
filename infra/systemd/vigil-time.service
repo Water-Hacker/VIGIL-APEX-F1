@@ -1,0 +1,13 @@
+[Unit]
+Description=VIGIL APEX authoritative time
+After=chrony.service
+Requires=chrony.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/chronyc tracking
+ExecStart=/usr/bin/timedatectl set-timezone Africa/Douala
+
+[Install]
+WantedBy=multi-user.target

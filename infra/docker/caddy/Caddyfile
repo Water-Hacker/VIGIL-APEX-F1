@@ -1,0 +1,97 @@
+# VIGIL APEX Caddyfile — TLS termination + reverse proxy.
+# SRD §9.4. ACME via Let's Encrypt (CAA pinned at the registrar).
+
+{
+    email ops@vigilapex.cm
+    auto_https on
+    servers {
+        protocols h1 h2 h3
+    }
+}
+
+# ----------------------------------------------------------------------------
+# Internal health (used by Docker healthcheck)
+# ----------------------------------------------------------------------------
+:80 {
+    @health path /healthz
+    handle @health {
+        respond "ok" 200
+    }
+    redir https://{host}{uri} permanent
+}
+
+# ----------------------------------------------------------------------------
+# Operator dashboard — authenticated surface
+# ----------------------------------------------------------------------------
+vigilapex.cm, www.vigilapex.cm {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https://api.mapbox.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.mapbox.com wss://vigilapex.cm; frame-ancestors 'none'"
+        -Server
+    }
+
+    handle /api/* {
+        reverse_proxy vigil-dashboard:3000
+    }
+    handle {
+        reverse_proxy vigil-dashboard:3000
+    }
+}
+
+# ----------------------------------------------------------------------------
+# Public verify — open read-only
+# ----------------------------------------------------------------------------
+verify.vigilapex.cm {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'"
+        -Server
+    }
+    handle /verify/* {
+        reverse_proxy vigil-dashboard:3000
+    }
+    handle /ledger* {
+        reverse_proxy vigil-dashboard:3000
+    }
+    handle {
+        respond "VIGIL APEX verification surface" 200
+    }
+}
+
+# ----------------------------------------------------------------------------
+# Tip portal — public-write, anti-bot, rate-limited
+# ----------------------------------------------------------------------------
+tip.vigilapex.cm {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        # CSP allowlist Cloudflare Turnstile only
+        Content-Security-Policy "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+    handle /tip* {
+        reverse_proxy vigil-dashboard:3000
+    }
+}
+
+# ----------------------------------------------------------------------------
+# Keycloak
+# ----------------------------------------------------------------------------
+kc.vigilapex.cm {
+    encode zstd gzip
+    reverse_proxy vigil-keycloak:8080 {
+        header_up Host {host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

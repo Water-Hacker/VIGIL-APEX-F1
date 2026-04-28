@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VIGIL APEX backup nightly at 02:30 Africa/Douala
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=vigil-backup.service
+
+[Install]
+WantedBy=timers.target

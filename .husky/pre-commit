@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# VIGIL APEX pre-commit hook
+# Runs lint-staged + secret scan + decision-log lint.
+
+set -euo pipefail
+
+# Block commit if any staged file is in personal/ (architect-only)
+if git diff --cached --name-only | grep -E '^personal/(calibration-seed|council-candidates|prompts/.*\.local\.md)' >/dev/null; then
+  echo "FATAL: refusing to commit architect-only files under personal/."
+  echo "       Check .gitignore."
+  exit 1
+fi
+
+# Block commit if a .env (not .env.example) is staged
+if git diff --cached --name-only | grep -E '(^|/)\.env(\..*)?$' | grep -v '\.example$' >/dev/null; then
+  echo "FATAL: refusing to commit a .env file. Use .env.example only."
+  exit 1
+fi
+
+# Run lint-staged
+pnpm exec lint-staged
+
+# Secret scan on staged content (gitleaks if available)
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact -v --no-banner
+fi
+
+echo "[pre-commit] OK"

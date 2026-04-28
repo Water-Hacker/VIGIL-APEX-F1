@@ -1,0 +1,31 @@
+{
+  "name": "worker-score",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bayesian certainty engine — combines signals into posterior; triggers counter-evidence at 0.85.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/patterns": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

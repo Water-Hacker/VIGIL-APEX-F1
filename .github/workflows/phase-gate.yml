@@ -1,0 +1,55 @@
+name: phase-gate
+
+# Per OPERATIONS.md §8 + EXEC §43.2 — refuses merge of Phase-N code that
+# violates the precondition recorded in docs/decisions/log.md.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read current phase from decision log
+        id: phase
+        run: |
+          # Extract `**Current phase: ...**` from docs/decisions/log.md
+          phase=$(grep -E '^\*\*Current phase:' docs/decisions/log.md | head -1 | \
+                  sed -E 's/.*Phase-([0-9]+).*/\1/' || echo "0")
+          echo "current_phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "Current phase: $phase"
+
+      - name: Verify dry-run decision (Phase 0+ requires GO)
+        if: steps.phase.outputs.current_phase != 'pre-0'
+        run: |
+          if [ ! -f docs/decisions/DRY-RUN-DECISION.md ]; then
+            echo "FATAL: DRY-RUN-DECISION.md missing; Phase 0 cannot proceed."
+            exit 1
+          fi
+          status=$(grep -E '^\*\*Status:\s*' docs/decisions/DRY-RUN-DECISION.md | head -1 || true)
+          if ! echo "$status" | grep -E 'GO\b|GO-with-note' >/dev/null; then
+            echo "FATAL: DRY-RUN-DECISION status is not GO. Current: $status"
+            exit 1
+          fi
+          echo "[gate] DRY-RUN-DECISION: GO ✔"
+
+      - name: Verify decision log discipline (W-27)
+        run: |
+          # Block merge if any FINAL decision in last 7 days lacks audit_event_id
+          # (Phase 1+ only — pre-Phase-1 entries are migrated retroactively).
+          if [ "${{ steps.phase.outputs.current_phase }}" -ge 1 ]; then
+            offenders=$(awk '/^## DECISION-/{d=$0} /Status: FINAL/{f=1} /audit_event_id:.*pending/{p=1} /^---/{if(f && p) print d; f=0; p=0}' docs/decisions/log.md)
+            if [ -n "$offenders" ]; then
+              echo "FATAL: FINAL decisions without audit_event_id:"
+              echo "$offenders"
+              exit 1
+            fi
+          fi
+          echo "[gate] Decision log: ✔"

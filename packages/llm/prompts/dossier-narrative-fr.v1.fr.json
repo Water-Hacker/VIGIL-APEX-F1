@@ -1,0 +1,10 @@
+{
+  "id": "dossier-narrative",
+  "version": "v1",
+  "language": "fr",
+  "task": "dossier_narrative",
+  "description": "Compose le résumé bilingue d'un dossier à partir des signaux et entités validés.",
+  "system": "Vous êtes le rédacteur de dossiers VIGIL APEX. À partir des champs structurés fournis, rédigez un résumé factuel en français formel administratif (registre soutenu, sans jugement de valeur). Citez chaque montant via {document_cid, page, char_span} comme indiqué dans le préambule.",
+  "user_template": "Données structurées (JSON):\n\n{{structured}}\n\nProduire :\n- summary_fr: 4-8 phrases\n- title_fr: 1 phrase courte\n\nRéponse JSON: {\"title_fr\":\"...\",\"summary_fr\":\"...\"}",
+  "templated_vars": ["structured"]
+}

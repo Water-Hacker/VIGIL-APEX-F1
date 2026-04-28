@@ -1,0 +1,13 @@
+[Unit]
+Description=VIGIL APEX watchdog — periodic health probe
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vigil-watchdog
+User=vigil
+Group=vigil
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

@@ -1,0 +1,50 @@
+name: contract-test
+
+on:
+  push:
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contract-test.yml'
+  pull_request:
+    paths:
+      - 'contracts/**'
+
+permissions:
+  contents: read
+
+jobs:
+  hardhat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Compile
+        run: pnpm --filter contracts run build
+      - name: Test
+        run: pnpm --filter contracts run test
+      - name: Coverage
+        run: pnpm --filter contracts run coverage
+      - name: Gas report
+        run: pnpm --filter contracts run gas
+        env:
+          REPORT_GAS: 'true'
+
+  slither:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install slither-analyzer
+      - name: Static analysis on contracts
+        run: slither contracts/contracts --json slither-report.json || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slither-report
+          path: slither-report.json

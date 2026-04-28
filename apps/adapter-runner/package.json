@@ -1,0 +1,38 @@
+{
+  "name": "adapter-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loads sources.json, schedules adapters per cron, dispatches results to Redis stream vigil:adapter:out.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/adapters": "workspace:*",
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/security": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "node-cron": "^3.0.3",
+    "robots-parser": "^3.0.1",
+    "undici": "^6.19.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/node-cron": "^3.0.11",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

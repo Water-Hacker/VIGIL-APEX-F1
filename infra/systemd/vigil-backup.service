@@ -1,0 +1,14 @@
+[Unit]
+Description=VIGIL APEX nightly backup
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vigil-backup --target /mnt/synology/vigil-archive --mode incremental
+User=vigil
+Group=vigil
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/mnt/synology/vigil-archive
+PrivateTmp=true
+TimeoutStartSec=2h

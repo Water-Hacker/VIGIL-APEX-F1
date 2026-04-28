@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "rootDir": ".",
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["./hardhat.config.ts", "./scripts/**/*.ts", "./test/**/*.ts", "./typechain-types/**/*.ts"],
+  "exclude": ["node_modules", "dist", "cache", "artifacts"]
+}

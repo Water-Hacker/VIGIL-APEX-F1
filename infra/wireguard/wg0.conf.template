@@ -1,0 +1,29 @@
+# /etc/wireguard/wg0.conf — VIGIL APEX mesh template
+# DO NOT commit a populated copy. Real keys go in Vault.
+#
+# Topology:
+#   - host (this machine, Yaoundé) ↔ N02 (Hetzner CPX31, Falkenstein)
+#   - host ↔ NAS-replica (off-site)
+#   - architect's laptop dial-in via wg-admin (separate config)
+
+[Interface]
+PrivateKey = ${HOST_PRIVATE_KEY}
+Address = 10.66.0.1/24
+ListenPort = 51820
+SaveConfig = false
+PostUp   = ufw allow in on wg0
+PostDown = ufw delete allow in on wg0
+
+# ---- Hetzner ingestion VPS (N02) ----
+[Peer]
+PublicKey = ${N02_PUBLIC_KEY}
+AllowedIPs = 10.66.0.2/32
+Endpoint = ${N02_PUBLIC_IP}:51820
+PersistentKeepalive = 25
+
+# ---- Synology replica NAS (off-site) ----
+[Peer]
+PublicKey = ${NAS_REPLICA_PUBLIC_KEY}
+AllowedIPs = 10.66.0.10/32
+Endpoint = ${NAS_REPLICA_PUBLIC_IP}:51820
+PersistentKeepalive = 25

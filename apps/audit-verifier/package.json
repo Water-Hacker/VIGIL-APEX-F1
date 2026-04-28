@@ -1,0 +1,29 @@
+{
+  "name": "audit-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hourly hash-chain integrity check (CT-01) + Polygon-anchor match (CT-02).",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "verify-once": "node dist/once.js",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

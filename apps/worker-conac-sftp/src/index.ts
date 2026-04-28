@@ -1,0 +1,180 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+
+import { getDb } from '@vigil/db-postgres';
+import {
+  createLogger,
+  installShutdownHandler,
+  initTracing,
+  shutdownTracing,
+  startMetricsServer,
+  registerShutdown,
+} from '@vigil/observability';
+import {
+  QueueClient,
+  STREAMS,
+  WorkerBase,
+  type Envelope,
+  type HandlerOutcome,
+} from '@vigil/queue';
+import { VaultClient, expose } from '@vigil/security';
+import { Schemas } from '@vigil/shared';
+import SftpClient from 'ssh2-sftp-client';
+import { z } from 'zod';
+
+import { buildManifest, type FormatAdapterVersion } from './format-adapter.js';
+
+const logger = createLogger({ service: 'worker-conac-sftp' });
+
+const zPayload = z.object({
+  finding_id: z.string().uuid(),
+  dossier_ref: z.string().regex(/^VA-\d{4}-\d{4,6}$/),
+  pdf_cid: z.string(),
+  pdf_sha256: z.string().length(64),
+  language: z.enum(['fr', 'en']),
+});
+type Payload = z.infer<typeof zPayload>;
+
+class ConacSftpWorker extends WorkerBase<Payload> {
+  constructor(
+    private readonly vault: VaultClient,
+    queue: QueueClient,
+  ) {
+    super({
+      name: 'worker-conac-sftp',
+      stream: STREAMS.DOSSIER_DELIVER,
+      schema: zPayload,
+      client: queue,
+      logger,
+      concurrency: 1, // sequential to avoid SFTP-session conflicts
+      maxRetries: 8,
+    });
+  }
+
+  protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
+    const formatVersion: FormatAdapterVersion =
+      (process.env.CONAC_FORMAT_ADAPTER as FormatAdapterVersion) ?? 'v1';
+
+    if (process.env.CONAC_SFTP_HOST?.startsWith('PLACEHOLDER')) {
+      logger.warn('CONAC_SFTP_HOST not provisioned; queueing dossier for later delivery');
+      return { kind: 'retry', reason: 'conac-not-provisioned', delay_ms: 24 * 3_600_000 };
+    }
+
+    const sftp = new SftpClient();
+    try {
+      const privKey = await this.vault.read<string>('conac-sftp', 'private_key');
+      await sftp.connect({
+        host: process.env.CONAC_SFTP_HOST!,
+        port: Number(process.env.CONAC_SFTP_PORT ?? 22),
+        username: process.env.CONAC_SFTP_USER ?? 'vigilapex',
+        privateKey: expose(privKey),
+        readyTimeout: 30_000,
+        algorithms: {
+          kex: ['curve25519-sha256', 'curve25519-sha256@libssh.org'],
+          cipher: ['chacha20-poly1305@openssh.com', 'aes256-gcm@openssh.com'],
+          serverHostKey: ['ssh-ed25519', 'rsa-sha2-512'],
+        },
+      });
+
+      const inbox = process.env.CONAC_INBOX ?? '/inbox/vigil-apex';
+      const ackDir = process.env.CONAC_ACK_DIR ?? '/ack/vigil-apex';
+      const ref = env.payload.dossier_ref;
+
+      // Build manifest via format-adapter (W-25)
+      const manifest = buildManifest(
+        {
+          dossier: {
+            id: env.payload.finding_id,
+            ref,
+            finding_id: env.payload.finding_id,
+            language: env.payload.language,
+            status: 'rendered',
+            pdf_sha256: env.payload.pdf_sha256 as Schemas.Sha256Hex,
+            pdf_cid: env.payload.pdf_cid as Schemas.DocumentCid,
+            signature_fingerprint: null,
+            signature_at: null,
+            rendered_at: new Date().toISOString(),
+            delivered_at: null,
+            acknowledged_at: null,
+            recipient_case_reference: null,
+            manifest_hash: null,
+            metadata: {},
+          },
+          finding: { id: env.payload.finding_id } as unknown as Schemas.Finding,
+          fr_pdf: { sha256: env.payload.pdf_sha256, bytes: 0 },
+          en_pdf: { sha256: env.payload.pdf_sha256, bytes: 0 },
+          evidence_archive: { sha256: '0'.repeat(64), bytes: 0 },
+          signer: {
+            name: 'Junior Thuram Nana',
+            pgp_fingerprint: process.env.GPG_FINGERPRINT ?? 'PLACEHOLDER',
+            signed_at: new Date().toISOString(),
+          },
+          audit_anchor: { audit_event_id: 'pending', polygon_tx_hash: null },
+        },
+        formatVersion,
+      );
+
+      // Upload (manifest LAST per SRD §25.3)
+      const remoteDir = `${inbox}/${ref}`;
+      await sftp.mkdir(remoteDir, true);
+      // PDF file is fetched from IPFS by a sibling worker normally; here we
+      // assume the bytes are already present in /var/run/vigil/dossiers
+      // (volume-shared with worker-dossier).
+      const localFr = `/var/run/vigil/dossiers/${ref}-fr.pdf`;
+      const localEn = `/var/run/vigil/dossiers/${ref}-en.pdf`;
+      await sftp.put(localFr, `${remoteDir}/${ref}-fr.pdf`).catch(() => null);
+      await sftp.put(localEn, `${remoteDir}/${ref}-en.pdf`).catch(() => null);
+      await sftp.put(Buffer.from(JSON.stringify(manifest, null, 2)), `${remoteDir}/${ref}-manifest.json`);
+
+      // Poll for ACK (5-min interval, up to 7 days per SRD §25.4)
+      const ackPath = `${ackDir}/${ref}.ack`;
+      const start = Date.now();
+      while (Date.now() - start < 7 * 86_400_000) {
+        try {
+          const exists = await sftp.exists(ackPath);
+          if (exists === '-') {
+            const ackBytes = (await sftp.get(ackPath)) as Buffer;
+            const parsed = Schemas.zConacAck.safeParse(JSON.parse(ackBytes.toString('utf8')));
+            if (parsed.success) {
+              logger.info({ ref, conac_ref: parsed.data.conac_case_reference }, 'conac-ack-received');
+              return { kind: 'ack' };
+            }
+          }
+        } catch {
+          // ignore transient errors, retry
+        }
+        await sleep(5 * 60_000);
+      }
+      return { kind: 'retry', reason: 'no-ack-7d', delay_ms: 24 * 3_600_000 };
+    } catch (e) {
+      logger.error({ err: e }, 'sftp-failed');
+      return { kind: 'retry', reason: 'sftp-error', delay_ms: 60_000 };
+    } finally {
+      await sftp.end().catch(() => null);
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  await initTracing({ service: 'worker-conac-sftp' });
+  const metrics = await startMetricsServer();
+  registerShutdown('metrics', () => metrics.close());
+  installShutdownHandler(logger);
+  registerShutdown('tracing', shutdownTracing);
+
+  const queue = new QueueClient({ logger });
+  await queue.ping();
+  registerShutdown('queue', () => queue.close());
+  await getDb();
+  const vault = await VaultClient.connect();
+  registerShutdown('vault', () => vault.close());
+
+  const worker = new ConacSftpWorker(vault, queue);
+  await worker.start();
+  registerShutdown('worker', () => worker.stop());
+  logger.info('worker-conac-sftp-ready');
+}
+
+main().catch((e: unknown) => {
+  logger.error({ err: e }, 'fatal-startup');
+  process.exit(1);
+});

@@ -1,0 +1,19 @@
+[Unit]
+Description=VIGIL APEX Vault unseal coordinator
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/vigil/unseal.env
+ExecStart=/usr/local/bin/vigil-vault-unseal
+TimeoutStartSec=180
+
+# This unit reads age-encrypted Shamir shares from /run/vigil/shamir/ and
+# unseals Vault using libykcs11 + age-plugin-yubikey. The architect must
+# be present with their YubiKey at boot for the unseal to complete.
+
+[Install]
+WantedBy=multi-user.target

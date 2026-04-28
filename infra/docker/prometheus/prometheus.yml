@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: vigil-apex
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  - job_name: vigil-workers
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - worker-entity:9100
+          - worker-pattern:9100
+          - worker-score:9100
+          - worker-dossier:9100
+          - worker-anchor:9100
+          - worker-governance:9100
+        labels: { ring: "1-2-3-4-5" }
+
+  - job_name: vigil-dashboard
+    metrics_path: /metrics
+    static_configs:
+      - targets: [vigil-dashboard:9100]
+
+  - job_name: vigil-postgres
+    static_configs:
+      - targets: [vigil-postgres:9187]
+
+  - job_name: vigil-redis
+    static_configs:
+      - targets: [vigil-redis:9121]
+
+  - job_name: vigil-self
+    static_configs:
+      - targets: [localhost:9090]

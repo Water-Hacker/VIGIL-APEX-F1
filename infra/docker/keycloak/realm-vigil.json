@@ -1,0 +1,97 @@
+{
+  "realm": "vigil-apex",
+  "displayName": "VIGIL APEX",
+  "displayNameHtml": "<b>VIGIL APEX</b>",
+  "enabled": true,
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "offlineSessionIdleTimeout": 2592000,
+
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'none'; object-src 'none';",
+    "xContentTypeOptions": "nosniff",
+    "referrerPolicy": "no-referrer",
+    "xRobotsTag": "none",
+    "xFrameOptions": "DENY",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  },
+
+  "webAuthnPolicyRpEntityName": "VIGIL APEX",
+  "webAuthnPolicyRpId": "vigilapex.cm",
+  "webAuthnPolicySignatureAlgorithms": ["ES256", "ES256K", "EdDSA", "RS256"],
+  "webAuthnPolicyUserVerificationRequirement": "required",
+  "webAuthnPolicyAttestationConveyancePreference": "direct",
+  "webAuthnPolicyAuthenticatorAttachment": "cross-platform",
+  "webAuthnPolicyRequireResidentKey": "No",
+  "webAuthnPolicyAcceptableAaguids": [],
+
+  "browserFlow": "VIGIL APEX FIDO2-only",
+  "directGrantFlow": "direct grant",
+  "registrationFlow": "registration",
+  "resetCredentialsFlow": "reset credentials",
+  "clientAuthenticationFlow": "clients",
+  "dockerAuthenticationFlow": "docker auth",
+
+  "authenticationFlows": [
+    {
+      "alias": "VIGIL APEX FIDO2-only",
+      "description": "Username + WebAuthn (no password fallback)",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-username-form", "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false, "autheticatorFlow": false },
+        { "authenticator": "webauthn-authenticator", "requirement": "REQUIRED", "priority": 20, "userSetupAllowed": true, "autheticatorFlow": false }
+      ]
+    }
+  ],
+
+  "clients": [
+    {
+      "clientId": "vigil-dashboard",
+      "name": "VIGIL APEX Dashboard",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "standardFlowEnabled": true,
+      "frontchannelLogout": true,
+      "rootUrl": "https://vigilapex.cm",
+      "redirectUris": ["https://vigilapex.cm/*", "http://localhost:3000/*"],
+      "webOrigins": ["https://vigilapex.cm", "http://localhost:3000"],
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+
+  "roles": {
+    "realm": [
+      { "name": "operator", "description": "Operations Room access" },
+      { "name": "council_member", "description": "Council portal access" },
+      { "name": "auditor", "description": "Read-only audit access" },
+      { "name": "tip_triage", "description": "Tip-portal triage queue" },
+      { "name": "architect", "description": "System architect — full access" }
+    ]
+  }
+}

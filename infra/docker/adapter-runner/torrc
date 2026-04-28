@@ -1,0 +1,19 @@
+# VIGIL APEX adapter-runner torrc
+# Used only as escalation tier when 403/451 from a source.
+
+SocksPort 9050
+ControlPort 9051
+DataDirectory /tmp/tor-data
+
+# obfs4 bridges — required for in-country submissions to defeat ISP fingerprinting
+UseBridges 1
+ClientTransportPlugin obfs4 exec /usr/bin/obfs4proxy
+
+# Bridge addresses are loaded at startup from /run/vigil/secrets/tor_bridges
+# (paper-distributed, rotated quarterly per OPERATIONS.md).
+# Bridge obfs4 <addr>:<port> <fingerprint> cert=<...> iat-mode=0
+%include /run/vigil/secrets/tor_bridges
+
+ExitNodes {us},{de},{nl},{ch}
+StrictNodes 1
+ExcludeNodes {cm}

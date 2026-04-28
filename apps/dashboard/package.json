@@ -1,0 +1,37 @@
+{
+  "name": "dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VIGIL APEX dashboard — operator + council + public verify + tip portal (Next.js 14).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev -p 3000",
+    "start": "next start -p 3000",
+    "lint": "next lint --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf .next .turbo"
+  },
+  "dependencies": {
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/governance": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/security": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "@simplewebauthn/browser": "^10.0.0",
+    "next": "^14.2.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "eslint-config-next": "^14.2.13",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

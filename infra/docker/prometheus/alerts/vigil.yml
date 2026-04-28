@@ -1,0 +1,55 @@
+groups:
+  - name: vigil_apex
+    interval: 30s
+    rules:
+      - alert: AdapterFailing
+        expr: rate(vigil_adapter_runs_total{outcome="failed"}[10m]) > 0.5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Adapter {{ $labels.source }} failing"
+          description: "Source-website change suspected. Check first-contact archive."
+
+      - alert: HashChainBreak
+        expr: increase(vigil_errors_total{code="AUDIT_HASH_CHAIN_BROKEN"}[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "FATAL: hash chain integrity violated"
+          description: "Stop all writes; investigate; restore from last-known-good."
+
+      - alert: PolygonAnchorFailing
+        expr: increase(vigil_polygon_anchor_total{outcome="failed"}[1h]) > 5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Polygon anchor failing repeatedly"
+
+      - alert: LlmCircuitOpen
+        expr: increase(vigil_llm_calls_total{outcome="error"}[5m]) > 10
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM circuit-breaker tripped — failing over to Bedrock"
+
+      - alert: LlmCostCeiling
+        expr: increase(vigil_llm_cost_usd_total[1d]) > 30
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM daily soft-ceiling exceeded"
+
+      - alert: LlmCostHardCeiling
+        expr: increase(vigil_llm_cost_usd_total[1d]) > 100
+        labels: { severity: critical }
+        annotations:
+          summary: "LLM daily HARD ceiling — calls throttled"
+
+      - alert: WorkerUnhealthy
+        expr: up{job="vigil-workers"} == 0
+        for: 5m
+        labels: { severity: warning }
+
+      - alert: ECEHigh
+        expr: vigil_calibration_ece_overall > 0.10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Expected calibration error above alarm threshold"

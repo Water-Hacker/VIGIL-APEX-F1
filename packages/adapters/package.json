@@ -1,0 +1,36 @@
+{
+  "name": "@vigil/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adapter base class, registry, scheduling, proxy rotation. Hosts all 26 adapters.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "node-cron": "^3.0.3",
+    "playwright": "^1.47.2",
+    "robots-parser": "^3.0.1",
+    "undici": "^6.19.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/node-cron": "^3.0.11",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

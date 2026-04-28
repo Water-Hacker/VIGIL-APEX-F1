@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VIGIL APEX watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=vigil-watchdog.service
+
+[Install]
+WantedBy=timers.target

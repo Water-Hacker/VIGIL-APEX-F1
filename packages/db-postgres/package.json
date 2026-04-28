@@ -1,0 +1,43 @@
+{
+  "name": "@vigil/db-postgres",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drizzle ORM schemas + migrations + repos for VIGIL APEX Postgres.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./schema": { "types": "./dist/schema/index.d.ts", "default": "./dist/schema/index.js" }
+  },
+  "files": ["dist", "drizzle"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "migrate": "drizzle-kit migrate",
+    "generate": "drizzle-kit generate",
+    "reset": "drizzle-kit drop && drizzle-kit migrate",
+    "seed": "node dist/scripts/seed.js",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/observability": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "drizzle-orm": "^0.34.0",
+    "pg": "^8.13.0",
+    "postgres": "^3.4.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.25.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}
