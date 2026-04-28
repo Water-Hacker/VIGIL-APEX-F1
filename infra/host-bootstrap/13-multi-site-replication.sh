@@ -166,7 +166,6 @@ fi
 # ============================================================================
 # Runtime
 # ============================================================================
-mkdir -p "${ARCHIVE_ROOT}" "${LOCK_DIR}" "$(dirname "${LOG_FILE}")"
 
 # Structured log helper. One JSON object per call.
 log_event() {
@@ -187,6 +186,9 @@ if (( DRY_RUN )); then
   done
   exit 0
 fi
+
+# Real-run only: ensure the runtime dirs exist.
+mkdir -p "${ARCHIVE_ROOT}" "${LOCK_DIR}" "$(dirname "${LOG_FILE}")"
 
 # Per-region pull loop.
 overall_status=0

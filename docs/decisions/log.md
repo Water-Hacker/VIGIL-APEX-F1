@@ -1133,6 +1133,161 @@ technical platform is ready to absorb each transition the day it
 lands; no further code work is required from the architect to
 unlock Phase 2.
 
+## 2026-04-28 — Phase 3 federation scaffold close (K1–K8)
+
+Phase 3 of the ROADMAP — regional federation across 10 Cameroonian
+regions — is *scaffolded* in tree. Execution remains gated on (i)
+CEMAC funding release against the $1.2M–$1.8M envelope and (ii) the
+council 4-of-5 architectural-review vote per §22 of the v5.1
+commercial agreement. The architect is **not authorised** to begin
+per-region cutover ceremonies before both gates clear.
+
+What landed:
+
+- **K1** architecture — `docs/PHASE-3-FEDERATION.md` with topology,
+  protobuf service shape, federated PKI hierarchy, NAS chain, cost
+  envelope, sequential rollout order CE → LT → NW → OU → SW → SU
+  → ES → EN → NO → AD.
+- **K2** regional-node Helm chart skeleton —
+  `infra/k8s/charts/regional-node/` with `Chart.yaml`,
+  `values.yaml`, `_helpers.tpl`, `adapter-runner`,
+  `federation-agent`, `postgres-replica`, `networkpolicy.yaml`.
+- **K3** federated Vault PKI bootstrap —
+  `infra/host-bootstrap/13-vault-pki-federation.sh` mounts the
+  Yaoundé root PKI (`pki/`, ttl=10y) and 10 region-scoped
+  subordinate mounts (`pki-region-<lowercase code>/`, ttl=2y),
+  issues each region's `federation-signer` ed25519 role, archives
+  the cert chain to `/run/vigil/region-cas/<CODE>.cert.pem`, and
+  applies the `architect-region-pki` Vault policy that explicitly
+  denies cross-region issuance.
+- **K4** `@vigil/federation-stream` package —
+  `proto/federation.proto` (authoritative wire format) plus a TS
+  client (used by the regional `worker-federation-agent`) and
+  server (used by the core `worker-federation-receiver`).
+  Receiver-side `verifyEnvelopeWithPolicy` enforces region-prefix
+  match on the signing-key id, replay window (default forward
+  60 s, backward 7 d), per-envelope payload cap (256 KiB), and
+  ed25519 signature over a deterministic canonical encoding
+  (`canonicalSigningBytes`). Test coverage in
+  `src/sign.test.ts` exercises round-trip, tampered-payload
+  rejection, wrong-key rejection, region-mismatch rejection,
+  replay-window rejection, oversized-payload rejection.
+- **K5** 10 per-region values files —
+  `infra/k8s/charts/regional-node/values-{CE,LT,NW,SW,OU,SU,ES,EN,NO,AD}.yaml`.
+  Each pins the region code, capital, signing-key id, federation
+  endpoint, the enabled adapter source-IDs for that region, the
+  Postgres-replica primary host, the regional Vault subordinate
+  CA URL, and the multi-site replication NAS host + bandwidth
+  cap. EN gets the lowest bw cap (15 Mbps); CE/LT/OU/SU the
+  highest (50 Mbps).
+- **K6** multi-site NAS replication —
+  `infra/host-bootstrap/13-multi-site-replication.sh` extends
+  the F1 backup chain. The Yaoundé core *pulls* (never pushes)
+  every regional NAS over WireGuard via rsync into
+  `/srv/vigil/region-archive/<CODE>/`, with per-region locks
+  under `/var/run/vigil/replication-<region>.lock`, structured
+  JSON log lines for the audit-verifier, lag alerting at half
+  the federation `retainHours` (default 84 h), and a
+  `RETAIN_DAYS=90` retention sweep. Companion systemd units in
+  `infra/host-bootstrap/systemd/vigil-multisite-replication.{service,timer}`
+  fire at 01:30 UTC, before the existing `vigil-backup.service`
+  at 02:30 Africa/Douala.
+- **K7** council architectural-review brief —
+  `docs/institutional/council-phase-3-review.md` walks the
+  council through the architecture, cost envelope, rollout order,
+  failure modes, rotation cadence (federation-signer 90 d,
+  subordinate CA 2 y, root CA 10 y), and the explicit "do not
+  approve" criteria NA1–NA5 the council should check. Indexed in
+  `docs/institutional/INDEX.md`.
+
+Architect-decision notes locked:
+
+1. **gRPC client-streaming for `PushEvents`, not bidi.** Acks
+   are per batch, not per envelope — bidi would force
+   per-envelope ack state on the regional agent and bloat the
+   WireGuard hop.
+2. **Signature verification at the receiver, not the policy
+   layer.** A signed envelope that fails verification is dropped
+   with a structured audit line; the trust boundary is the
+   federation receiver, matching the Vault PKI's "subordinate
+   certs trust only their own region" property.
+3. **Regional NAS pull, not push.** The Yaoundé core pulls every
+   regional NAS over WireGuard. A compromised regional NAS
+   cannot inject blobs into the core archive.
+4. **No regional `worker-federation-receiver`.** The receiver
+   lives on the core only; regions never receive from other
+   regions. All fan-in is core-mediated.
+5. **Council brief is presentation-only.** The architect uses it
+   to walk the council through the architecture; the vote
+   itself is recorded separately under
+   `docs/institutional/council-votes/phase-3-<UTC>.md` (out of
+   scope for this scaffold close).
+
+Deferred items (not in scope for the scaffold; gated on funding
++ council vote):
+
+- Per-region hardware procurement, WireGuard peer establishment,
+  regional Vault unseal ceremonies. Ten ceremonies, one per
+  region, in the documented sequential order.
+- Per-region adapter MOU sequencing (per-region MINFI / BEAC /
+  ANIF deployment timing).
+- The forthcoming `docs/runbooks/R9-federation-cutover.md` and
+  `docs/runbooks/R10-federation-key-rotation.md` runbooks.
+- Phase-3 ops handover documentation — Phase-3-execution
+  artefact, not a scaffold artefact.
+
+Verification gates (see plan §"Verification"):
+
+- `pnpm --filter @vigil/federation-stream build` clean (proto
+  dynamic-loaded via `@grpc/proto-loader`; no codegen step).
+- `pnpm --filter @vigil/federation-stream test` covers the six
+  rejection cases listed under K4.
+- `helm template … -f values-<CODE>.yaml | kubeconform --strict`
+  clean for every region.
+- `bash -n infra/host-bootstrap/13-multi-site-replication.sh`
+  syntax clean; `--dry-run` flag prints resolved per-region
+  targets without contacting any remote.
+
+This deliverable does NOT trigger any per-region cutover. Phase-1
+ops continue from Yaoundé on Compose. The Phase-3 scaffold is the
+on-ramp the architect presents to the council and to CEMAC at the
+funding window.
+
+Architect signature: <<YubiKey-touched audit row id pending council session>>
+
+## 2026-04-28 — Phase 3 federation runbooks (K9–K10) promoted to scaffold
+
+Two follow-up deliverables previously listed as deferred in the
+K1–K8 closeout above are promoted to scaffold-closed. The
+runbooks are documentation artefacts and benefit the council
+architectural-review brief by giving the council a concrete
+view of how the cutover and rotation will execute.
+
+What landed:
+
+- **K9** — `docs/runbooks/R9-federation-cutover.md`. Per-region
+  cutover runbook covering pre-flight checks, federation-signer
+  key issuance, regional Vault unseal ceremony (3-of-5 council
+  quorum), Helm install, multi-site replication wiring,
+  end-to-end smoke, council attestation row, rollback, and
+  post-cutover soak. Sequential rollout order documented in
+  Appendix A. The architect runs this once per region in the
+  strict order CE → LT → NW → OU → SW → SU → ES → EN → NO → AD,
+  one region at a time.
+- **K10** — `docs/runbooks/R10-federation-key-rotation.md`.
+  90-day federation-signer key rotation per region, with a
+  9-day stagger so two regions never rotate on the same day.
+  Covers the dual-key overlap window during cutover, the
+  2-of-5 council-witness ceremony, the audit-row shape, the
+  failure-mode recovery table, and the emergency rotation
+  variant for suspected compromise.
+
+Both runbooks are scaffold-only — their first execution is
+gated on the same gates that gate Phase-3 execution: CEMAC
+funding release + council 4-of-5 architectural-review vote.
+
+Architect signature: <<YubiKey-touched audit row id pending council session>>
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
