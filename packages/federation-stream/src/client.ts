@@ -45,8 +45,14 @@ function loadServiceCtor(): grpc.ServiceClientConstructor {
 export interface FederationClientOptions {
   /** Core endpoint (host:port) — typically the WireGuard-reachable Yaoundé core. */
   readonly coreEndpoint: string;
-  /** TLS root for the core's cert (Vault root CA). */
-  readonly tlsRootCertPath: string;
+  /**
+   * TLS root for the core's cert (Vault root CA). Required in
+   * production. If omitted the client connects with
+   * `grpc.credentials.createInsecure()` — intended only for in-process
+   * tests and `kind`-cluster dev boots, paired with a server started
+   * without TLS.
+   */
+  readonly tlsRootCertPath?: string;
   /** Region this client is signing for (drives signing_key_id prefix). */
   readonly region: RegionCode;
   /** Vault PKI key id, e.g. "CE:42" (region:rotation-seq). */
@@ -70,21 +76,29 @@ export interface FederationClientOptions {
  * FederationStreamClient — used by the regional federation-agent.
  *
  * Lifecycle:
- *   - new FederationStreamClient(opts) — constructs but does NOT
- *     open the stream (gRPC channels are lazy).
- *   - client.start() — opens the long-lived PushEvents stream and
- *     starts the batch timer.
- *   - client.push(unsigned) — signs and enqueues. Returns a Promise
- *     that resolves to the per-batch PushAck containing this
- *     envelope's id (so the caller can drive at-least-once delivery
- *     against the local SQLite WAL).
+ *   - new FederationStreamClient(opts) — constructs the channel-
+ *     holder but does NOT open it (gRPC channels are lazy).
+ *   - client.start() — connects the channel and starts the batch
+ *     timer. Idempotent.
+ *   - client.push(unsigned) — signs and enqueues into the current
+ *     in-flight batch. Returns a Promise that resolves to the
+ *     PushAck containing this envelope's id once the batch has
+ *     been flushed and acked by the core.
  *   - client.beacon(req) — unary HealthBeacon RPC.
- *   - client.close() — drains the queue, sends a final ack-pending
- *     batch, and closes the stream.
+ *   - client.close() — flushes the in-flight batch, awaits its
+ *     ack, then closes the channel.
  *
- * The client is intentionally single-stream — one process, one
- * stream, one signing key. Opening multiple streams in parallel
- * would require per-stream key isolation that we don't need.
+ * Wire model:
+ *   PushEvents is `stream EventEnvelope returns (PushAck)` —
+ *   client-streaming, single response. Each *batch* opens its own
+ *   client-streaming RPC, writes every envelope, then calls end().
+ *   The server's PushAck arrives once and is dispatched to every
+ *   pending resolver in that batch. Within a single channel,
+ *   opening a new HTTP/2 stream is cheap (no TLS handshake).
+ *
+ *   Earlier design tried a single long-lived stream which
+ *   produced exactly one ack at stream-close — incompatible with
+ *   per-batch ack semantics. This refactor closed that gap.
  */
 export class FederationStreamClient {
   private readonly logger: Logger;
@@ -93,14 +107,17 @@ export class FederationStreamClient {
   private readonly privateKeyPem: string;
 
   private grpcClient: grpc.Client | null = null;
-  private stream: grpc.ClientWritableStream<unknown> | null = null;
   private pendingBatch: EventEnvelope[] = [];
   private pendingResolvers = new Map<string, (ack: PushAck) => void>();
   private flushTimer: NodeJS.Timeout | null = null;
+  private inflightBatch: Promise<void> = Promise.resolve();
   private closed = false;
 
   constructor(private readonly opts: FederationClientOptions) {
-    this.logger = opts.logger ?? createLogger({ service: 'federation-stream-client', region: opts.region });
+    this.logger = opts.logger ?? createLogger({
+      service: 'federation-stream-client',
+      extraBindings: { region: opts.region },
+    });
     this.batchSize = opts.batchSize ?? 256;
     this.batchIntervalMs = opts.batchIntervalMs ?? 2_000;
     this.privateKeyPem = readFileSync(opts.signingPrivateKeyPath, 'utf8');
@@ -109,8 +126,9 @@ export class FederationStreamClient {
   start(): void {
     if (this.grpcClient) return;
     const Ctor = loadServiceCtor();
-    const tlsRoot = readFileSync(this.opts.tlsRootCertPath);
-    const credentials = grpc.credentials.createSsl(tlsRoot);
+    const credentials = this.opts.tlsRootCertPath
+      ? grpc.credentials.createSsl(readFileSync(this.opts.tlsRootCertPath))
+      : grpc.credentials.createInsecure();
     this.grpcClient = new Ctor(this.opts.coreEndpoint, credentials, {
       // 30 s keepalive matches the HealthBeacon cadence.
       'grpc.keepalive_time_ms': 30_000,
@@ -120,47 +138,10 @@ export class FederationStreamClient {
       'grpc.max_send_message_length': 512 * 1024,
       'grpc.max_receive_message_length': 64 * 1024,
     });
-    this.openStream();
-    this.flushTimer = setInterval(() => this.flush(), this.batchIntervalMs);
+    this.flushTimer = setInterval(() => {
+      void this.flush();
+    }, this.batchIntervalMs);
     this.flushTimer.unref();
-  }
-
-  private openStream(): void {
-    if (!this.grpcClient) throw new Error('client not started');
-    const callable = (this.grpcClient as unknown as {
-      pushEvents(cb: (err: grpc.ServiceError | null, ack: PushAck) => void): grpc.ClientWritableStream<unknown>;
-    }).pushEvents.bind(this.grpcClient);
-    this.stream = callable((err, ack) => {
-      if (err) {
-        this.logger.error({ err }, 'federation-stream-error');
-        // Resolve all pending with empty ack so the caller can re-enqueue.
-        for (const [id, resolve] of this.pendingResolvers) {
-          resolve({ accepted: [], rejected: [{ envelopeId: id, code: 'KEY_UNKNOWN', detail: err.message }], ackedAtMs: Date.now() });
-        }
-        this.pendingResolvers.clear();
-        // Reopen on next flush; gRPC channel itself is reconnecting.
-        this.stream = null;
-        return;
-      }
-      this.dispatchAck(ack);
-    });
-  }
-
-  private dispatchAck(ack: PushAck): void {
-    for (const id of ack.accepted) {
-      const r = this.pendingResolvers.get(id);
-      if (r) {
-        r(ack);
-        this.pendingResolvers.delete(id);
-      }
-    }
-    for (const r of ack.rejected) {
-      const f = this.pendingResolvers.get(r.envelopeId);
-      if (f) {
-        f(ack);
-        this.pendingResolvers.delete(r.envelopeId);
-      }
-    }
   }
 
   /**
@@ -173,7 +154,6 @@ export class FederationStreamClient {
    */
   async push(unsigned: EventEnvelopeUnsigned): Promise<PushAck> {
     if (this.closed) throw new Error('client closed');
-    if (!this.stream) this.openStream();
 
     const signature = signEnvelope(unsigned, this.privateKeyPem);
     const envelope: EventEnvelope = {
@@ -185,26 +165,78 @@ export class FederationStreamClient {
     const ackPromise = new Promise<PushAck>((resolve) => {
       this.pendingResolvers.set(unsigned.envelopeId, resolve);
     });
-    if (this.pendingBatch.length >= this.batchSize) this.flush();
+    if (this.pendingBatch.length >= this.batchSize) {
+      void this.flush();
+    }
     return ackPromise;
   }
 
-  private flush(): void {
-    if (!this.stream || this.pendingBatch.length === 0) return;
+  /**
+   * Open a new client-streaming RPC, send the current batch, await
+   * the unary PushAck. Sequenced through `inflightBatch` so two
+   * concurrent flush() calls don't race on the same stream.
+   */
+  private flush(): Promise<void> {
+    if (this.pendingBatch.length === 0) return this.inflightBatch;
+    if (!this.grpcClient) {
+      this.logger.warn('flush-without-start');
+      return this.inflightBatch;
+    }
     const batch = this.pendingBatch;
     this.pendingBatch = [];
+    const resolvers = new Map<string, (ack: PushAck) => void>();
     for (const env of batch) {
-      this.stream.write({
-        envelopeId: env.envelopeId,
-        region: env.region,
-        sourceId: env.sourceId,
-        dedupKey: env.dedupKey,
-        payload: env.payload,
-        observedAtMs: env.observedAtMs,
-        signature: env.signature,
-        signingKeyId: env.signingKeyId,
-      });
+      const r = this.pendingResolvers.get(env.envelopeId);
+      if (r) {
+        resolvers.set(env.envelopeId, r);
+        this.pendingResolvers.delete(env.envelopeId);
+      }
     }
+    const grpcClient = this.grpcClient;
+
+    this.inflightBatch = this.inflightBatch.then(
+      () =>
+        new Promise<void>((resolve) => {
+          const callable = (grpcClient as unknown as {
+            pushEvents(
+              cb: (err: grpc.ServiceError | null, ack: PushAck) => void,
+            ): grpc.ClientWritableStream<unknown>;
+          }).pushEvents.bind(grpcClient);
+          const stream = callable((err, ack) => {
+            if (err) {
+              this.logger.error({ err }, 'federation-stream-batch-error');
+              const errAck: PushAck = {
+                accepted: [],
+                rejected: batch.map((b) => ({
+                  envelopeId: b.envelopeId,
+                  code: 'KEY_UNKNOWN' as const,
+                  detail: err.message,
+                })),
+                ackedAtMs: Date.now(),
+              };
+              for (const [, r] of resolvers) r(errAck);
+              resolve();
+              return;
+            }
+            for (const [, r] of resolvers) r(ack);
+            resolve();
+          });
+          for (const env of batch) {
+            stream.write({
+              envelopeId: env.envelopeId,
+              region: env.region,
+              sourceId: env.sourceId,
+              dedupKey: env.dedupKey,
+              payload: env.payload,
+              observedAtMs: env.observedAtMs,
+              signature: env.signature,
+              signingKeyId: env.signingKeyId,
+            });
+          }
+          stream.end();
+        }),
+    );
+    return this.inflightBatch;
   }
 
   async beacon(req: { agentNowMs: number; agentSeqTotal: number }): Promise<HealthBeaconReply> {
@@ -229,11 +261,10 @@ export class FederationStreamClient {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    this.flush();
-    if (this.stream) {
-      this.stream.end();
-      this.stream = null;
-    }
+    // Flush whatever is queued, then await every in-flight batch RPC
+    // (including the one we just kicked off) before tearing down the
+    // gRPC channel.
+    await this.flush();
     if (this.grpcClient) {
       this.grpcClient.close();
       this.grpcClient = null;

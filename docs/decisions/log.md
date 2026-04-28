@@ -1255,6 +1255,126 @@ funding window.
 
 Architect signature: <<YubiKey-touched audit row id pending council session>>
 
+## 2026-04-28 — Phase 3 federation worker apps (L1–L4) close
+
+The `@vigil/federation-stream` package now has its two consumer apps
+on disk plus an in-process integration test that exercises the gRPC
++ sign/verify path end-to-end. The package is no longer dead code;
+the council architectural-review brief's NA1–NA5 verification checks
+can now read concrete app code instead of a future-tense reference.
+
+What landed:
+
+- **L3** — `STREAMS.FEDERATION_PUSH = 'vigil:federation:push'`
+  added to `packages/queue/src/streams.ts`. The regional
+  adapter-runner writes onto this stream when running in regional
+  mode; `worker-federation-agent` drains it.
+- **L1** — `apps/worker-federation-agent/`. Extends
+  `WorkerBase<FederationPushPayload>`, drains `FEDERATION_PUSH`,
+  decodes the base64 payload, hands to `FederationStreamClient.push()`,
+  and maps the per-batch `PushAck` into a queue `HandlerOutcome`.
+  The mapping is deliberate: `SIGNATURE_INVALID` /
+  `REGION_MISMATCH` / `REPLAY_WINDOW` / `PAYLOAD_TOO_LARGE` →
+  dead-letter (configuration or data fault, no point retrying);
+  `KEY_UNKNOWN` → retry (transient core-side condition);
+  `DEDUP_COLLISION` → ack (already-seen on the core, safe to drop).
+  Required env: `VIGIL_REGION_CODE`, `VIGIL_SIGNING_KEY_ID`,
+  `FEDERATION_CORE_ENDPOINT`, `FEDERATION_TLS_ROOT`,
+  `FEDERATION_SIGNING_KEY`, `REDIS_URL`.
+- **L2** — `apps/worker-federation-receiver/`. Long-running gRPC
+  server (NOT `WorkerBase` — inverted dataflow). Hosts
+  `FederationStreamServer` with a `DirectoryKeyResolver` that
+  reads PEM files at boot from `FEDERATION_KEY_DIR` (filenames
+  `<REGION>:<seq>.pem`). The `onAccepted` handler republishes
+  each accepted envelope onto `STREAMS.ADAPTER_OUT` with
+  `metadata.federation_region` and `metadata.federation_envelope_id`
+  tags, so downstream pattern-detect/score workers consume
+  uniformly whether the event arrived core-direct or via
+  federation. The `onBeacon` handler reads the most recent
+  `observed_at_ms` for the region from a single Redis hash
+  (`vigil:federation:lag`) — no Postgres IO per beacon. Required
+  env: `FEDERATION_LISTEN`, `FEDERATION_TLS_CERT`,
+  `FEDERATION_TLS_KEY`, `FEDERATION_KEY_DIR`, `REDIS_URL`.
+  Optional `FEDERATION_CLIENT_CA` for mTLS,
+  `FEDERATION_THROTTLE_HINT_MS` for cooperative backpressure.
+- **L4** — `apps/worker-federation-receiver/test/integration.test.ts`.
+  Boots `FederationStreamServer` in-process on a free port with a
+  `StaticKeyResolver` and a capturing handler, opens a
+  `FederationStreamClient` against it, pushes 50 envelopes (5
+  batches × 10), asserts every envelope appears in `accepted` and
+  the handler captured all 50 in stream order. Plus: HealthBeacon
+  round-trip with a non-zero `lastObservedAtMs`. Plus: a tamper
+  case where a second client signs with a fresh ed25519 key but
+  presents the same `signing_key_id` — every envelope is rejected
+  with `SIGNATURE_INVALID`.
+
+Architect-decision notes locked:
+
+1. **The receiver is NOT a `WorkerBase` instance.** WorkerBase is
+   a Redis-stream-consumer pattern; the receiver is a gRPC
+   *server* that produces envelopes onto the stream the rest of
+   the pipeline already consumes from. Forcing it into WorkerBase
+   shape would invert the data flow.
+2. **Each batch opens its own client-streaming RPC.** Earlier
+   K4 design tried a single long-lived stream which can only
+   produce one ack at stream-close — incompatible with per-batch
+   ack semantics. Refactored: each batch opens a new HTTP/2
+   stream within the same channel (cheap; no TLS handshake), so
+   per-envelope `push()` Promises resolve after the batch acks.
+3. **TLS cert/key promoted to optional in `FederationStreamServer` /
+   `FederationStreamClient`.** When both are absent, the server
+   boots with `grpc.ServerCredentials.createInsecure()` and the
+   client mirrors. The receiver logs a warning when running
+   insecure. This is a small productionising change benefiting
+   in-process tests + `kind`-cluster dev boots; production deploys
+   continue to require both.
+4. **Receiver writes onto `STREAMS.ADAPTER_OUT` directly.** Not a
+   separate `federation:in` stream — every event ultimately
+   becomes an adapter event regardless of origin. The envelope's
+   region and source-id are stamped into `metadata` so downstream
+   pattern workers can filter or tag by region without a separate
+   stream.
+5. **Beacon lag is read from Redis, not Postgres.** Single HGET
+   on `vigil:federation:lag` per beacon × 10 regions × 30 s =
+   ~20 ops/s steady state. Postgres-side queries would burn IO
+   for no benefit.
+
+Tracked follow-ups (not in scope for L1–L4):
+
+- **M1** — receiver-side dedup integration. The federation-stream
+  package intentionally does not enforce dedup (per K4 design);
+  the receiver will hook into the existing dedup-cache in
+  `@vigil/queue` once that integration lands. The current
+  receiver leans on the downstream pattern-detect dedup, which
+  is sufficient for the scaffold but not optimal for the steady
+  state.
+- **M2** — live Vault PKI HTTP key resolver. The
+  `VaultPkiKeyResolver` stub in
+  `apps/worker-federation-receiver/src/key-resolver.ts`
+  documents the URL pattern + cache shape; implementation
+  deferred until the per-region Vault subordinates are runtime-
+  issued (post-cutover, R9). Today the architect populates
+  `FEDERATION_KEY_DIR` by hand during the cutover ceremony.
+- **M3** — regional adapter-runner config flip to write onto
+  `FEDERATION_PUSH` instead of `ADAPTER_OUT` when running in
+  regional mode. One-line change; lives in the regional Helm
+  values, not in this PR.
+
+Verification:
+
+- Hand-traced: every queue-state-machine path in the agent maps
+  to a concrete `RejectionCode` × `HandlerOutcome` pair in
+  `worker.ts`'s switch statement.
+- Hand-traced: every public name on `@vigil/federation-stream`
+  is reused by the apps; no new types introduced.
+- The L4 integration test asserts the round-trip + tamper +
+  beacon paths. In-process; no Redis or external dependencies.
+
+This deliverable does NOT trigger any per-region cutover. Phase-1
+ops continue from Yaoundé on Compose.
+
+Architect signature: <<YubiKey-touched audit row id pending council session>>
+
 ## 2026-04-28 — Phase 3 federation runbooks (K9–K10) promoted to scaffold
 
 Two follow-up deliverables previously listed as deferred in the

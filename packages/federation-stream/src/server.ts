@@ -60,8 +60,14 @@ export interface ReceiverHandlers {
 
 export interface FederationServerOptions {
   readonly listenAddress: string; // e.g. "0.0.0.0:9443"
-  readonly tlsCertPath: string;
-  readonly tlsKeyPath: string;
+  /**
+   * TLS cert + key. Both required in production. If both are omitted
+   * the server boots with `grpc.ServerCredentials.createInsecure()` —
+   * intended only for in-process tests and `kind`-cluster dev boots.
+   * The receiver logs a warning when running insecure.
+   */
+  readonly tlsCertPath?: string;
+  readonly tlsKeyPath?: string;
   /** Optional CA bundle for mTLS. If set, clients must present a cert. */
   readonly clientCaPath?: string;
   readonly keyResolver: KeyResolver;
@@ -128,11 +134,17 @@ export class FederationStreamServer {
       inflight = inflight.then(async () => {
         const result = await verifyEnvelopeWithPolicy(env, this.opts.keyResolver, this.opts.policy);
         if (!result.ok) {
-          rejected.push({
-            envelopeId: env.envelopeId,
-            code: result.code ?? 'SIGNATURE_INVALID',
-            detail: result.detail,
-          });
+          const r: RejectedEnvelope = result.detail
+            ? {
+                envelopeId: env.envelopeId,
+                code: result.code ?? 'SIGNATURE_INVALID',
+                detail: result.detail,
+              }
+            : {
+                envelopeId: env.envelopeId,
+                code: result.code ?? 'SIGNATURE_INVALID',
+              };
+          rejected.push(r);
           this.logger.warn(
             { envelopeId: env.envelopeId, code: result.code, detail: result.detail, region: env.region },
             'federation-envelope-rejected',
@@ -179,12 +191,20 @@ export class FederationStreamServer {
   }
 
   async start(): Promise<void> {
-    const cert = readFileSync(this.opts.tlsCertPath);
-    const key = readFileSync(this.opts.tlsKeyPath);
-    const clientCa = this.opts.clientCaPath ? readFileSync(this.opts.clientCaPath) : null;
-    const credentials = clientCa
-      ? grpc.ServerCredentials.createSsl(clientCa, [{ private_key: key, cert_chain: cert }], true)
-      : grpc.ServerCredentials.createSsl(null, [{ private_key: key, cert_chain: cert }], false);
+    let credentials: grpc.ServerCredentials;
+    if (this.opts.tlsCertPath && this.opts.tlsKeyPath) {
+      const cert = readFileSync(this.opts.tlsCertPath);
+      const key = readFileSync(this.opts.tlsKeyPath);
+      const clientCa = this.opts.clientCaPath ? readFileSync(this.opts.clientCaPath) : null;
+      credentials = clientCa
+        ? grpc.ServerCredentials.createSsl(clientCa, [{ private_key: key, cert_chain: cert }], true)
+        : grpc.ServerCredentials.createSsl(null, [{ private_key: key, cert_chain: cert }], false);
+    } else {
+      this.logger.warn(
+        'federation-stream-server-insecure (no TLS cert/key configured; intended for in-process tests + dev only)',
+      );
+      credentials = grpc.ServerCredentials.createInsecure();
+    }
 
     await new Promise<void>((resolve, reject) => {
       this.server.bindAsync(this.opts.listenAddress, credentials, (err, port) => {

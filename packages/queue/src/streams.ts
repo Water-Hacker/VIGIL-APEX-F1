@@ -31,6 +31,11 @@ export const STREAMS = {
   AUDIT_PUBLISH: 'vigil:audit:publish',
   CALIBRATION_RUN: 'vigil:calibration:run',
   REALTIME_BROADCAST: 'vigil:realtime:broadcast',
+
+  // Phase 3 — regional federation. Regional adapters write here
+  // instead of ADAPTER_OUT; worker-federation-agent drains it,
+  // signs, and pushes to the Yaoundé core's federation receiver.
+  FEDERATION_PUSH: 'vigil:federation:push',
 } as const;
 
 export type StreamName = (typeof STREAMS)[keyof typeof STREAMS];
