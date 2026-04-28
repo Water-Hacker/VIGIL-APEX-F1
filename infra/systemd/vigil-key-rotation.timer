@@ -1,0 +1,11 @@
+[Unit]
+Description=Quarterly key rotation reminder for VIGIL APEX
+
+[Timer]
+# 1st of January, April, July, October at 09:00 Africa/Douala.
+OnCalendar=*-01,04,07,10-01 09:00:00
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

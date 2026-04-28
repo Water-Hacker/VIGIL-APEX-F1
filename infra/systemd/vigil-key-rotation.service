@@ -1,0 +1,10 @@
+[Unit]
+Description=VIGIL APEX quarterly key-rotation prompt
+Documentation=docs/source/HSK-v1.md
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/vigil-key-rotation prompt
+StandardOutput=journal
+StandardError=journal

@@ -3,5 +3,8 @@ providers:
   - name: vigil
     folder: VIGIL APEX
     type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards

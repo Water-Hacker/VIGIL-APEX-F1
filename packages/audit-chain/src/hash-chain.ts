@@ -51,12 +51,18 @@ export class HashChain {
     occurred_at?: string;
     payload?: Record<string, unknown>;
   }): Promise<Schemas.AuditEvent> {
-    const id = Ids.newAuditEventId() as string;
     const occurred_at = input.occurred_at ?? new Date().toISOString();
     const payload = input.payload ?? {};
 
     let lastErr: unknown;
+    let id = '';
     for (let attempt = 0; attempt < 3; attempt++) {
+      // Fresh UUID per attempt — a serialization rollback might or might not
+      // have actually inserted the row (rare but possible under nested
+      // failures), and reusing the same UUID would deadlock the retry on a
+      // PK conflict instead of advancing. seq is still allocated atomically
+      // inside the SERIALIZABLE transaction.
+      id = Ids.newAuditEventId() as string;
       const client = await this.pool.connect();
       try {
         await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');

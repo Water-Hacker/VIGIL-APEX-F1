@@ -18,5 +18,9 @@ disable_mlock = false
 log_level = "info"
 log_format = "json"
 
-# Audit log shipped to Postgres via Filebeat (defence in depth)
-# To enable: vault audit enable file file_path=/vault/logs/audit.log
+# Audit log shipped to Postgres via Filebeat (defence in depth, SRD §17.13).
+# The bootstrap script 07-vault-audit-enable.sh runs after unseal and
+# enables the file backend at /vault/logs/audit.log; rotation is handled
+# by logrotate on the host. Audit directives can NOT live in config.hcl —
+# Vault rejects them; they must be issued via the API after unseal.
+raw_storage_endpoint = false

@@ -29,6 +29,8 @@ export const STREAMS = {
   // Cross-cutting
   DEAD_LETTER: 'vigil:dead-letter',
   AUDIT_PUBLISH: 'vigil:audit:publish',
+  CALIBRATION_RUN: 'vigil:calibration:run',
+  REALTIME_BROADCAST: 'vigil:realtime:broadcast',
 } as const;
 
 export type StreamName = (typeof STREAMS)[keyof typeof STREAMS];

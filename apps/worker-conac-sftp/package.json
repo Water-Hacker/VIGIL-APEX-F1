@@ -19,6 +19,7 @@
     "@vigil/queue": "workspace:*",
     "@vigil/security": "workspace:*",
     "@vigil/shared": "workspace:*",
+    "kubo-rpc-client": "^4.1.2",
     "ssh2-sftp-client": "^11.0.0",
     "zod": "^3.23.8"
   },

@@ -15,7 +15,13 @@ import {
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
-import { sealedBoxDecrypt, VaultClient } from '@vigil/security';
+import {
+  expose,
+  sealedBoxDecrypt,
+  shamirCombineFromBase64,
+  VaultClient,
+  wrapSecret,
+} from '@vigil/security';
 import { z } from 'zod';
 
 const logger = createLogger({ service: 'worker-tip-triage' });
@@ -37,6 +43,16 @@ substance of the allegation. Output max 500 chars.
 
 Output JSON: {"paraphrase":"...","topic_hint":"procurement|payroll|infrastructure|sanctions|banking|other","severity_hint":"low|medium|high|critical"}
 `.trim();
+
+function toBase64(bytes: Uint8Array): string {
+  // Encode without depending on Node's Buffer import surface — the worker
+  // runtime always has it via the runtime, but importing keeps node:buffer
+  // off the type-check path for environments that don't ship @types/node.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+  const buf: { from: (b: Uint8Array) => { toString: (enc: string) => string } } =
+    (globalThis as { Buffer?: unknown }).Buffer as never;
+  return buf.from(bytes).toString('base64');
+}
 
 const zParaphrase = z.object({
   paraphrase: z.string().min(20).max(500),
@@ -65,21 +81,33 @@ class TipTriageWorker extends WorkerBase<Payload> {
     const tip = await this.tipRepo.getByRef(env.payload.tip_id);
     if (!tip) return { kind: 'dead-letter', reason: 'tip not found' };
 
-    // Recover the operator team private key from Vault using the supplied shares.
-    // For Phase 1 we read the privkey directly; quorum-Shamir recovery is a
-    // future enhancement (SRD §28.4 hints at it; council-quorum-decryption is wired
-    // in worker-council-decrypt).
-    const sk = await this.vault.read<string>('tip-portal', 'operator_team_private_key');
+    // 3-of-5 council quorum decryption (SRD §28.4). The inbound payload
+    // carries three council Shamir shares of the operator-team private key;
+    // we reconstruct the key in-memory, decrypt, and immediately drop the
+    // reconstructed handle. The shares themselves were collected by the
+    // /triage/tips operator UI (Phase C10) — never persisted server-side.
     const pk = await this.vault.read<string>('tip-portal', 'operator_team_public_key');
+
+    let reconstructedSk;
+    try {
+      reconstructedSk = shamirCombineFromBase64(env.payload.decryption_shares);
+    } catch (e) {
+      logger.error({ err: e, tip_id: tip.id }, 'shamir-combine-failed');
+      return { kind: 'dead-letter', reason: 'shamir-combine-failure' };
+    }
 
     let plaintext: Uint8Array;
     try {
+      // sealedBoxDecrypt expects base64-encoded keys/ciphertexts; the
+      // reconstructed Shamir bytes are the libsodium private key, so we
+      // re-encode through Secret<string> wrapping to keep the unwrap
+      // surface narrow.
+      const skBytes = expose(reconstructedSk);
+      const skB64 = wrapSecret(toBase64(skBytes));
       plaintext = await sealedBoxDecrypt(
-        Buffer.from(tip.body_ciphertext).toString('base64'),
-        // expose() — operator-team key, not council Shamir
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        (require('@vigil/security') as { expose: <T>(s: import('@vigil/security').Secret<T>) => T }).expose(pk),
-        sk,
+        toBase64(tip.body_ciphertext as unknown as Uint8Array),
+        expose(pk),
+        skB64,
       );
     } catch (e) {
       logger.error({ err: e }, 'tip-decrypt-failed');

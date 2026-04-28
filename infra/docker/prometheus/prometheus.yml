@@ -10,7 +10,7 @@ rule_files:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []
+        - targets: ['vigil-alertmanager:9093']
 
 scrape_configs:
   - job_name: vigil-workers

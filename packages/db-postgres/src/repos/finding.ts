@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ne, or, sql } from 'drizzle-orm';
 
 import * as findingSchema from '../schema/finding.js';
 import type { Db } from '../client.js';
@@ -24,6 +24,16 @@ export class FindingRepo {
       .limit(limit);
   }
 
+  async getSignals(
+    findingId: string,
+  ): Promise<readonly (typeof findingSchema.signal.$inferSelect)[]> {
+    return this.db
+      .select()
+      .from(findingSchema.signal)
+      .where(eq(findingSchema.signal.finding_id, findingId))
+      .orderBy(desc(findingSchema.signal.contributed_at));
+  }
+
   async addSignal(row: typeof findingSchema.signal.$inferInsert): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx.insert(findingSchema.signal).values(row);
@@ -44,6 +54,17 @@ export class FindingRepo {
       .where(eq(findingSchema.finding.id, id));
   }
 
+  async setCounterEvidence(
+    id: string,
+    text: string,
+    nextState: string = 'review',
+  ): Promise<void> {
+    await this.db
+      .update(findingSchema.finding)
+      .set({ counter_evidence: text, state: nextState })
+      .where(eq(findingSchema.finding.id, id));
+  }
+
   async setState(id: string, state: string, closure_reason?: string): Promise<void> {
     await this.db
       .update(findingSchema.finding)
@@ -52,5 +73,35 @@ export class FindingRepo {
         ...(closure_reason !== undefined && { closure_reason, closed_at: new Date() }),
       })
       .where(eq(findingSchema.finding.id, id));
+  }
+
+  /**
+   * Prior findings for a given canonical entity — used by worker-pattern's
+   * subject loader (Phase A3). A finding is considered "prior" when the
+   * entity is either the primary subject or appears in related_entity_ids.
+   */
+  async listByEntity(
+    canonicalId: string,
+    opts: { excludeFindingId?: string; limit?: number } = {},
+  ): Promise<readonly (typeof findingSchema.finding.$inferSelect)[]> {
+    const limit = opts.limit ?? 25;
+    const where = opts.excludeFindingId
+      ? and(
+          or(
+            eq(findingSchema.finding.primary_entity_id, canonicalId),
+            sql`${canonicalId} = ANY(${findingSchema.finding.related_entity_ids})`,
+          ),
+          ne(findingSchema.finding.id, opts.excludeFindingId),
+        )
+      : or(
+          eq(findingSchema.finding.primary_entity_id, canonicalId),
+          sql`${canonicalId} = ANY(${findingSchema.finding.related_entity_ids})`,
+        );
+    return this.db
+      .select()
+      .from(findingSchema.finding)
+      .where(where)
+      .orderBy(desc(findingSchema.finding.detected_at))
+      .limit(limit);
   }
 }

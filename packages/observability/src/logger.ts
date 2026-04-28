@@ -1,6 +1,8 @@
 import { context, trace } from '@opentelemetry/api';
 import pino, { type Logger as PinoLogger, type LoggerOptions } from 'pino';
 
+import { getCorrelationId, getWorkerName } from './correlation.js';
+
 /**
  * Structured logger for VIGIL APEX.
  *
@@ -21,13 +23,31 @@ export interface VigilLoggerOptions {
   readonly extraBindings?: Record<string, unknown>;
 }
 
-/** Mixin that injects OTel trace_id / span_id into every record. */
-function otelMixin(): Record<string, string | undefined> {
+/**
+ * Mixin that injects OTel trace_id / span_id AND the AsyncLocalStorage
+ * correlation_id into every record (Phase E5). The correlation_id
+ * crosses Redis envelope boundaries (worker reads `envelope.correlation_id`
+ * and calls `withCorrelation(...)` before invoking the handler), so a
+ * single tip submission can be followed across worker-document →
+ * worker-entity → worker-pattern → worker-score → worker-counter-evidence
+ * → worker-dossier → worker-anchor → worker-conac-sftp without trace
+ * gaps when the OTel exporter isn't reachable.
+ */
+function correlationMixin(): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
   const span = trace.getSpan(context.active());
-  if (!span) return {};
-  const sc = span.spanContext();
-  if (sc.traceId === '00000000000000000000000000000000') return {};
-  return { trace_id: sc.traceId, span_id: sc.spanId };
+  if (span) {
+    const sc = span.spanContext();
+    if (sc.traceId !== '00000000000000000000000000000000') {
+      out['trace_id'] = sc.traceId;
+      out['span_id'] = sc.spanId;
+    }
+  }
+  const cid = getCorrelationId();
+  if (cid) out['correlation_id'] = cid;
+  const wname = getWorkerName();
+  if (wname) out['worker'] = wname;
+  return out;
 }
 
 export function createLogger(opts: VigilLoggerOptions): PinoLogger {
@@ -62,7 +82,7 @@ export function createLogger(opts: VigilLoggerOptions): PinoLogger {
       level: (label) => ({ level: label }),
       bindings: (b) => ({ pid: b['pid'], hostname: b['hostname'] }),
     },
-    mixin: otelMixin,
+    mixin: correlationMixin,
   };
 
   if (isProd) {

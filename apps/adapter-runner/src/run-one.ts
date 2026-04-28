@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { Adapter, ProxyManager } from '@vigil/adapters';
 import type { SourceRepo } from '@vigil/db-postgres';
 import {
@@ -7,6 +9,77 @@ import {
 } from '@vigil/observability';
 import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
 import { Errors, type Schemas } from '@vigil/shared';
+
+/**
+ * Payload fields adapters use to advertise a downstream document URL.
+ * Order matters only for documentation: each is checked independently.
+ * Mirrors the conventions across the 26 adapters (cour-des-comptes →
+ * report_url, minfi-portal → document_url, ARMP → award_pdf, generic
+ * scrapers → href, etc.).
+ */
+const DOCUMENT_URL_FIELDS = [
+  'document_url',
+  'report_url',
+  'pdf_url',
+  'attachment_url',
+  'gazette_url',
+  'decision_url',
+  'award_pdf',
+  'href',
+] as const;
+
+const DOCUMENT_KIND_BY_FIELD: Record<(typeof DOCUMENT_URL_FIELDS)[number], string> = {
+  document_url: 'document',
+  report_url: 'audit_report',
+  pdf_url: 'document',
+  attachment_url: 'attachment',
+  gazette_url: 'gazette',
+  decision_url: 'decision',
+  award_pdf: 'award',
+  href: 'document',
+};
+
+interface DocumentFetchExtraction {
+  readonly request: {
+    readonly source_id: string;
+    readonly source_event_id: string;
+    readonly document_url: string;
+    readonly expected_kind: string;
+  };
+  readonly dedupKey: string;
+}
+
+function extractDocumentFetchRequests(
+  ev: Schemas.SourceEvent,
+): readonly DocumentFetchExtraction[] {
+  const payload = ev.payload as Record<string, unknown> | null | undefined;
+  if (!payload) return [];
+
+  const out: DocumentFetchExtraction[] = [];
+  const seen = new Set<string>();
+
+  for (const field of DOCUMENT_URL_FIELDS) {
+    const raw = payload[field];
+    if (typeof raw !== 'string') continue;
+    const url = raw.trim();
+    if (!/^https?:\/\//i.test(url)) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+
+    const urlHash = createHash('sha256').update(url).digest('hex').slice(0, 16);
+    out.push({
+      request: {
+        source_id: ev.source_id,
+        source_event_id: ev.id,
+        document_url: url,
+        expected_kind: DOCUMENT_KIND_BY_FIELD[field],
+      },
+      dedupKey: `doc:${ev.id}:${urlHash}`,
+    });
+  }
+
+  return out;
+}
 
 /**
  * runOne — execute a single adapter run end-to-end.
@@ -71,6 +144,19 @@ export async function runOne(args: RunOneArgs): Promise<void> {
             STREAMS.ADAPTER_OUT,
             newEnvelope('adapter-runner', ev, ev.dedup_key, correlationId),
           );
+
+          // A2 — adapter → document pipeline bridge.
+          // When the adapter event carries a document URL (PDF, scanned form,
+          // image, gazette, etc.), publish a `vigil:document:fetch` envelope so
+          // worker-document fetches the bytes, hashes, OCRs, and pins them.
+          // This is the missing handoff identified by the audit (closes the
+          // ADAPTER_OUT → DOCUMENT_FETCH gap).
+          for (const { request, dedupKey } of extractDocumentFetchRequests(ev)) {
+            await queue.publish(
+              STREAMS.DOCUMENT_FETCH,
+              newEnvelope('adapter-runner', request, dedupKey, correlationId),
+            );
+          }
         }
       }
 

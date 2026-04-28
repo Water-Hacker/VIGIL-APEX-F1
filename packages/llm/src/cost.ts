@@ -15,6 +15,15 @@ import { Constants, Errors } from '@vigil/shared';
 export interface CostCeilings {
   readonly dailySoftUsd: number;
   readonly dailyHardUsd: number;
+  /**
+   * Phase D6 — monthly budget. The 80%-spend circuit is a soft gate:
+   * non-critical calls (opts.critical !== true) are rejected once
+   * spent ≥ monthlyUsd × monthlyCircuitFraction. Critical calls
+   * (counter-evidence on escalation-eligible findings, dossier
+   * narrative on a council-approved case) always pass.
+   */
+  readonly monthlyUsd: number;
+  readonly monthlyCircuitFraction: number;
 }
 
 export interface UsageRecord {
@@ -34,10 +43,50 @@ export class CostTracker {
     private readonly ceilings: CostCeilings = {
       dailySoftUsd: Number(process.env.LLM_DAILY_SOFT_CEILING_USD ?? 30),
       dailyHardUsd: Number(process.env.LLM_DAILY_HARD_CEILING_USD ?? 100),
+      // SRD §18.4 monthly target: $2,503 — round to $2,500 for the
+      // circuit. The 0.80 fraction matches the audit-plan default.
+      monthlyUsd: Number(process.env.LLM_MONTHLY_BUDGET_USD ?? 2_500),
+      monthlyCircuitFraction: Number(process.env.LLM_MONTHLY_CIRCUIT_FRACTION ?? 0.8),
     },
     logger?: Logger,
   ) {
     this.logger = logger ?? createLogger({ service: 'llm-cost' });
+  }
+
+  /** Total USD spent in the calendar month-to-date (UTC). */
+  spentThisMonth(): number {
+    const now = new Date();
+    const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    let total = 0;
+    for (const r of this.history) {
+      if (r.at >= monthStart) total += r.costUsd;
+    }
+    return total;
+  }
+
+  /**
+   * Phase D6 — monthly cost circuit. Returns true when the call should
+   * be allowed; throws on hard daily ceiling. Non-critical calls are
+   * rejected once monthly spend ≥ 80% of budget. Critical calls
+   * (`opts.critical === true` from the router) always pass through
+   * — counter-evidence and dossier narratives are spec-blocking.
+   */
+  shouldAllow(opts: { critical: boolean }): { allow: boolean; reason?: string } {
+    this.enforceBeforeCall();
+    if (opts.critical) return { allow: true };
+    const monthSpent = this.spentThisMonth();
+    const threshold = this.ceilings.monthlyUsd * this.ceilings.monthlyCircuitFraction;
+    if (monthSpent >= threshold) {
+      this.logger.warn(
+        { monthSpent, threshold, monthlyBudget: this.ceilings.monthlyUsd },
+        'llm-monthly-circuit-open',
+      );
+      return {
+        allow: false,
+        reason: `monthly LLM spend ${monthSpent.toFixed(2)} USD >= ${threshold.toFixed(2)} USD circuit threshold`,
+      };
+    }
+    return { allow: true };
   }
 
   /** Compute USD cost given a model class + token counts. */

@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { getDb } from '@vigil/db-postgres';
+import { DossierRepo, getDb } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -18,6 +19,7 @@ import {
 } from '@vigil/queue';
 import { VaultClient, expose } from '@vigil/security';
 import { Schemas } from '@vigil/shared';
+import { create as kuboCreate } from 'kubo-rpc-client';
 import SftpClient from 'ssh2-sftp-client';
 import { z } from 'zod';
 
@@ -34,9 +36,17 @@ const zPayload = z.object({
 });
 type Payload = z.infer<typeof zPayload>;
 
+interface FetchedPdf {
+  readonly bytes: Buffer;
+  readonly sha256: string;
+  readonly cid: string;
+}
+
 class ConacSftpWorker extends WorkerBase<Payload> {
   constructor(
     private readonly vault: VaultClient,
+    private readonly dossierRepo: DossierRepo,
+    private readonly ipfsApiUrl: string,
     queue: QueueClient,
   ) {
     super({
@@ -59,6 +69,32 @@ class ConacSftpWorker extends WorkerBase<Payload> {
       return { kind: 'retry', reason: 'conac-not-provisioned', delay_ms: 24 * 3_600_000 };
     }
 
+    // Both language dossiers must be present before delivery (SRD §25 — bilingual
+    // dossier is a single deliverable). Look up siblings; if not yet rendered,
+    // back off until worker-dossier finishes the other language.
+    const siblings = await this.dossierRepo.listByFinding(env.payload.finding_id);
+    const fr = siblings.find((d) => d.language === 'fr');
+    const en = siblings.find((d) => d.language === 'en');
+    if (!fr || !en || !fr.pdf_cid || !en.pdf_cid) {
+      logger.info(
+        { finding_id: env.payload.finding_id, has_fr: !!fr, has_en: !!en },
+        'awaiting-bilingual-pair',
+      );
+      return { kind: 'retry', reason: 'awaiting-sibling-language', delay_ms: 60_000 };
+    }
+
+    let frPdf: FetchedPdf;
+    let enPdf: FetchedPdf;
+    try {
+      [frPdf, enPdf] = await Promise.all([
+        this.fetchAndVerify(fr.pdf_cid, fr.pdf_sha256),
+        this.fetchAndVerify(en.pdf_cid, en.pdf_sha256),
+      ]);
+    } catch (err) {
+      logger.error({ err, ref: env.payload.dossier_ref }, 'ipfs-fetch-failed');
+      return { kind: 'retry', reason: 'ipfs-fetch-failed', delay_ms: 60_000 };
+    }
+
     const sftp = new SftpClient();
     try {
       const privKey = await this.vault.read<string>('conac-sftp', 'private_key');
@@ -79,7 +115,7 @@ class ConacSftpWorker extends WorkerBase<Payload> {
       const ackDir = process.env.CONAC_ACK_DIR ?? '/ack/vigil-apex';
       const ref = env.payload.dossier_ref;
 
-      // Build manifest via format-adapter (W-25)
+      // Build manifest via format-adapter (W-25) — now with REAL bytes + sha256
       const manifest = buildManifest(
         {
           dossier: {
@@ -100,8 +136,8 @@ class ConacSftpWorker extends WorkerBase<Payload> {
             metadata: {},
           },
           finding: { id: env.payload.finding_id } as unknown as Schemas.Finding,
-          fr_pdf: { sha256: env.payload.pdf_sha256, bytes: 0 },
-          en_pdf: { sha256: env.payload.pdf_sha256, bytes: 0 },
+          fr_pdf: { sha256: frPdf.sha256, bytes: frPdf.bytes.length },
+          en_pdf: { sha256: enPdf.sha256, bytes: enPdf.bytes.length },
           evidence_archive: { sha256: '0'.repeat(64), bytes: 0 },
           signer: {
             name: 'Junior Thuram Nana',
@@ -113,17 +149,22 @@ class ConacSftpWorker extends WorkerBase<Payload> {
         formatVersion,
       );
 
-      // Upload (manifest LAST per SRD §25.3)
+      // Upload PDFs FIRST, manifest LAST (SRD §25.3 — manifest is the
+      // "ready to ingest" trigger; partial uploads must not look complete).
       const remoteDir = `${inbox}/${ref}`;
       await sftp.mkdir(remoteDir, true);
-      // PDF file is fetched from IPFS by a sibling worker normally; here we
-      // assume the bytes are already present in /var/run/vigil/dossiers
-      // (volume-shared with worker-dossier).
-      const localFr = `/var/run/vigil/dossiers/${ref}-fr.pdf`;
-      const localEn = `/var/run/vigil/dossiers/${ref}-en.pdf`;
-      await sftp.put(localFr, `${remoteDir}/${ref}-fr.pdf`).catch(() => null);
-      await sftp.put(localEn, `${remoteDir}/${ref}-en.pdf`).catch(() => null);
-      await sftp.put(Buffer.from(JSON.stringify(manifest, null, 2)), `${remoteDir}/${ref}-manifest.json`);
+      await sftp.put(frPdf.bytes, `${remoteDir}/${ref}-fr.pdf`);
+      await sftp.put(enPdf.bytes, `${remoteDir}/${ref}-en.pdf`);
+
+      const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2));
+      const manifestHash = createHash('sha256').update(manifestBytes).digest('hex');
+      await sftp.put(manifestBytes, `${remoteDir}/${ref}-manifest.json`);
+
+      // Persist delivery state for both language rows.
+      await Promise.all([
+        this.dossierRepo.markDelivered(fr.id, manifestHash),
+        this.dossierRepo.markDelivered(en.id, manifestHash),
+      ]);
 
       // Poll for ACK (5-min interval, up to 7 days per SRD §25.4)
       const ackPath = `${ackDir}/${ref}.ack`;
@@ -135,7 +176,12 @@ class ConacSftpWorker extends WorkerBase<Payload> {
             const ackBytes = (await sftp.get(ackPath)) as Buffer;
             const parsed = Schemas.zConacAck.safeParse(JSON.parse(ackBytes.toString('utf8')));
             if (parsed.success) {
-              logger.info({ ref, conac_ref: parsed.data.conac_case_reference }, 'conac-ack-received');
+              const conacRef = parsed.data.conac_case_reference;
+              await Promise.all([
+                this.dossierRepo.markAcknowledged(fr.id, conacRef),
+                this.dossierRepo.markAcknowledged(en.id, conacRef),
+              ]);
+              logger.info({ ref, conac_ref: conacRef }, 'conac-ack-received');
               return { kind: 'ack' };
             }
           }
@@ -152,6 +198,26 @@ class ConacSftpWorker extends WorkerBase<Payload> {
       await sftp.end().catch(() => null);
     }
   }
+
+  /**
+   * Fetch a CID's bytes from the local Kubo node, concatenate, hash, and
+   * verify against the dossier row's recorded sha256. A mismatch is fatal —
+   * either the IPFS payload was tampered with or the dossier row's sha256
+   * is wrong; both demand human review.
+   */
+  private async fetchAndVerify(cid: string, expectedSha256: string): Promise<FetchedPdf> {
+    const kubo = kuboCreate({ url: this.ipfsApiUrl });
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of kubo.cat(cid)) chunks.push(chunk);
+    const bytes = Buffer.concat(chunks);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (sha256.toLowerCase() !== expectedSha256.toLowerCase()) {
+      throw new Error(
+        `ipfs-sha256-mismatch: cid=${cid} expected=${expectedSha256} actual=${sha256}`,
+      );
+    }
+    return { bytes, sha256, cid };
+  }
 }
 
 async function main(): Promise<void> {
@@ -164,11 +230,14 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
-  await getDb();
+  const db = await getDb();
+  const dossierRepo = new DossierRepo(db);
   const vault = await VaultClient.connect();
   registerShutdown('vault', () => vault.close());
 
-  const worker = new ConacSftpWorker(vault, queue);
+  const ipfsApiUrl = process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001';
+
+  const worker = new ConacSftpWorker(vault, dossierRepo, ipfsApiUrl, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
   logger.info('worker-conac-sftp-ready');

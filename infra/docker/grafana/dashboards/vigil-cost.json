@@ -1,0 +1,64 @@
+{
+  "title": "VIGIL — Cost",
+  "uid": "vigil-cost",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "tags": ["vigil", "cost"],
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "LLM USD month-to-date",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 1500 },
+              { "color": "orange", "value": 2000 },
+              { "color": "red", "value": 2500 }
+            ]
+          },
+          "unit": "currencyUSD"
+        }
+      },
+      "targets": [{ "expr": "sum(increase(vigil_llm_cost_usd_total[30d]))" }],
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 }
+    },
+    {
+      "type": "stat",
+      "title": "Tokens per day",
+      "targets": [{ "expr": "sum(increase(vigil_llm_tokens_total[1d]))" }],
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 6 }
+    },
+    {
+      "type": "stat",
+      "title": "IPFS pins (24h)",
+      "targets": [{ "expr": "sum(increase(vigil_ipfs_pins_total{outcome=\"ok\"}[24h]))" }],
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 6 }
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM cost by model (USD/day)",
+      "targets": [
+        {
+          "expr": "sum by (model) (increase(vigil_llm_cost_usd_total[1d]))",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Token throughput (in vs out)",
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(vigil_llm_tokens_total[5m]))",
+          "legendFormat": "{{direction}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 }
+    }
+  ]
+}

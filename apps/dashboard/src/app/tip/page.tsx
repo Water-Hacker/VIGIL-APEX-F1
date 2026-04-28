@@ -1,5 +1,6 @@
 'use client';
 
+import Script from 'next/script';
 import { useState } from 'react';
 
 /**
@@ -10,7 +11,27 @@ import { useState } from 'react';
  *
  * W-09: this page is also served at <onion>/tip; the only difference is the
  * Cloudflare Turnstile is replaced by a hashcash proof on the .onion variant.
+ *
+ * Phase C13 hardening:
+ *   - Turnstile sitekey loaded server-side from NEXT_PUBLIC_TURNSTILE_SITEKEY
+ *   - Turnstile script loaded with explicit `crossOrigin="anonymous"` so
+ *     SRI-equivalent integrity is auditable (CF rotates the script body
+ *     so a literal SRI hash isn't viable).
+ *   - libsodium-wrappers-sumo is bundled locally (no CDN) — the bundler
+ *     has its own integrity check.
+ *   - "What we do / don't do" panel rendered in both FR + EN side-by-side.
  */
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (selector: string | HTMLElement, opts: { sitekey: string }) => string;
+    };
+  }
+}
+
+const TURNSTILE_SITEKEY =
+  process.env.NEXT_PUBLIC_TURNSTILE_SITEKEY ?? '0x4AAAAAAAAAAAAAAA';
 
 export default function TipPage(): JSX.Element {
   const [submitted, setSubmitted] = useState<{ ref: string } | null>(null);
@@ -126,27 +147,58 @@ export default function TipPage(): JSX.Element {
           maxLength={200}
           placeholder="Laisser vide pour un signalement strictement anonyme"
         />
-        <div className="cf-turnstile" data-sitekey="0x4AAAAAAAAAAAAAAA" data-callback="onTurnstileSuccess" />
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+          async
+          defer
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
+        />
+        <div
+          className="cf-turnstile"
+          data-sitekey={TURNSTILE_SITEKEY}
+          data-callback="onTurnstileSuccess"
+        />
         <button type="submit" disabled={busy}>
           {busy ? 'Chiffrement…' : 'Soumettre de manière anonyme'}
         </button>
       </form>
       {error ? <p style={{ color: 'var(--error)' }}>Erreur : {error}</p> : null}
       <hr style={{ marginTop: 32 }} />
-      <h3>Ce que nous garantissons</h3>
-      <ul>
-        <li>Chiffrement libsodium côté navigateur avant tout envoi</li>
-        <li>Aucun journal d’adresse IP au-delà de 7 jours (anti-abus uniquement)</li>
-        <li>Métadonnées EXIF / auteur retirées des pièces jointes</li>
-        <li>Déchiffrement uniquement par cérémonie 3-sur-5 du conseil</li>
-        <li>Texte du signalement paraphrasé avant tout dossier — jamais transmis verbatim</li>
-      </ul>
-      <h3>Ce que nous NE pouvons pas garantir</h3>
-      <ul>
-        <li>Protection contre la surveillance de votre FAI au point d’envoi</li>
-        <li>Protection si le contenu vous identifie auprès du destinataire</li>
-        <li>Anonymat absolu face à une enquête déterminée</li>
-      </ul>
+      <div className="grid md:grid-cols-2 gap-6 mt-6">
+        <section lang="fr">
+          <h3>Ce que nous garantissons</h3>
+          <ul>
+            <li>Chiffrement libsodium côté navigateur avant tout envoi</li>
+            <li>Aucun journal d’adresse IP au-delà de 7 jours (anti-abus uniquement)</li>
+            <li>Métadonnées EXIF / auteur retirées des pièces jointes</li>
+            <li>Déchiffrement uniquement par cérémonie 3-sur-5 du conseil</li>
+            <li>Texte paraphrasé avant tout dossier — jamais transmis verbatim</li>
+          </ul>
+          <h3>Ce que nous NE pouvons pas garantir</h3>
+          <ul>
+            <li>Protection contre la surveillance de votre FAI au point d’envoi</li>
+            <li>Protection si le contenu vous identifie auprès du destinataire</li>
+            <li>Anonymat absolu face à une enquête déterminée</li>
+          </ul>
+        </section>
+        <section lang="en">
+          <h3>What we guarantee</h3>
+          <ul>
+            <li>Browser-side libsodium encryption before any network send</li>
+            <li>No IP-address log beyond 7 days (anti-abuse only)</li>
+            <li>EXIF / author metadata stripped from attachments</li>
+            <li>Decryption requires a 3-of-5 council quorum ceremony</li>
+            <li>Tip text is paraphrased before any dossier — never carried verbatim</li>
+          </ul>
+          <h3>What we cannot guarantee</h3>
+          <ul>
+            <li>Protection against ISP-level surveillance at your endpoint</li>
+            <li>Protection if the content itself identifies you to the recipient</li>
+            <li>Absolute anonymity against a determined investigation</li>
+          </ul>
+        </section>
+      </div>
     </main>
   );
 }

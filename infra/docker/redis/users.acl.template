@@ -1,0 +1,8 @@
+# Redis ACL — interpolated at boot by the redis-entrypoint.sh wrapper.
+# `__VIGIL_REDIS_PASSWORD__` is replaced with the contents of
+# /run/secrets/redis_password before redis-server starts.
+#
+# Default user is disabled. Workers / dashboard / minfi-api authenticate
+# as vigil_app, which has full data-plane access.
+user default off nopass nocommands
+user vigil_app on >__VIGIL_REDIS_PASSWORD__ ~* &* +@all

@@ -20,9 +20,11 @@ import {
 import { Ids, Schemas } from '@vigil/shared';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import { fileTypeFromBuffer } from 'file-type';
+import { franc } from 'franc';
 import { request } from 'undici';
-import Tesseract from 'tesseract.js';
 import { z } from 'zod';
+
+import { OcrPool } from './ocr-pool.js';
 
 const logger = createLogger({ service: 'worker-document' });
 
@@ -46,6 +48,7 @@ class DocumentWorker extends WorkerBase<DocPayload> {
   constructor(
     private readonly sourceRepo: SourceRepo,
     private readonly ipfsApiUrl: string,
+    private readonly ocrPool: OcrPool,
     queue: QueueClient,
   ) {
     super({
@@ -80,23 +83,28 @@ class DocumentWorker extends WorkerBase<DocPayload> {
 
       const ft = await fileTypeFromBuffer(buf);
       const mime = (ft?.mime ?? 'application/octet-stream') as Schemas.DocumentMime;
-      const language = detectLanguageHeuristic(buf, mime);
       const kind = this.classifyKind(env.payload.expected_kind ?? 'other');
 
-      // OCR for image / scanned-PDF (simple heuristic; production uses Textract for low-confidence)
+      // OCR for image / scanned-PDF via shared worker pool. Tesseract runs
+      // 'fra+eng' so the model handles bilingual government documents; we
+      // then run franc on the extracted text to record the canonical
+      // language tag (SRD §14.4 — replaces hard-coded 'fr').
       let ocrEngine: Schemas.DocumentOcrEngine = 'none';
       let ocrConfidence: number | null = null;
       let textChars: number | null = null;
+      let detectedText: string | null = null;
       if (mime.startsWith('image/')) {
         try {
-          const ocr = await Tesseract.recognize(buf, language === 'fr' ? 'fra' : 'eng');
+          const ocr = await this.ocrPool.recognise(buf);
           ocrEngine = 'tesseract';
-          ocrConfidence = ocr.data.confidence / 100;
-          textChars = ocr.data.text.length;
+          ocrConfidence = ocr.confidence;
+          textChars = ocr.text.length;
+          detectedText = ocr.text;
         } catch (e) {
           logger.warn({ err: e }, 'tesseract-failed');
         }
       }
+      const language = detectLanguage(detectedText, mime);
 
       // IPFS pin
       const kubo = kuboCreate({ url: this.ipfsApiUrl });
@@ -179,11 +187,31 @@ class DocumentWorker extends WorkerBase<DocPayload> {
   }
 }
 
-function detectLanguageHeuristic(_buf: Buffer, mime: Schemas.DocumentMime): Schemas.DocumentLanguage {
-  // For Phase 1 we default to French (Cameroonian Francophone bias). Phase 2
-  // adds CLD3/franc detection on extracted text per SRD §14.4.
+/**
+ * Map an ISO-639-3 code (franc output) to the DocumentLanguage enum
+ * stored in `source.documents.language`. Cameroon's primary language is
+ * French; Fulfulde and Ewondo are recognised as `unknown` until Phase 2
+ * Pulaar/Ewondo adapters land. `und` (undetermined) defaults to French
+ * for procurement-flow docs but to `unknown` for structured payloads.
+ */
+function detectLanguage(text: string | null, mime: Schemas.DocumentMime): Schemas.DocumentLanguage {
   if (mime === 'application/json' || mime === 'application/xml') return 'unknown';
-  return 'fr';
+  if (!text || text.trim().length < 24) {
+    // Too little text to detect — fall back to FR (Cameroonian default).
+    return 'fr';
+  }
+  const code = franc(text, { minLength: 24 });
+  switch (code) {
+    case 'fra':
+      return 'fr';
+    case 'eng':
+      return 'en';
+    case 'ful': // Fulfulde — Cameroon Adamawa region
+    case 'ewo': // Ewondo — Centre / South region
+      return 'unknown';
+    default:
+      return 'fr';
+  }
 }
 
 async function main(): Promise<void> {
@@ -201,7 +229,11 @@ async function main(): Promise<void> {
   const sourceRepo = new SourceRepo(db);
   const ipfsApiUrl = process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001';
 
-  const worker = new DocumentWorker(sourceRepo, ipfsApiUrl, queue);
+  const ocrPool = new OcrPool(Number(process.env.OCR_POOL_SIZE ?? 4));
+  await ocrPool.init();
+  registerShutdown('ocr-pool', () => ocrPool.close());
+
+  const worker = new DocumentWorker(sourceRepo, ipfsApiUrl, ocrPool, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
   logger.info('worker-document-ready');

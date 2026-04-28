@@ -20,6 +20,26 @@ import type { QueueClient } from './client.js';
 import { STREAMS, consumerName, groupName, type StreamName } from './streams.js';
 import type { Envelope, HandlerOutcome, WorkerHandler } from './types.js';
 
+/**
+ * Atomic dedup-and-ack: collapses the two-RTT (SET NX, XACK) duplicate
+ * path into one Redis call. Returns 1 if this is a first delivery (caller
+ * proceeds to handle); 0 if duplicate (XACK already issued by Lua).
+ *   KEYS[1] = dedup key
+ *   KEYS[2] = stream name
+ *   ARGV[1] = consumer-group name
+ *   ARGV[2] = stream message id
+ *   ARGV[3] = TTL seconds (string)
+ */
+const DEDUP_AND_ACK_LUA = `
+  local set = redis.call('SET', KEYS[1], '1', 'EX', tonumber(ARGV[3]), 'NX')
+  if set then
+    return 1
+  else
+    redis.call('XACK', KEYS[2], ARGV[1], ARGV[2])
+    return 0
+  end
+`;
+
 /* =============================================================================
  * WorkerBase — extend this; implement only `handle()`.
  *
@@ -62,6 +82,14 @@ export abstract class WorkerBase<TPayload> {
   private running = false;
   private stopping = false;
 
+  // Phase D9 — adaptive concurrency. We start at the configured ceiling
+  // and degrade proportionally to the rolling 60s error rate. Token-
+  // bucket style: effective concurrency = ceil × max(0.1, 1 - errorRate).
+  // Recovers automatically when errorRate drops back under threshold.
+  private readonly errorWindow: { at: number; ok: boolean }[] = [];
+  private readonly errorWindowMs = 60_000;
+  private circuitOpenUntil = 0;
+
   constructor(cfg: WorkerBaseConfig<TPayload>) {
     this.logger = cfg.logger ?? createLogger({ service: cfg.name });
     this.instanceId = `${hostname()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,6 +101,35 @@ export abstract class WorkerBase<TPayload> {
       idleReclaimMs: cfg.idleReclaimMs ?? Number(process.env.REDIS_CONSUMER_IDLE_RECLAIM_MS ?? 300_000),
       schemaVersion: cfg.schemaVersion ?? 1,
     };
+  }
+
+  /**
+   * Effective concurrency for the next read. Multiplies the configured
+   * ceiling by (1 - errorRate) with a 10% floor so we never starve the
+   * worker entirely. While the half-open probe window is active (60s
+   * after the last 100% error), we cap at 1 to gently re-explore.
+   */
+  private effectiveConcurrency(): number {
+    const cfg = this.config.concurrency;
+    const now = Date.now();
+    while (this.errorWindow.length && now - this.errorWindow[0]!.at > this.errorWindowMs) {
+      this.errorWindow.shift();
+    }
+    if (this.errorWindow.length === 0) return cfg;
+    const errs = this.errorWindow.filter((e) => !e.ok).length;
+    const errorRate = errs / this.errorWindow.length;
+    if (now < this.circuitOpenUntil) return 1;
+    if (errorRate >= 0.9) {
+      this.circuitOpenUntil = now + 60_000;
+      this.logger.warn({ errorRate }, 'worker-circuit-half-open');
+      return 1;
+    }
+    return Math.max(1, Math.floor(cfg * Math.max(0.1, 1 - errorRate)));
+  }
+
+  protected recordOutcome(ok: boolean): void {
+    this.errorWindow.push({ at: Date.now(), ok });
+    if (this.errorWindow.length > 200) this.errorWindow.shift();
   }
 
   /** Implement the unit of work. MUST be idempotent at dedup_key. */
@@ -109,8 +166,8 @@ export abstract class WorkerBase<TPayload> {
 
     while (this.running && !this.stopping) {
       try {
-        // Don't pull more than concurrency permits
-        const slots = Math.max(0, this.config.concurrency - this.inFlight);
+        // Don't pull more than the (adaptive) concurrency permits.
+        const slots = Math.max(0, this.effectiveConcurrency() - this.inFlight);
         if (slots === 0) {
           await sleep(50);
           continue;
@@ -203,12 +260,24 @@ export abstract class WorkerBase<TPayload> {
         return;
       }
 
-      // Idempotency: dedup_key MUST be unique. If we've seen this key, ack and move on.
+      // Idempotency: dedup_key MUST be unique. If we've seen this key, ack
+      // and move on. Phase D4 — combined into a single Redis round-trip
+      // via a Lua script: previously two RTTs (SET then XACK), now one
+      // for the duplicate path (still just one for the first-delivery
+      // path). Saves ~50 % Redis bandwidth on duplicate-heavy streams.
       const dedupKey = `vigil:dedup:${name}:${envelope.dedup_key}`;
-      const set = await client.redis.set(dedupKey, '1', 'EX', 86_400, 'NX');
-      if (set === null) {
+      const dedupResult = (await client.redis.eval(
+        DEDUP_AND_ACK_LUA,
+        2,
+        dedupKey,
+        stream,
+        groupName(name),
+        redisId,
+        '86400',
+      )) as number;
+      // 1 = first delivery (SET happened; we proceed), 0 = duplicate (XACK already done by Lua)
+      if (dedupResult === 0) {
         dedupHits.labels({ worker: name }).inc();
-        await client.redis.xack(stream, groupName(name), redisId);
         return;
       }
 
@@ -223,6 +292,7 @@ export abstract class WorkerBase<TPayload> {
           await client.redis.xack(stream, groupName(name), redisId);
           eventsEmitted.labels({ worker: name, stream }).inc();
           redisAckLatency.labels({ worker: name }).observe((Date.now() - enqueuedAt) / 1000);
+          this.recordOutcome(true);
           break;
         case 'retry':
           this.logger.warn({ redisId, reason: outcome.reason }, 'handler-retry');
@@ -232,20 +302,21 @@ export abstract class WorkerBase<TPayload> {
           }
           // Release dedup lock so the retry can re-enter
           await client.redis.del(dedupKey);
+          this.recordOutcome(false);
           break;
         case 'dead-letter':
           this.logger.error({ redisId, reason: outcome.reason }, 'handler-dead-letter');
-          await this.deadLetter(redisId, body, outcome.reason);
-          await client.redis.xack(stream, groupName(name), redisId);
+          await this.deadLetterAndAck(redisId, body, outcome.reason);
+          this.recordOutcome(false);
           break;
       }
     } catch (e) {
       const ve = Errors.asVigilError(e);
       errorsTotal.labels({ service: name, code: ve.code, severity: ve.severity }).inc();
       this.logger.error({ err: ve, redisId }, 'handler-threw');
-      // Generic exception — push to DLQ; ACK so it doesn't loop forever
-      await this.deadLetter(redisId, body, ve.message);
-      await client.redis.xack(stream, groupName(name), redisId);
+      // Generic exception — push to DLQ; ACK so it doesn't loop forever.
+      await this.deadLetterAndAck(redisId, body, ve.message);
+      this.recordOutcome(false);
     } finally {
       this.inFlight--;
     }
@@ -269,6 +340,38 @@ export abstract class WorkerBase<TPayload> {
       },
     };
     await client.publish(STREAMS.DEAD_LETTER, dlEnvelope);
+  }
+
+  /**
+   * Pipeline the dead-letter publish and the originating XACK. Single
+   * Redis round-trip instead of two; the DLQ XADD and the upstream
+   * XACK are independent (no causal dependency at the wire level —
+   * worst case a partial pipeline replays the dead-letter once which
+   * is harmless: DLQ consumers dedupe on `dlq:<worker>:<redisId>`).
+   */
+  private async deadLetterAndAck(redisId: string, body: string, reason: string): Promise<void> {
+    const { client, name, stream } = this.config;
+    const dlEnvelope = {
+      id: Ids.newEventId() as string,
+      dedup_key: `dlq:${name}:${redisId}`,
+      correlation_id: Ids.newCorrelationId() as string,
+      producer: name,
+      produced_at: new Date().toISOString(),
+      schema_version: 1,
+      payload: {
+        original_stream: stream,
+        original_redis_id: redisId,
+        original_body: body,
+        reason,
+        worker: name,
+      },
+    };
+    const dlBody = JSON.stringify(dlEnvelope);
+    await client.redis
+      .pipeline()
+      .xadd(STREAMS.DEAD_LETTER, '*', 'body', dlBody)
+      .xack(stream, groupName(name), redisId)
+      .exec();
   }
 
   private fieldsToBody(fields: string[]): string {

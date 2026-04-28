@@ -97,17 +97,14 @@ class CounterWorker extends WorkerBase<Payload> {
       const r = await this.llm.call<z.infer<typeof zCounterResp>>(opts);
       const text =
         `Concerns:\n- ${r.content.concerns.join('\n- ') || 'none identified'}\n\n` +
-        (r.content.alternative_explanation ? `Alternative explanation:\n${r.content.alternative_explanation}\n\n` : '') +
+        (r.content.alternative_explanation
+          ? `Alternative explanation:\n${r.content.alternative_explanation}\n\n`
+          : '') +
         `Verification steps:\n- ${r.content.verification_steps.join('\n- ')}`;
-      // Persist counter_evidence on finding
-      await this.findingRepo.setState(finding.id, 'review');
-      // direct sql for the field
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { sql } = require('drizzle-orm');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getDb } = require('@vigil/db-postgres');
-      const db = await getDb();
-      await db.execute(sql`UPDATE finding.finding SET counter_evidence = ${text} WHERE id = ${finding.id}`);
+      // Single repo call — atomic state + counter_evidence write, no inline
+      // require() hop. Replaces the previous two-step UPDATE that briefly
+      // left findings in 'review' state without their devil's-advocate text.
+      await this.findingRepo.setCounterEvidence(finding.id, text, 'review');
       return { kind: 'ack' };
     } catch (e) {
       logger.error({ err: e }, 'counter-evidence-failed');

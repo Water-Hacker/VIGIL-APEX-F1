@@ -1,0 +1,26 @@
+# VIGIL APEX Tor v3 hidden service for the public tip portal.
+#
+# Per THREAT-MODEL-CMR §02: tippers in adversarial regions need a path
+# that cannot be observed by upstream ISPs. The .onion address is shown
+# inline on the /tip page (and in printed materials handed out by
+# civil-society partners). The same Caddy backend serves both clearnet
+# and onion — Tor terminates here and forwards to vigil-caddy:80.
+
+User vigil-tor
+DataDirectory /var/lib/tor
+SocksPort 0
+ControlPort 0
+
+# v3 hidden service. Key material is generated on first run and kept
+# under /var/lib/tor/vigil-tip — this directory MUST be on encrypted
+# storage (it is on /srv/vigil/* which is on the LUKS-backed Btrfs
+# subvol, per W-12) and backed up via vigil-backup.
+HiddenServiceDir /var/lib/tor/vigil-tip
+HiddenServicePort 80 vigil-caddy:80
+HiddenServiceVersion 3
+HiddenServicePoWDefensesEnabled 1
+
+# Don't run as a relay — outbound traffic only when fetching descriptors.
+ClientOnly 0
+
+Log notice stdout

@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 
 import * as sourceSchema from '../schema/source.js';
 import type { Db } from '../client.js';
@@ -64,5 +64,28 @@ export class SourceRepo {
       .where(eq(sourceSchema.documents.sha256, sha256))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  async getEventsByIds(
+    ids: readonly string[],
+  ): Promise<readonly (typeof sourceSchema.events.$inferSelect)[]> {
+    if (ids.length === 0) return [];
+    return this.db
+      .select()
+      .from(sourceSchema.events)
+      .where(inArray(sourceSchema.events.id, ids as string[]));
+  }
+
+  async getRecentEventsForSources(
+    sourceIds: readonly string[],
+    limit = 200,
+  ): Promise<readonly (typeof sourceSchema.events.$inferSelect)[]> {
+    if (sourceIds.length === 0) return [];
+    return this.db
+      .select()
+      .from(sourceSchema.events)
+      .where(inArray(sourceSchema.events.source_id, sourceIds as string[]))
+      .orderBy(sql`${sourceSchema.events.observed_at} DESC`)
+      .limit(limit);
   }
 }

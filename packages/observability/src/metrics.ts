@@ -122,6 +122,101 @@ export const adapterRowsEmitted = new Counter({
   registers: [registry],
 });
 
+/* ---- Phase E2 — business metrics ------------------------------------------*/
+
+/**
+ * Distribution of pattern-strength values per pattern. Lets us spot a
+ * pattern that has drifted to always-high (likely false positives) or
+ * always-low (likely deprecated). 10 bins across [0,1].
+ */
+export const patternStrength = new Histogram({
+  name: 'vigil_pattern_strength',
+  help: 'Per-pattern signal strength values',
+  labelNames: ['pattern_id'] as const,
+  buckets: [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  registers: [registry],
+});
+
+/**
+ * Posterior at the moment scoring writes it. The /findings dashboard
+ * uses the histogram's percentiles to track calibration drift.
+ */
+export const findingPosterior = new Histogram({
+  name: 'vigil_finding_posterior',
+  help: 'Distribution of posterior values at scoring time',
+  buckets: [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1.0],
+  registers: [registry],
+});
+
+export const dossierRenderDuration = new Histogram({
+  name: 'vigil_dossier_render_duration_seconds',
+  help: 'End-to-end dossier render time (docx → pdf → IPFS pin)',
+  labelNames: ['language'] as const,
+  buckets: [1, 5, 10, 30, 60, 120, 300, 600],
+  registers: [registry],
+});
+
+export const minfiScoreBandTotal = new Counter({
+  name: 'vigil_minfi_score_band_total',
+  help: 'MINFI /score responses by band',
+  labelNames: ['band'] as const,
+  registers: [registry],
+});
+
+export const councilVoteTotal = new Counter({
+  name: 'vigil_council_vote_total',
+  help: 'Council votes recorded',
+  labelNames: ['choice', 'pillar'] as const,
+  registers: [registry],
+});
+
+/**
+ * Postgres pool saturation gauge — Phase D1's `poolStats(pool)` exporter
+ * is wired here. Sample every metrics-scrape (Prometheus default 15 s).
+ */
+export const dbPoolTotal = new Gauge({
+  name: 'vigil_db_pool_total',
+  help: 'Total Postgres pool size',
+  registers: [registry],
+});
+
+export const dbPoolIdle = new Gauge({
+  name: 'vigil_db_pool_idle',
+  help: 'Idle Postgres pool connections',
+  registers: [registry],
+});
+
+export const dbPoolWaiting = new Gauge({
+  name: 'vigil_db_pool_waiting',
+  help: 'Postgres pool waiting requests (saturation indicator)',
+  registers: [registry],
+});
+
+/**
+ * In-flight gauge for adaptive concurrency (D9). Each worker reports its
+ * own slot count.
+ */
+export const workerInflight = new Gauge({
+  name: 'vigil_worker_inflight',
+  help: 'In-flight handler invocations per worker',
+  labelNames: ['worker'] as const,
+  registers: [registry],
+});
+
+export const workerEffectiveConcurrency = new Gauge({
+  name: 'vigil_worker_effective_concurrency',
+  help: 'Effective concurrency after adaptive throttling',
+  labelNames: ['worker'] as const,
+  registers: [registry],
+});
+
+export const ipfsPinsTotal = new Counter({
+  name: 'vigil_ipfs_pins_total',
+  help: 'IPFS pin attempts',
+  labelNames: ['outcome'] as const,
+  registers: [registry],
+});
+
 export type Labels<T extends string> = LabelValues<T>;
 
 /** Start a tiny HTTP server that serves /metrics. */

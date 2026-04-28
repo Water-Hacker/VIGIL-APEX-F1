@@ -1,0 +1,61 @@
+{
+  "title": "VIGIL — Findings funnel",
+  "uid": "vigil-findings",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "tags": ["vigil", "findings"],
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Pattern detections per hour",
+      "targets": [
+        {
+          "expr": "sum by (pattern_id) (increase(vigil_pattern_strength_count[1h]))",
+          "legendFormat": "{{pattern_id}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 }
+    },
+    {
+      "type": "heatmap",
+      "title": "Pattern strength histogram",
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(vigil_pattern_strength_bucket[10m]))",
+          "format": "heatmap"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "type": "heatmap",
+      "title": "Posterior distribution",
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(vigil_finding_posterior_bucket[10m]))",
+          "format": "heatmap"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Counter-evidence runs",
+      "targets": [
+        {
+          "expr": "sum(rate(vigil_events_consumed_total{worker=\"worker-counter-evidence\"}[5m]))",
+          "legendFormat": "consumed/s"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "ECE overall (calibration)",
+      "targets": [{ "expr": "vigil_calibration_ece_overall" }],
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 }
+    }
+  ]
+}

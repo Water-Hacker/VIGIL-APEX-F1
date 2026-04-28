@@ -164,27 +164,59 @@ export class UnixSocketSignerAdapter implements SignerAdapter {
     });
   }
 
-  private rpc(method: string, params: Record<string, unknown>): Promise<string> {
+  /**
+   * NDJSON request/response over the Unix socket. Each request is a
+   * single line (`<json>\n`); the response is the first line received.
+   * Fragmentation, multi-frame, or trailing data after the first newline
+   * is handled correctly — the previous implementation buffered until
+   * `end` and could deadlock if the signer kept the socket open after
+   * a single response. A 30 s timeout protects against signer hangs.
+   */
+  private rpc(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = 30_000,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       const sock = new Socket();
-      const buf: Buffer[] = [];
+      let buf = '';
+      let done = false;
+
+      const finish = (err: unknown, value?: string): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        sock.removeAllListeners();
+        sock.destroy();
+        if (err) reject(err instanceof Error ? err : new Error(String(err)));
+        else resolve(value!);
+      };
+
+      const timer = setTimeout(() => {
+        finish(new Error(`polygon-signer rpc timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
       sock.connect(this.socketPath);
       sock.on('connect', () => {
         sock.write(JSON.stringify({ method, params }) + '\n');
       });
-      sock.on('data', (chunk) => buf.push(chunk));
-      sock.on('end', () => {
+      sock.on('data', (chunk: Buffer) => {
+        buf += chunk.toString('utf8');
+        const newlineAt = buf.indexOf('\n');
+        if (newlineAt < 0) return; // wait for more bytes
+        const line = buf.slice(0, newlineAt);
         try {
-          const r = JSON.parse(Buffer.concat(buf).toString('utf8')) as
+          const r = JSON.parse(line) as
             | { ok: true; result: string }
             | { ok: false; error: string };
-          if (r.ok) resolve(r.result);
-          else reject(new Error(r.error));
+          if (r.ok) finish(null, r.result);
+          else finish(new Error(r.error));
         } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
+          finish(e);
         }
       });
-      sock.on('error', reject);
+      sock.on('end', () => finish(new Error('polygon-signer closed before response')));
+      sock.on('error', (e) => finish(e));
     });
   }
 }

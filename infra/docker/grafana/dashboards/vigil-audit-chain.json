@@ -1,0 +1,47 @@
+{
+  "title": "VIGIL — Audit chain & Polygon",
+  "uid": "vigil-audit-chain",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "tags": ["vigil", "audit", "polygon"],
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Audit chain seq",
+      "targets": [{ "expr": "max(vigil_audit_chain_seq)" }],
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Polygon anchors (last 24h)",
+      "targets": [{ "expr": "sum(increase(vigil_polygon_anchor_total{outcome=\"ok\"}[24h]))" }],
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Polygon failures (last 24h)",
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+      "targets": [{ "expr": "sum(increase(vigil_polygon_anchor_total{outcome=\"failed\"}[24h]))" }],
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Hash-chain growth (events/min)",
+      "targets": [{ "expr": "rate(vigil_audit_chain_seq[5m])" }],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Polygon anchor outcomes",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(vigil_polygon_anchor_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 }
+    }
+  ]
+}

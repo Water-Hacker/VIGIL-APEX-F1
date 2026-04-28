@@ -57,7 +57,36 @@ export interface LlmCallOptions {
   readonly cacheKey?: string;
   /** Correlation propagation. */
   readonly correlationId?: string;
+  /**
+   * Phase D5 — non-urgent calls go to Anthropic's Batch API at 50% cost.
+   * Pattern + entity-resolution work tolerates the 24h SLA; counter-
+   * evidence + dossier narrative do not. The router maps task → mode
+   * unless this overrides.
+   */
+  readonly batch?: boolean;
+  /**
+   * Phase D6 — when the monthly cost circuit is open (≥ 80% of budget),
+   * non-critical calls are throttled. Setting this to true marks the
+   * call as critical (counter-evidence on escalation-eligible findings,
+   * dossier narrative on a council-approved case).
+   */
+  readonly critical?: boolean;
 }
+
+/**
+ * Default batch-mode setting per task class. The Anthropic Batch API
+ * tolerates a 24h turnaround in exchange for a 50% input/output discount.
+ */
+export const TASK_BATCH_DEFAULT: Record<LlmTaskClass, boolean> = {
+  extraction: true,              // adapter post-processing, daily refresh OK
+  classification: true,          // bulk classification of incoming docs
+  translation: true,              // dossier translation can wait 24h
+  devils_advocate: false,        // counter-evidence: real-time, blocks escalation
+  entity_resolution: true,       // tolerable to defer 24h
+  pattern_evidence: true,        // pattern signals refresh on a daily cadence
+  dossier_narrative: false,      // post-quorum render path is real-time
+  tip_classify: false,           // operator triage SLA < 1h
+};
 
 export interface LlmCallResult<T = string> {
   readonly tier: LlmTier;

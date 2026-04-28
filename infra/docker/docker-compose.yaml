@@ -65,6 +65,12 @@ secrets:
     file: /run/vigil/secrets/sentinelhub_client_id
   sentinelhub_client_secret:
     file: /run/vigil/secrets/sentinelhub_client_secret
+  alertmanager_smtp_password:
+    file: /run/vigil/secrets/alertmanager_smtp_password
+  alertmanager_slack_webhook:
+    file: /run/vigil/secrets/alertmanager_slack_webhook
+  ipfs_cluster_secret:
+    file: /run/vigil/secrets/ipfs_cluster_secret
 
 # ============================================================================
 # YAML anchors — common env + restart policy
@@ -94,6 +100,49 @@ x-logging: &logging
 services:
 
   # ==========================================================================
+  # N00 — vigil-secret-init  (runs first; rest of the stack depends on it)
+  # ==========================================================================
+  # Materialises /run/vigil/secrets/* on the HOST from Vault before any
+  # service that uses Docker secrets starts. Implemented as a one-shot
+  # container that re-execs the host bootstrap script via a bind-mount —
+  # keeps the Vault token path out of every service container.
+  #
+  # This compose service exists so `docker compose up` is self-contained:
+  # if the operator forgot the systemd timer, the stack still refuses to
+  # start until secrets are present rather than booting half-broken.
+  vigil-secret-init:
+    image: hashicorp/vault:1.17
+    container_name: vigil-secret-init
+    hostname: vigil-secret-init
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.5 }
+    volumes:
+      - /run/vigil/secrets:/run/vigil/secrets
+      - ../host-bootstrap/05-secret-materialisation.sh:/bootstrap.sh:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR:-https://vigil-vault:8200}
+      VAULT_BIN: /bin/vault
+      SECRET_ROOT: /run/vigil/secrets
+      VAULT_TOKEN_FILE: /run/vigil/vault-init-token
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -f "$$VAULT_TOKEN_FILE" ]; then
+          export VAULT_TOKEN="$$(cat $$VAULT_TOKEN_FILE)"
+        fi
+        # The script greps `vault status` to decide whether Vault is unsealed
+        # and bails if not — exactly what we want from a compose dependency.
+        apk add --no-cache bash >/dev/null
+        bash /bootstrap.sh
+    depends_on:
+      vigil-vault: { condition: service_healthy }
+    restart: "no"
+    security_opt: [ "no-new-privileges:true" ]
+
+  # ==========================================================================
   # N03 — vigil-postgres
   # ==========================================================================
   vigil-postgres:
@@ -117,6 +166,8 @@ services:
       POSTGRES_USER: vigil
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8 --auth=scram-sha-256"
+    depends_on:
+      vigil-secret-init: { condition: service_completed_successfully }
     secrets: [pg_password]
     command:
       - postgres
@@ -158,6 +209,8 @@ services:
       NEO4J_server_memory_heap_max__size: 16G
       NEO4J_server_memory_pagecache_size: 14G
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+    depends_on:
+      vigil-secret-init: { condition: service_completed_successfully }
     secrets: [neo4j_password]
     deploy:
       resources:
@@ -182,9 +235,14 @@ services:
       vigil-internal: { ipv4_address: 172.20.0.12 }
     volumes:
       - /srv/vigil/redis/data:/data
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./redis/users.acl.template:/etc/redis/users.acl.template:ro
+      - ./redis/redis-entrypoint.sh:/usr/local/bin/redis-entrypoint.sh:ro
       - /etc/localtime:/etc/localtime:ro
-    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    entrypoint: ["/usr/local/bin/redis-entrypoint.sh"]
+    command: ["/etc/redis/redis.conf"]
+    depends_on:
+      vigil-secret-init: { condition: service_completed_successfully }
     secrets: [redis_password]
     environment: *common-env
     deploy:
@@ -223,6 +281,67 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    security_opt: [ "no-new-privileges:true" ]
+
+  # ==========================================================================
+  # vigil-ipfs-2 — second Kubo node for replication (Phase D8)
+  # ==========================================================================
+  # Two-node Kubo replication: every CID added by vigil-ipfs propagates
+  # to vigil-ipfs-2 via the cluster service below. If either node fails
+  # the other still serves /verify reads. Phase 2 will graduate this to
+  # a 3+ node ipfs-cluster with per-CID replication factor 2.
+  vigil-ipfs-2:
+    image: ipfs/kubo:v0.30.0
+    container_name: vigil-ipfs-2
+    hostname: vigil-ipfs-2
+    <<: [*restart, *logging]
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.14 }
+    volumes:
+      - /srv/vigil/ipfs2/data:/data/ipfs
+      - /srv/vigil/ipfs2/staging:/export
+      - ./ipfs/init.sh:/container-init.d/001-init.sh:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      <<: *common-env
+      IPFS_PROFILE: server
+    deploy:
+      resources:
+        limits: { memory: 8g, cpus: "2.0" }
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs --api=/ip4/127.0.0.1/tcp/5001 id || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    security_opt: [ "no-new-privileges:true" ]
+
+  # ipfs-cluster — coordinates pinning between vigil-ipfs + vigil-ipfs-2
+  # so CIDs added by either node are pinned by both. Cluster secret comes
+  # from /run/secrets/ipfs_cluster_secret (B1 materialisation).
+  vigil-ipfs-cluster:
+    image: ipfs/ipfs-cluster:v1.1.2
+    container_name: vigil-ipfs-cluster
+    hostname: vigil-ipfs-cluster
+    <<: [*restart, *logging]
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.16 }
+    volumes:
+      - /srv/vigil/ipfs-cluster/data:/data/ipfs-cluster
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      vigil-ipfs:    { condition: service_healthy }
+      vigil-ipfs-2:  { condition: service_healthy }
+      vigil-secret-init: { condition: service_completed_successfully }
+    environment:
+      <<: *common-env
+      CLUSTER_PEERNAME: vigil-cluster-1
+      CLUSTER_SECRET_FILE: /run/secrets/ipfs_cluster_secret
+      CLUSTER_IPFSHTTP_NODEMULTIADDRESS: /dns4/vigil-ipfs/tcp/5001
+      CLUSTER_REPLICATION_FACTOR_MIN: "2"
+      CLUSTER_REPLICATION_FACTOR_MAX: "2"
+    deploy:
+      resources:
+        limits: { memory: 1g, cpus: "0.5" }
     security_opt: [ "no-new-privileges:true" ]
 
   # ==========================================================================
@@ -303,12 +422,13 @@ services:
       context: ../..
       dockerfile: infra/docker/dockerfiles/Dashboard.Dockerfile
     image: vigil-apex/dashboard:0.1.0
-    container_name: vigil-dashboard
+    # Phase D7 — horizontal scaling. Caddy fans out across replicas via
+    # service-name DNS round-robin (`vigil-dashboard:3000` resolves all
+    # IPs). Static container_name + ipv4_address removed so Compose can
+    # spawn N instances; replicas controlled via deploy.replicas.
     hostname: vigil-dashboard
     <<: [*restart, *logging]
-    networks:
-      vigil-internal: { ipv4_address: 172.20.0.17 }
-      vigil-edge:     { ipv4_address: 172.21.0.10 }
+    networks: [vigil-internal, vigil-edge]
     depends_on:
       vigil-postgres: { condition: service_healthy }
       vigil-redis:    { condition: service_healthy }
@@ -326,9 +446,16 @@ services:
       KEYCLOAK_URL: http://vigil-keycloak:8080
       OTEL_SERVICE_NAME: vigil-dashboard
       PROMETHEUS_PORT: "9100"
+      # Session store in Redis so requests can hit any replica.
+      SESSION_STORE: redis
     deploy:
+      replicas: 3
       resources:
         limits: { memory: 4g, cpus: "2.0" }
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health || exit 1"]
       interval: 30s
@@ -339,10 +466,40 @@ services:
     security_opt: [ "no-new-privileges:true" ]
 
   # ==========================================================================
+  # vigil-tor — Tor v3 hidden service for the tip portal (B7 / W-12)
+  # ==========================================================================
+  vigil-tor:
+    image: dperson/torproxy:latest
+    container_name: vigil-tor
+    hostname: vigil-tor
+    <<: [*restart, *logging]
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.30 }
+    volumes:
+      - ./tor/torrc:/etc/tor/torrc:ro
+      - /srv/vigil/tor:/var/lib/tor
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      vigil-caddy: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 512m, cpus: "1.0" }
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /var/lib/tor/vigil-tip/hostname"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    security_opt: [ "no-new-privileges:true" ]
+
+  # ==========================================================================
   # Caddy reverse proxy — terminates TLS + serves /verify, /tip, etc.
   # ==========================================================================
   vigil-caddy:
-    image: caddy:2.8-alpine
+    build:
+      context: ..
+      dockerfile: docker/dockerfiles/Caddy.Dockerfile
+    image: vigil-caddy:rl-2.8
     container_name: vigil-caddy
     hostname: vigil-caddy
     <<: [*restart, *logging]
@@ -584,6 +741,87 @@ services:
   # ==========================================================================
   # Observability
   # ==========================================================================
+  # ==========================================================================
+  # vigil-alertmanager — Slack/email routing for the Phase E4 alert tree
+  # ==========================================================================
+  vigil-alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: vigil-alertmanager
+    hostname: vigil-alertmanager
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.32 } }
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - /srv/vigil/alertmanager/data:/alertmanager
+    secrets: [alertmanager_smtp_password, alertmanager_slack_webhook]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=https://alerts.vigilapex.cm
+    deploy:
+      resources:
+        limits: { memory: 256m, cpus: "0.25" }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9093/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt: [ "no-new-privileges:true" ]
+
+  # ==========================================================================
+  # vigil-logstash — Vault audit JSON → Postgres audit.vault_log (Phase E7)
+  # ==========================================================================
+  vigil-logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.3
+    container_name: vigil-logstash
+    hostname: vigil-logstash
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.33 } }
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - /srv/vigil/logstash/data:/usr/share/logstash/data
+    secrets: [pg_password]
+    environment:
+      <<: *common-env
+      LS_JAVA_OPTS: "-Xms256m -Xmx512m"
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    command: >
+      /bin/sh -c "
+      export POSTGRES_PASSWORD=\"$$(cat /run/secrets/pg_password)\";
+      exec /usr/share/logstash/bin/logstash"
+    depends_on:
+      vigil-postgres: { condition: service_healthy }
+      vigil-secret-init: { condition: service_completed_successfully }
+    deploy:
+      resources:
+        limits: { memory: 1g, cpus: "0.5" }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9600/_node/stats || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    security_opt: [ "no-new-privileges:true" ]
+
+  # vigil-filebeat — tails Vault's audit.log and ships to vigil-logstash.
+  vigil-filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.3
+    container_name: vigil-filebeat
+    hostname: vigil-filebeat
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.34 } }
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /srv/vigil/vault/logs:/vault/logs:ro
+      - /srv/vigil/filebeat/data:/usr/share/filebeat/data
+    user: "0:0"
+    depends_on:
+      vigil-logstash: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 256m, cpus: "0.25" }
+    security_opt: [ "no-new-privileges:true" ]
+
   vigil-prometheus:
     image: prom/prometheus:v2.55.0
     container_name: vigil-prometheus

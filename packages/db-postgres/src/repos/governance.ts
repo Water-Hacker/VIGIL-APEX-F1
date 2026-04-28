@@ -53,4 +53,27 @@ export class GovernanceRepo {
       .orderBy(desc(govSchema.proposal.opened_at))
       .limit(limit);
   }
+
+  async getProposalById(id: string) {
+    const rows = await this.db
+      .select()
+      .from(govSchema.proposal)
+      .where(eq(govSchema.proposal.id, id))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async getVote(proposalId: string, voterAddress: string) {
+    const rows = await this.db
+      .select()
+      .from(govSchema.vote)
+      .where(
+        and(
+          eq(govSchema.vote.proposal_id, proposalId),
+          eq(govSchema.vote.voter_address, voterAddress),
+        ),
+      )
+      .limit(1);
+    return rows[0] ?? null;
+  }
 }

@@ -8,5 +8,6 @@
 export * from './vault.js';
 export * from './secrets.js';
 export * from './sodium.js';
+export * from './shamir.js';
 export * from './fido.js';
 export * from './mtls.js';

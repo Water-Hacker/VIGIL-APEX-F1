@@ -8,6 +8,8 @@
 export * from './client.js';
 export * as schema from './schema/index.js';
 export * from './repos/audit.js';
+export * from './repos/dossier.js';
+export * from './repos/entity.js';
 export * from './repos/finding.js';
 export * from './repos/source.js';
 export * from './repos/governance.js';

@@ -1,8 +1,37 @@
+import { readFileSync } from 'node:fs';
+
 import { createLogger, type Logger } from '@vigil/observability';
 import { Errors } from '@vigil/shared';
 import IORedis, { type Redis, type RedisOptions } from 'ioredis';
 
 import type { Envelope } from './types.js';
+
+/**
+ * Read the Redis password from the secret-init mounted file. Resolution
+ * order:
+ *   1. explicit `passwordFile` option
+ *   2. REDIS_PASSWORD_FILE env (mount provided by the secret-init container)
+ *   3. /run/secrets/redis_password (Docker secrets default mount)
+ * If none are present we return null and connect anonymously — Redis
+ * will reject on AUTH-required clusters, which is the loud failure
+ * mode we want.
+ */
+function loadRedisPassword(explicit: string | undefined): string | null {
+  const candidates = [
+    explicit,
+    process.env.REDIS_PASSWORD_FILE,
+    '/run/secrets/redis_password',
+  ].filter((p): p is string => typeof p === 'string' && p.length > 0);
+  for (const path of candidates) {
+    try {
+      const raw = readFileSync(path, 'utf8').trim();
+      if (raw) return raw;
+    } catch {
+      // try next candidate
+    }
+  }
+  return process.env.REDIS_PASSWORD ?? null;
+}
 
 /**
  * Thin wrapper over ioredis that owns connection lifecycle and exposes
@@ -42,6 +71,8 @@ export class QueueClient {
       },
     };
     if (opts.tls === true) options.tls = {};
+    const password = loadRedisPassword(opts.passwordFile);
+    if (password !== null) options.password = password;
 
     if (opts.url !== undefined) {
       this.redis = new IORedis(opts.url, options);

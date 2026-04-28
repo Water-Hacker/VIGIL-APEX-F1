@@ -20,6 +20,7 @@
     "@vigil/queue": "workspace:*",
     "@vigil/shared": "workspace:*",
     "file-type": "^19.4.1",
+    "franc": "^6.2.0",
     "kubo-rpc-client": "^4.1.2",
     "tesseract.js": "^5.1.0",
     "undici": "^6.19.8",

@@ -1,0 +1,68 @@
+{
+  "title": "VIGIL — Overview",
+  "uid": "vigil-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["vigil", "overview"],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Adapter runs (last 1h)",
+      "targets": [{ "expr": "sum(increase(vigil_adapter_runs_total[1h]))", "legendFormat": "runs" }],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Findings detected (last 1h)",
+      "targets": [{ "expr": "sum(increase(vigil_events_emitted_total{stream=\"vigil:pattern:detect\"}[1h]))" }],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Audit chain seq",
+      "targets": [{ "expr": "max(vigil_audit_chain_seq)" }],
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "LLM cost MTD (USD)",
+      "targets": [{ "expr": "sum(increase(vigil_llm_cost_usd_total[30d]))" }],
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker P99 processing duration",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (worker, le) (rate(vigil_processing_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{worker}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors per minute by service",
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(vigil_errors_total[1m]))",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Postgres pool saturation",
+      "targets": [
+        { "expr": "vigil_db_pool_total", "legendFormat": "total" },
+        { "expr": "vigil_db_pool_idle", "legendFormat": "idle" },
+        { "expr": "vigil_db_pool_waiting", "legendFormat": "waiting" }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 }
+    }
+  ]
+}

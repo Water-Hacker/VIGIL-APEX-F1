@@ -18,9 +18,9 @@
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "migrate": "drizzle-kit migrate",
+    "migrate": "node dist/scripts/migrate.js",
     "generate": "drizzle-kit generate",
-    "reset": "drizzle-kit drop && drizzle-kit migrate",
+    "reset": "drizzle-kit drop && pnpm run migrate",
     "seed": "node dist/scripts/seed.js",
     "clean": "rimraf dist .turbo"
   },

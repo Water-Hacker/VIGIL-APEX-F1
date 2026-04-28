@@ -1,4 +1,5 @@
-import { createSign } from 'node:crypto';
+import { createSign, createVerify } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
@@ -42,15 +43,50 @@ async function main(): Promise<void> {
 
   const redisHost = process.env.REDIS_HOST ?? 'vigil-redis';
   const redisPort = Number(process.env.REDIS_PORT ?? 6379);
-  const redis = new IORedis({ host: redisHost, port: redisPort });
+  // AUTH from /run/secrets/redis_password (B5). Never log the password.
+  let redisPassword: string | undefined;
+  try {
+    redisPassword = readFileSync(
+      process.env.REDIS_PASSWORD_FILE ?? '/run/secrets/redis_password',
+      'utf8',
+    ).trim();
+  } catch {
+    redisPassword = process.env.REDIS_PASSWORD;
+  }
+  const redis = new IORedis({
+    host: redisHost,
+    port: redisPort,
+    ...(redisPassword && { password: redisPassword }),
+  });
   registerShutdown('redis', () => redis.quit().then(() => undefined));
 
   const responsePrivKey = await vault.read<string>('minfi-api', 'response_signing_private_key');
+  // MINFI's request-signing public key — distributed by MINFI's PKI; we
+  // verify each /score request body against the `x-minfi-signature`
+  // header before doing any DB work. Rotated quarterly per F10.
+  const minfiPublicKeyPem = await vault
+    .read<string>('minfi-api', 'minfi_request_public_key')
+    .catch(() => null);
+
+  // mTLS — when MINFI_API_MTLS=1 the listener requires a client cert
+  // signed by the MINFI CA. Files come from /run/secrets (mounted by
+  // the secret-init container at B1).
+  const mtlsEnabled = process.env.MINFI_API_MTLS === '1';
+  const httpsOptions = mtlsEnabled
+    ? {
+        cert: readFileSync(process.env.MINFI_API_TLS_CERT ?? '/run/secrets/minfi_tls_cert'),
+        key: readFileSync(process.env.MINFI_API_TLS_KEY ?? '/run/secrets/minfi_tls_key'),
+        ca: readFileSync(process.env.MINFI_API_TLS_CA ?? '/run/secrets/minfi_tls_ca'),
+        requestCert: true,
+        rejectUnauthorized: true,
+      }
+    : null;
 
   const fastify = Fastify({
     logger: false,
     bodyLimit: 64 * 1024,
     trustProxy: true,
+    ...(httpsOptions && { https: httpsOptions }),
   });
   await fastify.register(helmet);
   await fastify.register(rateLimit, {
@@ -61,6 +97,31 @@ async function main(): Promise<void> {
   fastify.get('/healthz', () => ({ status: 'ok' }));
 
   fastify.post('/score', async (req, reply) => {
+    // Per-request ECDSA P-256 signature over the canonical JSON body
+    // (SRD §26.4). MINFI signs with its private key; we verify with
+    // the public key fetched from Vault at startup. Header format:
+    //   x-minfi-signature: base64(ECDSA-SHA256(canonical_json))
+    if (minfiPublicKeyPem) {
+      const sigB64 = req.headers['x-minfi-signature'];
+      if (typeof sigB64 !== 'string' || sigB64.length === 0) {
+        reply.code(401);
+        return { error: 'missing-signature' };
+      }
+      const rawBody = JSON.stringify(req.body);
+      const verified = createVerify('SHA256')
+        .update(rawBody)
+        .verify(expose(minfiPublicKeyPem), sigB64, 'base64');
+      if (!verified) {
+        reply.code(401);
+        return { error: 'invalid-signature' };
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      // Fail closed in prod — no signature verification path means no
+      // way to authenticate the caller and we MUST not score blindly.
+      reply.code(503);
+      return { error: 'minfi-pubkey-not-provisioned' };
+    }
+
     const parsed = Schemas.zMinfiScoreRequest.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
@@ -74,19 +135,29 @@ async function main(): Promise<void> {
     if (cached) return JSON.parse(cached);
 
     // Compute score from active findings against the recipient's RCCM/NIU.
-    // Fast path: query finding.finding for any escalated finding referencing this RCCM/NIU.
-    const r = await db.execute(sql`
-      SELECT id, posterior, severity
-        FROM finding.finding
-       WHERE state IN ('review','council_review','escalated')
-         AND (
-           ${recipient.rccm ?? null}::text IS NOT NULL
-           OR ${recipient.niu ?? null}::text IS NOT NULL
-         )
-       ORDER BY posterior DESC NULLS LAST
-       LIMIT 20
-    `);
-    const findings = r.rows as Array<{ id: string; posterior: number | null; severity: string }>;
+    // Resolve recipient identity → canonical entity → active findings where
+    // that entity is the primary subject OR appears in related_entity_ids.
+    const rccm = recipient.rccm ?? null;
+    const niu = recipient.niu ?? null;
+    let findings: Array<{ id: string; posterior: number | null; severity: string }> = [];
+    if (rccm !== null || niu !== null) {
+      const r = await db.execute(sql`
+        WITH matched AS (
+          SELECT id FROM entity.canonical
+           WHERE (${rccm}::text IS NOT NULL AND rccm_number = ${rccm})
+              OR (${niu}::text  IS NOT NULL AND niu          = ${niu})
+        )
+        SELECT f.id, f.posterior, f.severity
+          FROM finding.finding f
+          JOIN matched m
+            ON f.primary_entity_id = m.id
+            OR m.id = ANY(f.related_entity_ids)
+         WHERE f.state IN ('review','council_review','escalated')
+         ORDER BY f.posterior DESC NULLS LAST
+         LIMIT 20
+      `);
+      findings = r.rows as Array<{ id: string; posterior: number | null; severity: string }>;
+    }
     const maxPosterior = findings.reduce((acc, f) => Math.max(acc, f.posterior ?? 0), 0);
     const band: Schemas.MinfiScoreBand =
       maxPosterior >= 0.85 ? 'red' : maxPosterior >= 0.55 ? 'orange' : maxPosterior >= 0.30 ? 'amber' : 'green';

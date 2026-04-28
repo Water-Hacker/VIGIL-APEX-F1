@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
@@ -78,10 +79,13 @@ async function main(): Promise<void> {
 
       const fromSeq = lastAnchoredTo + 1;
       const toSeq = tail.seq;
-      // Compute root over the range — for MVP we use the latest body_hash
-      // (the chain itself is hash-linked, so the tail hash IS a Merkle root
-      // of the prefix; verifier walks the chain).
-      const rootHash = tail.bodyHash;
+      // Merkle root over the body_hash leaves in [fromSeq, toSeq].
+      // The audit-chain is itself hash-linked (each row carries the previous
+      // row's body_hash via prev_hash), so a Merkle commitment at the range
+      // tip plus the verifier's chain walk gives O(log n) inclusion proofs
+      // for any single event in the anchored window — matches SRD §17 where
+      // the anchor must be a CRYPTOGRAPHIC root, not just the tail hash.
+      const rootHash = await computeMerkleRootForRange(pool, fromSeq, toSeq);
 
       logger.info({ fromSeq, toSeq, rootHash }, 'anchoring');
       const txHash = await anchor.commit(fromSeq, toSeq, rootHash);
@@ -100,10 +104,39 @@ async function main(): Promise<void> {
   logger.info('worker-anchor-stopping');
 }
 
+/**
+ * Compute the Merkle root of the body_hash values for audit.actions rows in
+ * [fromSeq, toSeq] inclusive. SHA-256 is the leaf and node hash; an odd-sized
+ * layer duplicates its last node (Bitcoin-style) — documented in SRD §17.4.
+ */
+async function computeMerkleRootForRange(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  fromSeq: number,
+  toSeq: number,
+): Promise<string> {
+  const r = await pool.query<{ body_hash: Buffer }>(
+    `SELECT body_hash FROM audit.actions
+      WHERE seq BETWEEN $1 AND $2
+      ORDER BY seq ASC`,
+    [fromSeq, toSeq],
+  );
+  if (r.rows.length === 0) {
+    return createHash('sha256').update('').digest('hex');
+  }
+  let layer: Buffer[] = r.rows.map((row) => row.body_hash);
+  while (layer.length > 1) {
+    const next: Buffer[] = [];
+    for (let i = 0; i < layer.length; i += 2) {
+      const left = layer[i]!;
+      const right = i + 1 < layer.length ? layer[i + 1]! : left;
+      next.push(createHash('sha256').update(Buffer.concat([left, right])).digest());
+    }
+    layer = next;
+  }
+  return layer[0]!.toString('hex');
+}
+
 main().catch((e: unknown) => {
   logger.error({ err: e }, 'fatal-startup');
   process.exit(1);
 });
-
-import { getDb as _getDb, getPool as _getPool } from '@vigil/db-postgres';
-void _getDb; void _getPool;

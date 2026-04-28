@@ -2,6 +2,7 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 
 /**
  * OpenTelemetry tracing — initialised once per process, before any HTTP /
@@ -58,4 +59,50 @@ export async function shutdownTracing(): Promise<void> {
   if (!sdk) return;
   await sdk.shutdown();
   sdk = null;
+}
+
+/**
+ * Get a tracer for a service. Auto-instrumentation gives us spans for
+ * HTTP / pg / ioredis / undici; this is the handle workers use to add
+ * their own business spans (Phase E1).
+ */
+export function getServiceTracer(service: string): Tracer {
+  return trace.getTracer(service);
+}
+
+/**
+ * Run `fn` inside a child span named `name`, attaching the supplied
+ * attributes. Records exceptions and sets the span status correctly.
+ * Pattern matches `withCorrelation` so handlers compose them naturally:
+ *
+ *   await withCorrelation(env.correlation_id, name, () =>
+ *     withSpan(tracer, 'worker.pattern.handle',
+ *       { finding_id, pattern_id }, () => this.handle(env)),
+ *   );
+ */
+export async function withSpan<T>(
+  tracer: Tracer,
+  name: string,
+  attrs: Record<string, string | number | boolean | undefined>,
+  fn: (span: Span) => Promise<T>,
+): Promise<T> {
+  return tracer.startActiveSpan(name, async (span: Span) => {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v !== undefined) span.setAttribute(k, v);
+    }
+    try {
+      const result = await fn(span);
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
+    } catch (err) {
+      span.recordException(err as Error);
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    } finally {
+      span.end();
+    }
+  });
 }

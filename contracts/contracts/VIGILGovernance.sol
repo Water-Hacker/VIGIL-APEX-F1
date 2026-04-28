@@ -145,10 +145,54 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
 
     /* ==================== Proposals + voting =========================== */
 
-    function openProposal(bytes32 findingHash, string calldata uri) external returns (uint256 idx) {
+    /* ----- Commit-reveal anti-front-running (B11 / SRD §22.6) -----
+     * A bot watching the mempool would otherwise be able to copy an open
+     * dossier URI before the proposer's tx confirms — and a hostile
+     * relayer could withhold the original tx in favour of one with a
+     * mutated URI. We therefore require a two-phase open:
+     *
+     *   1. commitProposal(commitment) where
+     *      commitment = keccak256(abi.encode(findingHash, uri, salt, msg.sender))
+     *      Locks the (proposer, commitment) tuple; bots see only the hash.
+     *
+     *   2. After REVEAL_DELAY blocks, openProposal(findingHash, uri, salt)
+     *      checks the commitment matches and, if so, creates the proposal.
+     *      The salt prevents brute-force pre-image attacks on the URI
+     *      space (URIs are otherwise enumerable across IPFS gateways).
+     */
+    uint256 public constant REVEAL_DELAY = 2 minutes;
+    mapping(address => mapping(bytes32 => uint64)) public commitments;
+
+    event ProposalCommitted(address indexed proposer, bytes32 commitment, uint64 commitBlockTimestamp);
+
+    error CommitmentNotFound();
+    error CommitmentTooEarly();
+    error CommitmentMismatch();
+
+    function commitProposal(bytes32 commitment) external {
+        Member storage m = memberByAccount[msg.sender];
+        if (!m.active) revert NotPillarMember();
+        require(commitment != bytes32(0), "Empty commitment");
+        commitments[msg.sender][commitment] = uint64(block.timestamp);
+        emit ProposalCommitted(msg.sender, commitment, uint64(block.timestamp));
+    }
+
+    function openProposal(
+        bytes32 findingHash,
+        string calldata uri,
+        bytes32 salt
+    ) external returns (uint256 idx) {
         Member storage m = memberByAccount[msg.sender];
         if (!m.active) revert NotPillarMember();
         require(findingHash != bytes32(0), "Empty finding");
+
+        bytes32 commitment = keccak256(abi.encode(findingHash, uri, salt, msg.sender));
+        uint64 committedAt = commitments[msg.sender][commitment];
+        if (committedAt == 0) revert CommitmentNotFound();
+        if (block.timestamp < committedAt + REVEAL_DELAY) revert CommitmentTooEarly();
+        // Spend the commitment (replay protection)
+        delete commitments[msg.sender][commitment];
+
         idx = _proposals.length;
         _proposals.push(
             Proposal({

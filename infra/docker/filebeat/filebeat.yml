@@ -1,0 +1,42 @@
+# VIGIL APEX Filebeat — Vault audit log shipper (Phase E7).
+#
+# Tails /vault/logs/audit.log (JSON, one record per line; SRD §17.13)
+# and forwards to Logstash, which inserts into Postgres `audit.vault_log`
+# for cross-correlation with the application hash-chain. Cross-host
+# clustering is not used — single-node Phase 1 deployment.
+
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /vault/logs/audit.log
+    json:
+      keys_under_root: true
+      add_error_key: true
+      message_key: type
+    fields:
+      vigil_source: vault-audit
+      vigil_phase: phase-1
+
+# Light parse — Vault audit records are already JSON. We strip large
+# request/response bodies that don't carry signal (TLS proof) but
+# would balloon the Postgres column.
+processors:
+  - drop_fields:
+      fields: ["request.headers", "response.headers", "agent"]
+      ignore_missing: true
+  - timestamp:
+      field: time
+      layouts:
+        - "2006-01-02T15:04:05.999Z"
+        - "2006-01-02T15:04:05Z"
+      test:
+        - "2026-04-28T13:01:09Z"
+
+output.logstash:
+  hosts: ["vigil-logstash:5044"]
+  ssl.enabled: false
+
+logging:
+  level: info
+  to_stderr: true
