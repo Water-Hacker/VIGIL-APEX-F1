@@ -140,6 +140,10 @@ verify-hashchain: ## Verify Postgres hash chain integrity (continuous-test CT-01
 verify-ledger: ## Verify Polygon anchor matches local audit-chain root (CT-02)
 	pnpm run verify:ledger
 
+.PHONY: verify-cross-witness
+verify-cross-witness: ## Verify Postgres ↔ Fabric witness divergence is zero (CT-03; Phase I1)
+	pnpm --filter audit-verifier exec node dist/cross-witness-cli.js
+
 # --- Cleanup ------------------------------------------------------------------
 .PHONY: clean
 clean: ## Remove build outputs and node_modules

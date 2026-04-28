@@ -1,0 +1,25 @@
+# Fabric MSP crypto material spec — consumed by `cryptogen` at first
+# boot via the fabric-bootstrap.sh script. Multi-org rollout at Phase 2
+# entry adds two PeerOrgs blocks below; nothing else changes.
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: orderer.vigilapex.cm
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+        SANS:
+          - vigil-fabric-orderer
+          - localhost
+
+PeerOrgs:
+  - Name: Org1
+    Domain: org1.vigilapex.cm
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - vigil-fabric-peer0-org1
+        - localhost
+    Users:
+      Count: 1

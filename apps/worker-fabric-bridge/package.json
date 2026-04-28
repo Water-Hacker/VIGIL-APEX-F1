@@ -1,0 +1,33 @@
+{
+  "name": "worker-fabric-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Postgres audit.actions → Fabric audit-witness chaincode replication. Phase G of the country-grade plan.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/fabric-bridge": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/security": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

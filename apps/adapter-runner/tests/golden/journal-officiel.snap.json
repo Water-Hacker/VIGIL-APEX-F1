@@ -1,0 +1,25 @@
+{
+  "events": [
+    {
+      "kind": "gazette_appointment",
+      "payload_keys": ["raw_text", "cells", "href"],
+      "href_pattern": "https://www.spm.gov.cm/jo/2026-04-decret-123.pdf"
+    },
+    {
+      "kind": "gazette_decree",
+      "payload_keys": ["raw_text", "cells", "href"],
+      "href_pattern": "https://www.spm.gov.cm/jo/2026-03-decret-098.pdf"
+    },
+    {
+      "kind": "gazette_appointment",
+      "payload_keys": ["raw_text", "cells", "href"],
+      "href_pattern": "https://www.spm.gov.cm/jo/2026-02-decret-077.pdf"
+    }
+  ],
+  "metadata": {
+    "source_id": "journal-officiel",
+    "captured_at": "2026-04-28",
+    "captured_by": "phase-h6-reference",
+    "notes": "Reference fixture. The 20 remaining non-reference adapters land their HTML + snap pairs incrementally as part of the post-H6 follow-up; the harness asserts existence + JSON validity even when parse shims aren't yet exported."
+  }
+}

@@ -73,3 +73,21 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "worker-image-forensics has processed no documents in 6h"
+
+      # Phase G — Fabric witness divergence. ANY non-zero increase is a
+      # P0 incident — Postgres and Fabric disagree on at least one
+      # audit row's body_hash. Same alert tier as HashChainBreak
+      # because the consequence is identical.
+      - alert: FabricWitnessDivergence
+        expr: increase(vigil_errors_total{service="worker-fabric-bridge", code="AUDIT_HASH_CHAIN_BROKEN"}[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "FATAL: Fabric witness divergence — Postgres ↔ Fabric audit-row mismatch"
+          description: "worker-fabric-bridge reported a divergence; investigate immediately. See docs/incident-response/finding-leak.md (audit forensics) + RESTORE.md."
+
+      - alert: FabricBridgeBacklog
+        expr: vigil_worker_inflight{worker="worker-fabric-bridge"} > 50
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "worker-fabric-bridge backlog growing; Fabric peer may be slow or unhealthy"

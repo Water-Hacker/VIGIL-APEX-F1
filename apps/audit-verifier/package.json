@@ -17,6 +17,7 @@
   "dependencies": {
     "@vigil/audit-chain": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
+    "@vigil/fabric-bridge": "workspace:*",
     "@vigil/observability": "workspace:*",
     "ethers": "^6.13.2"
   },

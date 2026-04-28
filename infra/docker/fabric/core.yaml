@@ -1,0 +1,60 @@
+# Minimal peer core.yaml override. Most defaults are kept; we only
+# pin the parts that affect determinism, observability, and the
+# audit-witness chaincode lifecycle.
+peer:
+  id: vigil-fabric-peer0-org1
+  networkId: vigil-audit
+  listenAddress: 0.0.0.0:7051
+  chaincodeListenAddress: 0.0.0.0:7052
+  chaincodeAddress: vigil-fabric-peer0-org1:7052
+  address: vigil-fabric-peer0-org1:7051
+  addressAutoDetect: false
+  gossip:
+    bootstrap: vigil-fabric-peer0-org1:7051
+    useLeaderElection: true
+    orgLeader: false
+    membershipTrackerInterval: 5s
+    pvtData:
+      pullRetryThreshold: 60s
+  tls:
+    enabled: true
+    clientAuthRequired: false
+    cert:
+      file: /var/hyperledger/fabric/tls/server.crt
+    key:
+      file: /var/hyperledger/fabric/tls/server.key
+    rootcert:
+      file: /var/hyperledger/fabric/tls/ca.crt
+  fileSystemPath: /var/hyperledger/production
+  BCCSP:
+    Default: SW
+    SW:
+      Hash: SHA2
+      Security: 256
+      FileKeyStore:
+        KeyStore:
+  mspConfigPath: /var/hyperledger/fabric/msp
+  localMspId: Org1MSP
+  metrics:
+    provider: prometheus
+  operations:
+    listenAddress: 0.0.0.0:9443
+  chaincode:
+    builder: $(DOCKER_NS)/fabric-ccenv:$(TWO_DIGIT_VERSION)
+    pull: false
+    runtime: $(DOCKER_NS)/fabric-baseos:$(TWO_DIGIT_VERSION)
+    executeTimeout: 30s
+    installTimeout: 300s
+    startuptimeout: 300s
+    logging:
+      level: info
+      format: '%{color}%{time:2006-01-02 15:04:05.000 MST} [%{module}] %{shortfunc} -> %{level:.4s}%{id:03x}%{color:reset} %{message}'
+ledger:
+  state:
+    stateDatabase: goleveldb
+operations:
+  listenAddress: 0.0.0.0:9443
+  tls:
+    enabled: false
+metrics:
+  provider: prometheus

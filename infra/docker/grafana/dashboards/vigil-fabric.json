@@ -1,0 +1,88 @@
+{
+  "title": "VIGIL — Hyperledger Fabric witness",
+  "uid": "vigil-fabric",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["vigil", "fabric", "audit"],
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Bridge inflight",
+      "targets": [{ "expr": "vigil_worker_inflight{worker=\"worker-fabric-bridge\"}" }],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Commitments / minute",
+      "targets": [{ "expr": "sum(rate(vigil_events_emitted_total{worker=\"worker-fabric-bridge\"}[5m])) * 60" }],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Divergences (24h)",
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+      "targets": [{ "expr": "sum(increase(vigil_errors_total{service=\"worker-fabric-bridge\", code=\"AUDIT_HASH_CHAIN_BROKEN\"}[24h]))" }],
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Peer block height",
+      "targets": [{ "expr": "max(ledger_blockchain_height{job=\"vigil-fabric-peer\"})" }],
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bridge processing duration (p50/p95/p99)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(vigil_processing_duration_seconds_bucket{worker=\"worker-fabric-bridge\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vigil_processing_duration_seconds_bucket{worker=\"worker-fabric-bridge\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vigil_processing_duration_seconds_bucket{worker=\"worker-fabric-bridge\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Postgres ↔ Fabric divergence (cumulative)",
+      "targets": [
+        {
+          "expr": "sum(vigil_errors_total{service=\"worker-fabric-bridge\", code=\"AUDIT_HASH_CHAIN_BROKEN\"})",
+          "legendFormat": "divergences"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Orderer block production rate",
+      "targets": [
+        {
+          "expr": "rate(consensus_etcdraft_committed_block_number{job=\"vigil-fabric-orderer\"}[5m])",
+          "legendFormat": "blocks/s"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Chaincode endorsement latency (p99)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (chaincode, le) (rate(endorser_proposal_duration_bucket{job=\"vigil-fabric-peer\"}[5m])))",
+          "legendFormat": "{{chaincode}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 }
+    }
+  ]
+}

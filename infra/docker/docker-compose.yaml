@@ -71,6 +71,15 @@ secrets:
     file: /run/vigil/secrets/alertmanager_slack_webhook
   ipfs_cluster_secret:
     file: /run/vigil/secrets/ipfs_cluster_secret
+  # Phase G5 — Fabric MSP material for worker-fabric-bridge / verifier
+  fabric_tls_root:
+    file: /run/vigil/secrets/fabric_tls_root
+  fabric_client_cert:
+    file: /run/vigil/secrets/fabric_client_cert
+  fabric_client_key:
+    file: /run/vigil/secrets/fabric_client_key
+  vault_token_fabric:
+    file: /run/vigil/secrets/vault_token_fabric
 
 # ============================================================================
 # YAML anchors — common env + restart policy
@@ -644,6 +653,45 @@ services:
       WORKER_NAME: worker-governance
       OTEL_SERVICE_NAME: worker-governance
 
+  # Phase G — Fabric witness bridge. Consumes vigil:audit:publish and
+  # writes commitments into the audit-witness chaincode. Audited via
+  # `audit-verifier --cross-witness` (Phase I1).
+  worker-fabric-bridge:
+    <<: *worker-base
+    build:
+      context: ../..
+      dockerfile: infra/docker/dockerfiles/Worker.Dockerfile
+      args: { WORKER_NAME: worker-fabric-bridge }
+    image: vigil-apex/worker-fabric-bridge:0.1.0
+    container_name: worker-fabric-bridge
+    hostname: worker-fabric-bridge
+    networks: { vigil-internal: { ipv4_address: 172.20.0.26 } }
+    depends_on:
+      vigil-postgres:               { condition: service_healthy }
+      vigil-redis:                  { condition: service_healthy }
+      vigil-fabric-peer0-org1:      { condition: service_healthy }
+      vigil-secret-init:            { condition: service_completed_successfully }
+    secrets:
+      - pg_password
+      - redis_password
+      - vault_token_fabric
+      - fabric_tls_root
+      - fabric_client_cert
+      - fabric_client_key
+    environment:
+      <<: *worker-env
+      WORKER_NAME: worker-fabric-bridge
+      OTEL_SERVICE_NAME: worker-fabric-bridge
+      VAULT_TOKEN_FILE: /run/secrets/vault_token_fabric
+      FABRIC_MSP_ID: Org1MSP
+      FABRIC_PEER_ENDPOINT: vigil-fabric-peer0-org1:7051
+      FABRIC_PEER_HOST_ALIAS: vigil-fabric-peer0-org1
+      FABRIC_CHANNEL: vigil-audit
+      FABRIC_CHAINCODE: audit-witness
+      FABRIC_TLS_ROOT: /run/secrets/fabric_tls_root
+      FABRIC_CLIENT_CERT: /run/secrets/fabric_client_cert
+      FABRIC_CLIENT_KEY: /run/secrets/fabric_client_key
+
   # ==========================================================================
   # Python workers (Ring 1.5 — satellite + image forensics)
   # ==========================================================================
@@ -820,6 +868,170 @@ services:
     deploy:
       resources:
         limits: { memory: 256m, cpus: "0.25" }
+    security_opt: [ "no-new-privileges:true" ]
+
+  # ==========================================================================
+  # Hyperledger Fabric scaffold (Phase G)
+  # ==========================================================================
+  # Single-org / single-peer Phase-2-prep topology. CONAC + Cour des
+  # Comptes peers join at Phase 2 entry by extending crypto-config and
+  # configtx and joining the existing `vigil-audit` channel — the
+  # chaincode `audit-witness` (chaincode/audit-witness) is unchanged.
+  #
+  # vigil-fabric-bootstrap is a one-shot init container that runs
+  # cryptogen + configtxgen on first boot to generate MSP material into
+  # /srv/vigil/fabric/msp; subsequent boots skip when the artifacts are
+  # already present (idempotent like vigil-secret-init).
+  vigil-fabric-bootstrap:
+    image: hyperledger/fabric-tools:2.5.10
+    container_name: vigil-fabric-bootstrap
+    hostname: vigil-fabric-bootstrap
+    networks: { vigil-internal: { ipv4_address: 172.20.0.40 } }
+    volumes:
+      - /srv/vigil/fabric:/var/hyperledger/fabric
+      - ./fabric/configtx.yaml:/etc/hyperledger/fabric/configtx.yaml:ro
+      - ./fabric/crypto-config.yaml:/etc/hyperledger/fabric/crypto-config.yaml:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -f /var/hyperledger/fabric/.bootstrap.done ]; then
+          echo "[ok] fabric crypto + genesis already generated"
+          exit 0
+        fi
+        cryptogen generate \
+          --config=/etc/hyperledger/fabric/crypto-config.yaml \
+          --output=/var/hyperledger/fabric/msp
+        configtxgen \
+          -profile VigilAuditGenesis \
+          -channelID system-channel \
+          -outputBlock /var/hyperledger/fabric/genesis.block \
+          -configPath /etc/hyperledger/fabric
+        configtxgen \
+          -profile VigilAuditChannel \
+          -channelID vigil-audit \
+          -outputCreateChannelTx /var/hyperledger/fabric/vigil-audit.tx \
+          -configPath /etc/hyperledger/fabric
+        touch /var/hyperledger/fabric/.bootstrap.done
+        echo "[ok] fabric crypto + genesis generated"
+    restart: "no"
+    security_opt: [ "no-new-privileges:true" ]
+
+  vigil-fabric-orderer:
+    image: hyperledger/fabric-orderer:2.5.10
+    container_name: vigil-fabric-orderer
+    hostname: vigil-fabric-orderer
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.41 } }
+    depends_on:
+      vigil-fabric-bootstrap: { condition: service_completed_successfully }
+    volumes:
+      - /srv/vigil/fabric/msp/ordererOrganizations/orderer.vigilapex.cm/orderers/orderer.orderer.vigilapex.cm/msp:/var/hyperledger/orderer/msp
+      - /srv/vigil/fabric/msp/ordererOrganizations/orderer.vigilapex.cm/orderers/orderer.orderer.vigilapex.cm/tls:/var/hyperledger/orderer/tls
+      - /srv/vigil/fabric/genesis.block:/var/hyperledger/orderer/orderer.genesis.block:ro
+      - /srv/vigil/fabric/orderer:/var/hyperledger/production/orderer
+    environment:
+      <<: *common-env
+      FABRIC_LOGGING_SPEC: INFO
+      ORDERER_GENERAL_LISTENADDRESS: 0.0.0.0
+      ORDERER_GENERAL_LISTENPORT: "7050"
+      ORDERER_GENERAL_BOOTSTRAPMETHOD: file
+      ORDERER_GENERAL_BOOTSTRAPFILE: /var/hyperledger/orderer/orderer.genesis.block
+      ORDERER_GENERAL_LOCALMSPID: OrdererMSP
+      ORDERER_GENERAL_LOCALMSPDIR: /var/hyperledger/orderer/msp
+      ORDERER_GENERAL_TLS_ENABLED: "true"
+      ORDERER_GENERAL_TLS_PRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+      ORDERER_GENERAL_TLS_CERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+      ORDERER_GENERAL_TLS_ROOTCAS: '[/var/hyperledger/orderer/tls/ca.crt]'
+      ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+      ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+      ORDERER_GENERAL_CLUSTER_ROOTCAS: '[/var/hyperledger/orderer/tls/ca.crt]'
+      ORDERER_OPERATIONS_LISTENADDRESS: 0.0.0.0:9443
+      ORDERER_METRICS_PROVIDER: prometheus
+    command: ["orderer"]
+    deploy:
+      resources:
+        limits: { memory: 1g, cpus: "0.5" }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9443/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt: [ "no-new-privileges:true" ]
+
+  vigil-fabric-peer0-org1:
+    image: hyperledger/fabric-peer:2.5.10
+    container_name: vigil-fabric-peer0-org1
+    hostname: vigil-fabric-peer0-org1
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.42 } }
+    depends_on:
+      vigil-fabric-orderer: { condition: service_healthy }
+    volumes:
+      - /srv/vigil/fabric/msp/peerOrganizations/org1.vigilapex.cm/peers/peer0.org1.vigilapex.cm/msp:/var/hyperledger/fabric/msp
+      - /srv/vigil/fabric/msp/peerOrganizations/org1.vigilapex.cm/peers/peer0.org1.vigilapex.cm/tls:/var/hyperledger/fabric/tls
+      - /srv/vigil/fabric/peer0:/var/hyperledger/production
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      - ./fabric/core.yaml:/etc/hyperledger/fabric/core.yaml:ro
+    environment:
+      <<: *common-env
+      FABRIC_LOGGING_SPEC: INFO
+      CORE_VM_ENDPOINT: unix:///host/var/run/docker.sock
+      CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE: vigil-apex_vigil-internal
+      CORE_PEER_ID: vigil-fabric-peer0-org1
+      CORE_PEER_ADDRESS: vigil-fabric-peer0-org1:7051
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:7051
+      CORE_PEER_CHAINCODEADDRESS: vigil-fabric-peer0-org1:7052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7052
+      CORE_PEER_GOSSIP_BOOTSTRAP: vigil-fabric-peer0-org1:7051
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: vigil-fabric-peer0-org1:7051
+      CORE_PEER_LOCALMSPID: Org1MSP
+      CORE_PEER_MSPCONFIGPATH: /var/hyperledger/fabric/msp
+      CORE_PEER_TLS_ENABLED: "true"
+      CORE_PEER_TLS_CERT_FILE: /var/hyperledger/fabric/tls/server.crt
+      CORE_PEER_TLS_KEY_FILE: /var/hyperledger/fabric/tls/server.key
+      CORE_PEER_TLS_ROOTCERT_FILE: /var/hyperledger/fabric/tls/ca.crt
+      CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:9443
+      CORE_METRICS_PROVIDER: prometheus
+    command: ["peer", "node", "start"]
+    deploy:
+      resources:
+        limits: { memory: 2g, cpus: "1.0" }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9443/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    security_opt: [ "no-new-privileges:true" ]
+
+  vigil-fabric-ca-org1:
+    image: hyperledger/fabric-ca:1.5.13
+    container_name: vigil-fabric-ca-org1
+    hostname: vigil-fabric-ca-org1
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.43 } }
+    depends_on:
+      vigil-fabric-bootstrap: { condition: service_completed_successfully }
+    volumes:
+      - /srv/vigil/fabric/ca-org1:/etc/hyperledger/fabric-ca-server
+    environment:
+      <<: *common-env
+      FABRIC_CA_HOME: /etc/hyperledger/fabric-ca-server
+      FABRIC_CA_SERVER_CA_NAME: ca-org1
+      FABRIC_CA_SERVER_TLS_ENABLED: "true"
+      FABRIC_CA_SERVER_PORT: "7054"
+    command: ["fabric-ca-server", "start", "-b", "admin:adminpw"]
+    deploy:
+      resources:
+        limits: { memory: 512m, cpus: "0.25" }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://localhost:7054/cainfo || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     security_opt: [ "no-new-privileges:true" ]
 
   vigil-prometheus:

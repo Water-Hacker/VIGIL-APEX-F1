@@ -1,0 +1,143 @@
+# Fabric channel configuration for VIGIL APEX (Phase G).
+#
+# Single-org / single-peer Phase-2-prep topology — when CONAC and Cour
+# des Comptes peers are added at Phase 2 entry, this file gains two
+# Organizations stanzas and an OrdererEndpoints update; chaincode and
+# channel structure stay untouched.
+#
+# Channel name: `vigil-audit`. The chaincode `audit-witness` lives on
+# this channel and only this channel. No other channels are defined.
+
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: /var/hyperledger/fabric/msp/orderer
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+    OrdererEndpoints:
+      - vigil-fabric-orderer:7050
+
+  - &Org1
+    Name: Org1MSP
+    ID: Org1MSP
+    MSPDir: /var/hyperledger/fabric/msp/org1
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Org1MSP.admin', 'Org1MSP.peer', 'Org1MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Org1MSP.admin', 'Org1MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Org1MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Org1MSP.peer')"
+    AnchorPeers:
+      - Host: vigil-fabric-peer0-org1
+        Port: 7051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  EtcdRaft:
+    Consenters:
+      - Host: vigil-fabric-orderer
+        Port: 7050
+        ClientTLSCert: /var/hyperledger/fabric/tls/orderer/server.crt
+        ServerTLSCert: /var/hyperledger/fabric/tls/orderer/server.crt
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  VigilAuditGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
+    Consortiums:
+      VigilConsortium:
+        Organizations:
+          - *Org1
+
+  VigilAuditChannel:
+    Consortium: VigilConsortium
+    <<: *ChannelDefaults
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *Org1
+      Capabilities:
+        <<: *ApplicationCapabilities

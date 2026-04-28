@@ -39,16 +39,32 @@ What does NOT ship in Phase 1:
 
 ## Phase 2 — Production Hardening + MOU-Gated Escalation (months 7-12)
 
+**Status (2026-04-28):** technical scaffolding complete (Phases G/H/I
+of the Phase-2 Tech Scaffold plan, signed off in
+`docs/decisions/log.md`). Institutional preconditions remain open.
+
 Unlocks:
 
-- Hyperledger Fabric multi-org (CONAC + Cour des Comptes + VIGIL APEX SAS minimum 3 peers, BFT signalling).
-- MINFI / BEAC / ANIF MOU-gated direct API ingestion (replaces SFTP scraping).
+- ~~Hyperledger Fabric multi-org~~ → **scaffolded as single-peer
+  Org1**. CONAC + Cour des Comptes peers join at Phase-2 entry by
+  extending `infra/docker/fabric/{configtx,crypto-config}.yaml`.
+  Chaincode `audit-witness` + bridge worker + cross-witness verifier
+  shipped. (Phase G of the Tech Scaffold plan.)
+- ~~Adapter self-healing worker (W-19) in continuous CI mode~~ →
+  **shipped**. `apps/worker-adapter-repair` runs daily LLM-driven
+  selector re-derivation + 48 h shadow tests + auto-promotion for
+  informational adapters; operator approval UI for critical
+  adapters. (Phase H1–H3.)
+- MINFI / BEAC / ANIF MOU-gated direct API ingestion (replaces SFTP
+  scraping). **Still gated on MOUs.**
 - Full external pentest + ISO 27001 formal certification.
+  **Institutional + commercial work.**
 - Phase 2 Retention Incentive payable on M4 acceptance ($50K to SAS).
 - Continuous calibration with > 200 ground-truth-labelled cases.
-- Adapter self-healing worker (W-19 fix) in continuous CI mode.
+  **Pattern test framework + coverage gate landed (Phase H4–H6); the
+  200-case ground-truth set accumulates as the platform runs.**
 
-Required institutional pre-conditions:
+Required institutional pre-conditions (unchanged):
 - CONAC engagement letter countersigned for Phase 2 scope.
 - MINFI MOU in negotiation with Phase 2 budget allocated.
 - ANTIC declaration accepted (W-23).

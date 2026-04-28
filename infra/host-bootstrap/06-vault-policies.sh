@@ -66,5 +66,8 @@ mint_token() {
 mint_token worker
 mint_token dashboard
 mint_token minfi-api
+# Phase G5 — Fabric bridge token. Reads MSP material under
+# secret/vigil/fabric/* via the `fabric` policy.
+mint_token fabric
 
 echo "[ok] policies applied and tokens minted ($(ls -1 "${SECRET_ROOT}"/vault_token_* | wc -l))"

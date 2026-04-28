@@ -38,8 +38,31 @@ Last updated: **2026-04-28** by Junior Thuram Nana, Sovereign Architect.
 | Sentinel monitors | 3 VPS (Helsinki, Tokyo, NYC), 2-of-3 quorum for outage attestation | MVP §05.1 | committed |
 | Container fabric | Docker Compose v2 on host; 16 containers (8 host + 8 workers/observability); 1 on Hetzner | SRD §03; SRD §04 | committed |
 | Inter-host VPN | WireGuard mesh (host ↔ Hetzner ↔ NAS-replica) | SRD §02.4; MVP §03 | committed |
-| Permissioned ledger | **Deferred to Phase 2** (Postgres `audit.actions` hash chain in MVP) | TRUTH (resolves W-11) | proposed |
+| Permissioned ledger | **Phase-2 scaffolded** — Postgres `audit.actions` hash chain remains source of truth in MVP; Hyperledger Fabric 2.5 single-peer witness is in tree under `chaincode/audit-witness/` and `apps/worker-fabric-bridge` (Phase-G of the Phase-2 Tech Scaffold). CONAC + Cour des Comptes peers join at Phase-2 entry by extending `crypto-config.yaml` — no rewrite. See Section B.2. | TRUTH (resolves W-11) | scaffolded |
 | Public ledger / anchor | Polygon mainnet via Alchemy RPC | SRD §22 | committed |
+
+### Section B.2 — Audit witness state (Phase-2 scaffold note)
+
+Three independent witnesses now record every audit row:
+
+1. **Postgres `audit.actions`** — application source of truth, hash-linked
+   per row. CT-01 walks it hourly via `audit-verifier`.
+2. **Polygon mainnet anchors** — Merkle root over a seq range,
+   committed by `worker-anchor` every hour. CT-02 reads the latest
+   commitment back and matches it to the local chain.
+3. **Hyperledger Fabric `audit-witness` chaincode** — commitment-only
+   record `(seq, bodyHash, recordedAt)`. Postgres → Fabric replication
+   runs through `worker-fabric-bridge`; CT-03 (`make
+   verify-cross-witness`) compares Postgres ↔ Fabric and reports
+   divergence. Single-peer Org1 today; multi-org rollout (CONAC, Cour
+   des Comptes) happens at Phase-2 entry by adding peer/org stanzas.
+   `audit-witness` does not store the audit-row payload — only the
+   commitment — so multi-org peers can endorse without read access to
+   operator-only finding text.
+
+The architect commitment that **Postgres remains the source of truth**
+is unchanged. Fabric is a parallel cryptographic witness, not a
+replacement.
 
 ## Section C — Data, Patterns, Intelligence
 

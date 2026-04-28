@@ -7,6 +7,7 @@ import {
   UnixSocketSignerAdapter,
 } from '@vigil/audit-chain';
 import { getPool } from '@vigil/db-postgres';
+import { FabricBridge } from '@vigil/fabric-bridge';
 import {
   createLogger,
   installShutdownHandler,
@@ -15,6 +16,8 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
+
+import { verifyCrossWitness } from './cross-witness.js';
 
 const logger = createLogger({ service: 'audit-verifier' });
 
@@ -51,6 +54,32 @@ async function main(): Promise<void> {
   });
   logger.info({ intervalMs }, 'audit-verifier-ready');
 
+  // Phase I1 — cross-witness Fabric bridge. Optional: when
+  // FABRIC_PEER_ENDPOINT is unset (local dev or pre-G boot), the
+  // CT-03 check is skipped without failing the loop.
+  const fabricEnabled = Boolean(process.env.FABRIC_PEER_ENDPOINT);
+  let bridge: FabricBridge | null = null;
+  if (fabricEnabled) {
+    bridge = new FabricBridge(
+      {
+        mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
+        peerEndpoint: process.env.FABRIC_PEER_ENDPOINT!,
+        ...(process.env.FABRIC_PEER_HOST_ALIAS && {
+          peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS,
+        }),
+        channelName: process.env.FABRIC_CHANNEL ?? 'vigil-audit',
+        chaincodeName: process.env.FABRIC_CHAINCODE ?? 'audit-witness',
+        tlsRootCertPath: process.env.FABRIC_TLS_ROOT ?? '/run/secrets/fabric_tls_root',
+        clientCertPath: process.env.FABRIC_CLIENT_CERT ?? '/run/secrets/fabric_client_cert',
+        clientPrivateKeyPath:
+          process.env.FABRIC_CLIENT_KEY ?? '/run/secrets/fabric_client_key',
+      },
+      logger,
+    );
+    await bridge.connect();
+    registerShutdown('fabric-bridge', () => bridge!.close());
+  }
+
   while (!stopping) {
     try {
       // CT-01: full chain walk (cheap; serial scan)
@@ -58,6 +87,33 @@ async function main(): Promise<void> {
       if (tail) {
         const verified = await chain.verify(1, tail.seq);
         logger.info({ verified, tail_seq: tail.seq }, 'ct-01-hash-chain-verified');
+
+        // CT-03: cross-witness Fabric ↔ Postgres. Walks the same
+        // [1, tail.seq] range that CT-01 just confirmed clean and
+        // matches each row against the audit-witness chaincode.
+        if (bridge && tail.seq > 0) {
+          try {
+            const report = await verifyCrossWitness(
+              pool,
+              bridge,
+              { from: 1n, to: BigInt(tail.seq) },
+              logger,
+            );
+            if (report.divergentSeqs.length > 0) {
+              logger.error(
+                { divergent: report.divergentSeqs },
+                'ct-03-cross-witness-divergence',
+              );
+            } else {
+              logger.info(
+                { checked: report.checked, missing: report.missingFromFabric.length },
+                'ct-03-cross-witness-clean',
+              );
+            }
+          } catch (e) {
+            logger.error({ err: e }, 'ct-03-cross-witness-error');
+          }
+        }
       }
       // CT-02: latest on-chain commitment vs local
       try {

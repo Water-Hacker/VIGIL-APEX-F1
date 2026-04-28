@@ -68,6 +68,12 @@ materialise secret/vigil/sentinelhub             client_sec  "${SECRET_ROOT}/sen
 materialise secret/vigil/turnstile               secret_key  "${SECRET_ROOT}/turnstile_secret_key"
 materialise secret/vigil/conac-sftp              private_key "${SECRET_ROOT}/conac_sftp_privkey"
 
+# Phase G5 — Hyperledger Fabric MSP material. Org1 only at Phase-2-prep;
+# CONAC + Cour des Comptes paths added at Phase-2-entry enrolment.
+materialise secret/vigil/fabric/org1/tls_root    pem  "${SECRET_ROOT}/fabric_tls_root"
+materialise secret/vigil/fabric/org1/client_cert pem  "${SECRET_ROOT}/fabric_client_cert"
+materialise secret/vigil/fabric/org1/client_key  pem  "${SECRET_ROOT}/fabric_client_key"
+
 # Per-worker Vault tokens — one short-lived AppRole-derived token each.
 # `vault token create` is invoked separately by 06-vault-policies.sh; this
 # script consumes the result.

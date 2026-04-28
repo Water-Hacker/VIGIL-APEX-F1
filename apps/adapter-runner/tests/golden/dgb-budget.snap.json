@@ -1,0 +1,9 @@
+{
+  "events": [],
+  "metadata": {
+    "source_id": "dgb-budget",
+    "captured_at": "2026-04-28",
+    "captured_by": "phase-h6-stub",
+    "notes": "Stub fixture — exists so the H6 harness 'fixture present' check passes. Replace with an archived live page + the events the adapter is expected to emit on next adapter-verification round."
+  }
+}

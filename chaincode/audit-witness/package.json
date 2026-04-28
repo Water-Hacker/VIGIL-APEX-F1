@@ -1,0 +1,27 @@
+{
+  "name": "@vigil/chaincode-audit-witness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VIGIL APEX audit-witness chaincode — second cryptographic witness over the Postgres hash chain.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "fabric-chaincode-node start",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "fabric-contract-api": "^2.5.4",
+    "fabric-shim": "^2.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

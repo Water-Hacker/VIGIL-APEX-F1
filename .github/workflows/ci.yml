@@ -114,6 +114,13 @@ jobs:
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
           REDIS_URL: redis://localhost:6379
+      # Phase H5 — pattern coverage hard gate. Fails the job if the
+      # @vigil/patterns suite drops under 80% lines/functions/statements
+      # or 75% branches. The vitest config exits non-zero on threshold
+      # breach; the run above already covers it, but we keep this
+      # step explicit so the CI log clearly shows which package gated.
+      - name: pattern coverage hard gate (≥80%)
+        run: pnpm --filter @vigil/patterns test
       - uses: actions/upload-artifact@v4
         with:
           name: coverage
