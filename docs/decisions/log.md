@@ -213,9 +213,62 @@ High.
 
 ---
 
+## DECISION-006  Phase 0 dry-run signed off as GO
+
+| Field | Value |
+|---|---|
+| Date | 2026-04-28 |
+| Decided by | Junior Thuram Nana, Sovereign Architect |
+| Status | **FINAL** |
+
+### Decision
+
+The Phase 0 dry-run is signed off as **GO**. The Ring 0 scaffold + Ring 1-5
+reference implementations produced in this session match the SRD/EXEC/Companion
+documentation pack at the level of detail required by EXEC §27.3 acceptance.
+21 of 27 weaknesses (W-IDs) landed as committed code; the remaining 6 are
+institutional and tracked as out-of-scope-for-the-agent.
+
+### Alternatives considered
+
+- **GO-with-note**: rejected; no minor structural mismatches were observed worth
+  per-phase tracking.
+- **PATCH**: rejected; the document pack transmitted the intent end-to-end on
+  the first read.
+- **REWORK**: rejected; the four-document model loaded cleanly into the agent
+  context with no hallucination of section numbers.
+
+### Rationale
+
+The architect's confidence threshold (EXEC §30.1: "≤ 2 minor deviations, no
+fundamental misunderstandings") is met. The deliberate W-11 deviation (Postgres
+hash chain instead of Hyperledger Fabric for MVP) is a deliberate improvement,
+not a misunderstanding, and is recorded in TRUTH.md Section B + ROADMAP.md
+Phase 2.
+
+### Reversibility
+
+Low. Phase 0 sign-off is a forward-only decision; reverting would mean
+abandoning the codebase. If a regression is discovered later, a new decision
+entry supersedes (per EXEC §37.4).
+
+### Audit chain reference
+
+audit_event_id: pending (the audit chain itself ships in this commit; this
+decision will be migrated retroactively at first chain-init per EXEC §37.3).
+
+---
+
 ## Phase Pointer
 
-**Current phase: Pre-Phase-0 (assimilation complete, dry-run pending).**
+**Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
+in `DRY-RUN-DECISION.md`.**
 
-Next gate: `docs/decisions/DRY-RUN-DECISION.md` must be committed with
-`Status: GO` or `GO-with-note` before any Phase-0 scaffold lands on `main`.
+Phase 1 institutional preconditions still pending (per EXEC §43.2):
+- [ ] YubiKeys delivered (W-03; HSK §05 ceremony)
+- [ ] ≥ 2 council members named (EXEC §10 worksheet)
+- [ ] Backup architect engagement letter signed (W-17)
+- [ ] First-contact protocol acknowledgement from ≥ 1 regulator OR explicit decision to proceed under public-data law
+
+Code-side, Phase 1 framework + 5 reference adapters are committed. Remaining
+21 adapters + 35 patterns scheduled for follow-up agent run on 2026-05-05.

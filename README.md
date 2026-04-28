@@ -18,15 +18,14 @@ Operates on **public data only**. Sovereignty by design.
 | Phase | Status |
 |---|---|
 | **Assimilation** | ✅ Complete |
+| **Phase 0 dry-run (per EXEC §26)** | ✅ **GO** — signed in [`docs/decisions/DRY-RUN-DECISION.md`](docs/decisions/DRY-RUN-DECISION.md) |
 | **Ring 0 — Infrastructure scaffold** | ✅ Complete (12 packages, contracts, compose, host bootstrap, 26 sources registered) |
-| **Ring 1 — Ingestion framework** | ✅ Adapter-runner + 5 reference adapters + document pipeline |
-| **Ring 2 — AI brain** | ✅ Pattern engine + 8 reference patterns + 4 workers (entity/pattern/score/counter-evidence) |
+| **Ring 1 — Ingestion** | ✅ Adapter-runner + **all 26 adapters** + document pipeline |
+| **Ring 2 — AI brain** | ✅ Pattern engine + **all 43 patterns / 8 categories** + 4 workers (entity / pattern / score / counter-evidence) |
 | **Ring 3 — Intelligence products** | ✅ Next.js dashboard skeleton + tip portal + dossier renderer |
 | **Ring 4 — Enforcement** | ✅ CONAC SFTP + MINFI scoring API + Polygon anchor |
 | **Ring 5 — Governance shield** | ✅ Governance event watcher + audit-verifier (CT-01/CT-02) |
-| Phase 0 dry-run (per EXEC §26) | ⏳ Pending architect sign-off |
-| Remaining 21 adapters | ⏳ Follow-up agent run |
-| Remaining 35 patterns | ⏳ Follow-up agent run |
+| **Phase 1 institutional preconditions** | ⏳ YubiKey procurement · council formation · ANTIC declaration · backup-architect letter — architect external action |
 
 ---
 

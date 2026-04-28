@@ -1,17 +1,32 @@
 # VIGIL APEX — Completion Manifest
 
-**Date**: 2026-04-28
+**Date**: 2026-04-28 (revised after Phase 0 GO + adapter/pattern fill-in)
 **Architect**: Junior Thuram Nana
-**Phase**: Pre-Phase-0 (assimilation + scaffolding complete; awaiting dry-run sign-off)
+**Phase**: **Phase 1 (data plane).** Phase 0 closed with **GO** sign-off; institutional preconditions still pending for live ingestion.
 
 ## Repo statistics
 
-- **310 files**
-- **TypeScript**: ~11,300 lines
+- **370 files**
+- **TypeScript**: ~14,700 lines
 - **TSX (Next.js)**: ~300 lines
 - **Solidity**: ~360 lines
-- **Markdown**: ~9,800 lines
+- **Markdown**: ~10,050 lines
 - **Shell**: ~330 lines
+
+## Completeness vs SRD targets
+
+| Component | Target | Current | Status |
+|---|---|---|---|
+| Adapters | 26 | **26** | ✅ |
+| Patterns | 43 across 8 categories | **43 / 8** | ✅ |
+| Foundation packages | 12 | 12 | ✅ |
+| Worker apps | 11 | 11 | ✅ |
+| Smart contracts | 2 | 2 | ✅ |
+| Compose services | 16 | 16 | ✅ |
+| Anti-hallucination guard layers | 12 | 12 | ✅ |
+| Source registry entries | 26 | 26 | ✅ |
+| Synthetic-hallucination corpus rows | ≥ 7 | 7 | ✅ |
+| Pattern test fixtures | ≥ 2 per pattern | scheduled (follow-up) | ⏳ |
 
 ## Apps (14)
 
@@ -124,12 +139,12 @@
 
 Institutional W's (W-08, W-17, W-23, W-24) are blocked on the architect's external action.
 
-## What remains (follow-up agent)
+## What remains (follow-up agent run on 2026-05-05)
 
-- 21 additional adapters (template + selectors per BUILD-V2 §41-44)
-- 35 additional patterns (template per BUILD-V2 §45-52)
-- Per-pattern unit-test fixtures
-- Council vote ceremony page (WebAuthn + native helper bundle)
+- ~~21 additional adapters~~ ✅ done in this commit (all 26 adapters now present)
+- ~~35 additional patterns~~ ✅ done in this commit (all 43 patterns now present)
+- Per-pattern unit-test fixtures (≥ 2 per pattern; ~86 fixtures total)
+- Council vote ceremony page (WebAuthn + native helper bundle, W-10)
 - Operator dossier-detail / finding-detail pages
 - Tip-triage UI with quorum-decryption flow
 - Calibration page + ECE charts
@@ -138,6 +153,8 @@ Institutional W's (W-08, W-17, W-23, W-24) are blocked on the architect's extern
 - Watchdog binary at `/usr/local/bin/vigil-watchdog`
 - Polygon signer binary at `/usr/local/bin/vigil-polygon-signer`
 - Vault unseal binary at `/usr/local/bin/vigil-vault-unseal`
+- `pnpm-lock.yaml` (run `pnpm install --no-frozen-lockfile` once)
+- `make gates` end-to-end pass
 
 ## Bring-up sequence (after architect institutional work + dry-run GO)
 

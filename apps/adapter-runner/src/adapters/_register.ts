@@ -1,31 +1,56 @@
 /**
- * Adapter registration barrel.
+ * Adapter registration barrel — all 26 adapters.
  *
- * Each adapter file has a side-effect call to `registerAdapter(...)`. Importing
- * them here causes registration on module load. New adapters: add an import.
+ * Each file calls `registerAdapter(...)` at module load. The plain
+ * side-effect `import` below is enough to trigger that registration; we
+ * intentionally do NOT name-import any exports.
  *
- * Phase 1 reference adapters (5 of 26):
- *   - armp-main         (Cameroon procurement; reference complexity)
- *   - rccm-search       (commercial registry; auth-light)
- *   - cour-des-comptes  (audit reports; PDF-heavy)
- *   - worldbank-sanctions (debarment API; reference for sanctions tier)
- *   - opensanctions     (PEP/sanctions aggregator; reference for API tier)
+ * Reference (full hand-written): armp-main, rccm-search, cour-des-comptes,
+ * worldbank-sanctions, opensanctions.
  *
- * The remaining 21 adapters follow the same patterns and are stubbed in a
- * follow-up agent run; the framework here makes "add the next 21" a copy-and-
- * tune-selectors job, not a re-architect job.
+ * The other 21 use `_helpers.ts` + `_sectoral-ministry.ts` factories per
+ * BUILD-COMPANION-v2 §41-44 to keep per-source code thin.
  */
 
+// ---- Cameroonian core (procurement + finance) ----
+import './armp-main.js';
+import './minmap-portal.js';
+import './coleps-tenders.js';
+import './minfi-portal.js';
+import './dgb-budget.js';
+import './dgtcfm-treasury.js';
+import './dgi-attestations.js';
+import './minepat-bip.js';
+
+// ---- Sectoral ministries (largest procurement budgets) ----
+import './mintp-public-works.js';
+import './minee-energy.js';
+import './minsante-health.js';
+import './minedub-basic-ed.js';
+import './minesec-secondary-ed.js';
+import './minhdu-housing.js';
+
+// ---- Registries + audit institutions ----
+import './rccm-search.js';
+import './cour-des-comptes.js';
+import './journal-officiel.js';
+import './anif-pep.js';
+
+// ---- International corroboration ----
+import './worldbank-sanctions.js';
+import './afdb-sanctions.js';
+import './eu-sanctions.js';
+import './ofac-sdn.js';
+import './un-sanctions.js';
+import './opensanctions.js';
+import './opencorporates.js';
+import './occrp-aleph.js';
+
+/**
+ * Public entry point — kept for backwards compatibility with the previous
+ * registry call site. Importing this module is sufficient on its own; calling
+ * `registerAllAdapters()` is now a no-op (modules registered at import time).
+ */
 export function registerAllAdapters(): void {
-  // Side-effect imports register on load
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('./armp-main.js');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('./rccm-search.js');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('./cour-des-comptes.js');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('./worldbank-sanctions.js');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('./opensanctions.js');
+  // Intentionally empty — registration occurs via the side-effect imports above.
 }
