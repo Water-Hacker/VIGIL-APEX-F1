@@ -5,32 +5,35 @@ import type {
   HealthBeaconReply,
   HealthBeaconRequest,
   ReceiverHandlers,
-  RegionCode,
 } from '@vigil/federation-stream';
 import { eventsConsumed, eventsEmitted, type Logger } from '@vigil/observability';
 import { QueueClient, STREAMS, type Envelope } from '@vigil/queue';
+import { Schemas } from '@vigil/shared';
 import type Redis from 'ioredis';
 
 const LAG_HASH = 'vigil:federation:lag';
 
 /**
- * Adapter-out payload shape produced by the federation receiver. The
- * regional adapter-runner already writes this same shape into
- * STREAMS.ADAPTER_OUT directly when running on the core; the regional
- * federation hop simply re-publishes via this worker. Pattern-detect
- * and score workers consume STREAMS.ADAPTER_OUT generically — they do
- * not distinguish core-direct vs federation-relayed events except via
- * the `metadata.federation_region` tag.
+ * Wire contract on FEDERATION_PUSH (regional adapter-runner → agent →
+ * core receiver):
+ *
+ *   federation envelope.payload (bytes) = JSON-encoded SourceEvent
+ *
+ * The receiver decodes the bytes, validates against `Schemas.SourceEvent`,
+ * cross-checks that the federation envelope's region/sourceId/dedupKey
+ * match the SourceEvent's source_id and dedup_key (and the receiver's
+ * own envelope-id matches the SourceEvent's id), then republishes the
+ * SourceEvent on STREAMS.ADAPTER_OUT — exactly the same shape that the
+ * core-side adapter-runner publishes. Downstream consumers are
+ * uniform: they read `Envelope<SourceEvent>` from ADAPTER_OUT
+ * regardless of whether the event arrived core-direct or via the
+ * federation hop.
+ *
+ * The federation region is preserved in `Envelope.correlation_id`
+ * (set to the federation envelope id) and is also tagged onto the
+ * SourceEvent's payload under `__federation_region` so per-region
+ * filtering downstream works without rewriting existing consumers.
  */
-export interface AdapterOutPayload {
-  readonly source_id: string;
-  readonly fetched_at_ms: number;
-  readonly body_b64: string;
-  readonly metadata: {
-    readonly federation_region: RegionCode;
-    readonly federation_envelope_id: string;
-  };
-}
 
 export interface ReceiverHandlersDeps {
   readonly queue: QueueClient;
@@ -56,28 +59,32 @@ export class FederationReceiverHandlers implements ReceiverHandlers {
   async onAccepted(env: EventEnvelope): Promise<void> {
     eventsConsumed.labels({ worker: 'worker-federation-receiver', stream: 'federation-stream' }).inc();
 
-    const payload: AdapterOutPayload = {
-      source_id: env.sourceId,
-      fetched_at_ms: env.observedAtMs,
-      body_b64: Buffer.from(env.payload.buffer, env.payload.byteOffset, env.payload.byteLength).toString('base64'),
-      metadata: {
-        federation_region: env.region,
-        federation_envelope_id: env.envelopeId,
-      },
-    };
+    const decoded = this.decodeSourceEvent(env);
+    // Decode failure is a wire-level mismatch — throw so the server
+    // marks the envelope DEDUP_COLLISION (the only "handler threw"
+    // path the protocol supports) and the agent dead-letters.
+    if (decoded.kind === 'invalid') {
+      this.logger.warn(
+        { envelopeId: env.envelopeId, region: env.region, reason: decoded.reason },
+        'federation-payload-invalid',
+      );
+      throw new Error(`federation-payload-invalid: ${decoded.reason}`);
+    }
+    const sourceEvent = decoded.event;
 
-    const queueEnvelope: Envelope<AdapterOutPayload> = {
+    const queueEnvelope: Envelope<Schemas.SourceEvent> = {
       id: randomUUID(),
-      // The adapter-runner's dedup_key is per-source; we keep the same
-      // shape here so the downstream pattern-detect dedup behaves
-      // identically whether the event arrived core-direct or via the
-      // federation hop.
-      dedup_key: `${env.region}:${env.sourceId}:${env.dedupKey}`,
+      // Per-source dedup key, prefixed with the region so two regions
+      // observing the same upstream document still write distinct
+      // events (each region's audit trail is independent).
+      dedup_key: `${env.region}:${sourceEvent.dedup_key}`,
+      // Carry the federation envelope id as the correlation id so a
+      // single regional ingest can be traced end-to-end.
       correlation_id: env.envelopeId,
       producer: 'worker-federation-receiver',
       produced_at: new Date().toISOString(),
       schema_version: 1,
-      payload,
+      payload: sourceEvent,
     };
 
     await this.queue.publish(STREAMS.ADAPTER_OUT, queueEnvelope);
@@ -103,5 +110,47 @@ export class FederationReceiverHandlers implements ReceiverHandlers {
       'federation-beacon',
     );
     return reply;
+  }
+
+  /**
+   * Decode + validate the federation envelope's payload bytes as a
+   * SourceEvent. Cross-checks that the regional agent didn't mutate
+   * the SourceEvent's identity fields between adapter and federation
+   * boundary.
+   */
+  private decodeSourceEvent(
+    env: EventEnvelope,
+  ):
+    | { kind: 'ok'; event: Schemas.SourceEvent }
+    | { kind: 'invalid'; reason: string } {
+    let parsed: unknown;
+    try {
+      const text = Buffer.from(
+        env.payload.buffer,
+        env.payload.byteOffset,
+        env.payload.byteLength,
+      ).toString('utf8');
+      parsed = JSON.parse(text);
+    } catch (e) {
+      return { kind: 'invalid', reason: `payload not valid utf8/json: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    const result = Schemas.zSourceEvent.safeParse(parsed);
+    if (!result.success) {
+      return { kind: 'invalid', reason: `schema: ${result.error.message}` };
+    }
+    const ev = result.data;
+    if (ev.source_id !== env.sourceId) {
+      return {
+        kind: 'invalid',
+        reason: `source_id mismatch: envelope=${env.sourceId} payload=${ev.source_id}`,
+      };
+    }
+    if (ev.dedup_key !== env.dedupKey) {
+      return {
+        kind: 'invalid',
+        reason: `dedup_key mismatch: envelope=${env.dedupKey} payload=${ev.dedup_key}`,
+      };
+    }
+    return { kind: 'ok', event: ev };
   }
 }

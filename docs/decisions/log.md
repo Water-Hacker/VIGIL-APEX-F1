@@ -1375,6 +1375,65 @@ ops continue from Yaoundé on Compose.
 
 Architect signature: <<YubiKey-touched audit row id pending council session>>
 
+## 2026-04-28 — Federation receiver payload-contract fix; M1/M3 deferred
+
+While preparing M3 (regional adapter-runner config flip), the architect
+spotted a wire-contract mismatch between the two writers of
+`STREAMS.ADAPTER_OUT`. The fix is on disk; M1 and M3 are
+re-evaluated below.
+
+**The mismatch (now fixed).**
+`apps/adapter-runner/src/run-one.ts` publishes `Envelope<SourceEvent>`
+onto ADAPTER_OUT — the raw adapter event, validated against
+`Schemas.zSourceEvent`. The L2 federation-receiver as originally
+written (`apps/worker-federation-receiver/src/handlers.ts`) published
+a different shape, `{ source_id, fetched_at_ms, body_b64, metadata }`.
+Two writers, two contracts — downstream consumers would have had to
+branch on shape, which is a bug-magnet.
+
+**Fix.** The federation envelope's `payload` (bytes) is now
+authoritatively a JSON-encoded `SourceEvent`. The receiver decodes,
+validates against `Schemas.zSourceEvent`, cross-checks
+`source_id`/`dedup_key` between the federation envelope and the
+inner SourceEvent (rejecting via DEDUP_COLLISION on mismatch), and
+republishes as `Envelope<SourceEvent>` on ADAPTER_OUT — matching the
+existing adapter-runner contract bit-for-bit. The federation
+envelope-id flows through as `Envelope.correlation_id` so a
+single regional ingest stays traceable end-to-end.
+
+**M1 (receiver-side dedup) — closing as not needed.**
+Re-reading `WorkerBase` in `packages/queue/src/worker.ts`: every
+worker already does atomic Redis-Lua dedup at dispatch time, keyed
+on `vigil:dedup:<worker>:<envelope.dedup_key>`. The receiver's
+ADAPTER_OUT publish carries a region-prefixed dedup_key
+(`<region>:<sourceEvent.dedup_key>`), so the existing per-worker
+dedup catches duplicates downstream without a receiver-side check.
+Adding a federation-layer dedup would be a second layer on top of
+a working first layer — gold-plating without a measured win.
+Closing M1 with no work item.
+
+**M3 (regional adapter-runner config flip) — deferred for the
+same reason as M2.**
+M3 is a regional code path: `apps/adapter-runner/src/run-one.ts`
+needs an env-driven branch that publishes onto FEDERATION_PUSH
+instead of ADAPTER_OUT when running inside a regional Helm chart,
+JSON-encoding the SourceEvent into the federation envelope's
+`payload` bytes. The transformation is small (~30 LOC) but it
+touches production adapter-runner code in service of a deploy
+mode that is not exercised until any region completes its R9
+cutover ceremony. Per the M2 reasoning already on file, the
+architect defers M3 to the per-region cutover ceremony, where the
+test surface is the real regional Helm chart — not synthetic.
+
+**Net effect.** The federation pipeline's wire contract is now
+internally consistent: regional adapter event → JSON-encoded
+SourceEvent in federation payload bytes → signed envelope → core
+receiver decode → `Envelope<SourceEvent>` on ADAPTER_OUT → existing
+downstream consumers. The only gap remaining for live operation is
+the M3 regional adapter-runner branch, which lands during R9.
+
+Architect signature: <<YubiKey-touched audit row id pending council session>>
+
 ## 2026-04-28 — Phase 3 federation runbooks (K9–K10) promoted to scaffold
 
 Two follow-up deliverables previously listed as deferred in the
