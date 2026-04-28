@@ -23,6 +23,7 @@ const sanctioned = {
   last_seen: '2026-01-01T00:00:00Z',
   resolution_confidence: 0.99,
   resolved_by: 'rule' as const,
+  metadata: {},
 };
 const clean = { ...sanctioned, id: '00000000-0000-4000-a000-000000000302', is_sanctioned: false, sanctioned_lists: [] as string[] };
 

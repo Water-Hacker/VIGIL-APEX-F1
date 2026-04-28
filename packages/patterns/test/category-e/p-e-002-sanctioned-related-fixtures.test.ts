@@ -18,6 +18,7 @@ const baseCompany = {
   last_seen: '2026-01-01T00:00:00Z',
   resolution_confidence: 0.95,
   resolved_by: 'rule' as const,
+  metadata: {},
 };
 const sanctionedSubsidiary = {
   ...baseCompany,

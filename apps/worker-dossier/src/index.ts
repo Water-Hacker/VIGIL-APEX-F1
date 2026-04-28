@@ -59,6 +59,7 @@ function rowToCanonical(
     last_seen: row.last_seen.toISOString(),
     resolution_confidence: row.resolution_confidence,
     resolved_by: row.resolved_by as Schemas.EntityCanonical['resolved_by'],
+    metadata: (row.metadata as Schemas.EntityCanonical['metadata']) ?? {},
   };
 }
 

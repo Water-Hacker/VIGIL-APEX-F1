@@ -65,6 +65,12 @@ function rowToCanonical(
     last_seen: row.last_seen.toISOString(),
     resolution_confidence: row.resolution_confidence,
     resolved_by: row.resolved_by as Schemas.EntityCanonical['resolved_by'],
+    // W-19b — propagate the runtime metadata bag the DB already stores.
+    // Network/structure fields (roundTripDetected, communityId, tags…)
+    // are written by upstream workers (worker-fabric-bridge, Louvain
+    // pass, audit-chain backfill); read here without transformation so
+    // pattern fixtures match production semantics.
+    metadata: (row.metadata as Schemas.EntityCanonical['metadata']) ?? {},
   };
 }
 

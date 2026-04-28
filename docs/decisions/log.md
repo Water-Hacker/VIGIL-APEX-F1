@@ -882,38 +882,65 @@ Post-this-phase open work is institutional only: YubiKey procurement,
 council formation, ANTIC declaration, backup-architect engagement
 letter, CONAC engagement letter, MINFI/BEAC/ANIF MOU negotiation.
 
-## 2026-04-28 — H4 fixture-density follow-up (round 1)
+## 2026-04-28 — H4 fixture-density follow-up (rounds 1 + 2)
 
-Continuing the H4 follow-up tracked under W-19a. Detailed
-TP/TN/edge/multi/regression fixture files added for seven additional
-patterns; `_registry-baseline.test.ts` continues to provide 5
-sanity cases for the 36 patterns not yet detailed. Coverage breakdown:
+Continuing the H4 follow-up tracked under W-19a. Two rounds delivered
+in this session.
 
-- **Category E — fully detailed** (4/4):
-  P-E-001 (sanctioned-direct), P-E-002 (sanctioned-related),
-  P-E-003 (sanctioned-jurisdiction-payment),
-  P-E-004 (PEP-controlled-sanctioned).
-- **Category A** (4/9 detailed):
-  P-A-001 (single-bidder), P-A-002 (split-tender),
-  P-A-003 (no-bid-emergency), P-A-004 (late-amendment).
-- **Category B** (1/7): P-B-007 (PEP link).
-- **Category C** (1/6): P-C-001 (price-above-benchmark).
-- **Category H** (1/3): P-H-001 (award-before-tender-close).
+**Round 1** (7 files): P-E-002, P-E-003, P-E-004, P-A-002, P-A-003,
+P-A-004, P-C-001, P-H-001.
 
-Total detailed pattern fixture files: 11/43.
-Total fixture cases: ~66 detailed + 215 baseline = 281 test cases.
+**Round 2** (17 files):
+- P-A-005, P-A-006, P-A-007, P-A-008, P-A-009 — closes category A
+- P-B-001, P-B-003, P-B-004 — adds 3 of the 6 remaining B patterns
+- P-C-002, P-C-003, P-C-004, P-C-005, P-C-006 — closes category C
+- P-G-001, P-G-002, P-G-003, P-G-004 — closes category G
+- P-H-002, P-H-003 — closes category H
+- P-D-001, P-D-003, P-D-004, P-D-005 — adds 4 of the 5 D patterns
 
-P-F-001 (round-trip-payment) deferred — pattern reads
-`canonical.metadata.roundTripDetected` which isn't part of the
-public `Schemas.EntityCanonical` shape. A typed test fixture would
-need an unsafe cast; W-19b tracks the canonical-metadata typing
-fix as a precondition. Same shape applies to other graph-derived
-patterns (P-F-002 director-ring, P-F-004 hub-and-spoke, P-D-002
-incomplete-construction) — they consume metadata that
-worker-pattern's subject loader populates at runtime but that
-the static schema doesn't expose. Subsequent fixture rounds
-either fix the typing or land detailed fixtures by category in
-the order the typing comes online.
+**Coverage after rounds 1–3 (43/43 detailed — full coverage):**
+
+| Category | Detailed | Total | Notes |
+|---|---|---|---|
+| A — Procurement | 9 | 9 | full |
+| B — Beneficial owner | 7 | 7 | full (round 3 closed P-B-002, P-B-005, P-B-006) |
+| C — Price | 6 | 6 | full |
+| D — Project delivery | 5 | 5 | full (round 3 closed P-D-002) |
+| E — Sanctions | 4 | 4 | full |
+| F — Network | 5 | 5 | full (round 3 closed all 5 F-patterns) |
+| G — Document forensics | 4 | 4 | full |
+| H — Temporal | 3 | 3 | full |
+
+Total fixture cases: ~225 detailed + 215 baseline = 440 test cases.
+
+## 2026-04-28 — W-19b close + H4 round 3 close
+
+**W-19b** — `Schemas.EntityCanonical` typing for runtime metadata.
+`packages/shared/src/schemas/entity.ts` now exposes a typed
+`metadata` field via the new `zEntityCanonicalMetadata` shape: nine
+documented optional fields (roundTripDetected, roundTripHops,
+directorRingFlag, supplierCycleLength, authorityConcentrationRatio,
+publicContractsCount, communityId, tags, declared_ubo, registry_ubo)
+plus `.passthrough()` for forward-compatible additions. Both
+`rowToCanonical` mappers (`apps/worker-pattern/src/index.ts`,
+`apps/worker-dossier/src/index.ts`) propagate the DB metadata
+column. Existing fixture canonical-builders patched with
+`metadata: {}` defaults via the same Zod-default pattern.
+
+**H4 round 3** — 9 fixture files written, closing the last gaps:
+P-F-001 (round-trip), P-F-002 (director-ring), P-F-003 (supplier-cycle),
+P-F-004 (hub-and-spoke), P-F-005 (dense-bidder-network),
+P-B-002 (nominee-director), P-B-005 (co-incorporated-cluster),
+P-B-006 (ubo-mismatch), P-D-002 (incomplete-construction; reclassified
+from W-19b-blocked once re-read — it operates on event payloads,
+not canonical metadata).
+
+The H4 contract from the Phase-2 Tech Scaffold plan (43 patterns ×
+≥ 5 TP/TN/edge/multi/regression cases each) is satisfied end-to-end.
+The pattern coverage gate at `packages/patterns/vitest.config.ts`
+(≥ 80% lines / functions / statements, ≥ 75% branches) is the
+steady-state floor; new patterns land with their own fixture file
+before merge per the H5 CI hook.
 
 ## Phase Pointer
 
