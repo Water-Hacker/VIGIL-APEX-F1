@@ -64,6 +64,51 @@ The architect commitment that **Postgres remains the source of truth**
 is unchanged. Fabric is a parallel cryptographic witness, not a
 replacement.
 
+### Section B.3 — Phase-3 federation scaffold (committed 2026-04-28)
+
+The Phase-3 federation architecture is *scaffolded* in tree but not
+*executed*. The following claims are now true at the scaffold level
+— meaning the artefacts exist and are reviewable — and become true
+at the runtime level on a per-region basis as each cutover ceremony
+completes (gated on council 4-of-5 vote + CEMAC funding):
+
+1. **Federated Vault PKI hierarchy.** A Yaoundé root PKI mount
+   (`pki/`, ttl=10y) and 10 region-scoped subordinate mounts
+   (`pki-region-<lowercase code>/`, ttl=2y) are bootstrapped by
+   `infra/host-bootstrap/13-vault-pki-federation.sh`. Cross-region
+   issuance is denied at the policy layer
+   (`architect-region-pki`).
+2. **Signed-envelope federation stream.** The
+   `@vigil/federation-stream` package provides an ed25519-signed
+   gRPC stream service (`PushEvents`, `HealthBeacon`) defined by
+   `proto/federation.proto`. Receiver-side verification enforces
+   region-prefix match on the signing-key id, a configurable
+   replay window (default forward 60 s, backward 7 d), and a
+   per-envelope payload cap (256 KiB).
+3. **Multi-site NAS failover chain.** The Yaoundé core pulls each
+   regional NAS over WireGuard nightly via
+   `infra/host-bootstrap/13-multi-site-replication.sh` into
+   `/srv/vigil/region-archive/<CODE>/`, before the existing
+   nightly Hetzner archive (10-vigil-backup.sh) sweeps it
+   offsite. Pull-based, not push-based, so a compromised regional
+   NAS cannot inject blobs into the core archive.
+4. **Per-region adapter allocation.** Ten per-region values files
+   under `infra/k8s/charts/regional-node/values-<CODE>.yaml`
+   pin each region's enabled adapters, signing-key id, NAS host,
+   and WireGuard endpoint. The architect's source-coverage
+   decision is documented in `docs/PHASE-3-FEDERATION.md` §3 and
+   reviewed once a year.
+5. **Council architectural-review gate.** The council 4-of-5
+   architectural-review brief at
+   `docs/institutional/council-phase-3-review.md` documents the
+   architecture, cost envelope, rollout order, failure modes,
+   rotation cadence, and the explicit "do not approve" criteria
+   the council should check before voting.
+
+The architect commitment that **the Yaoundé core remains the
+single point of authoritative trust** is unchanged. Phase-3
+distributes ingestion, not authority.
+
 ## Section C — Data, Patterns, Intelligence
 
 | Fact | Value | Source | Status |

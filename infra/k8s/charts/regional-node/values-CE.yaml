@@ -1,0 +1,56 @@
+# Regional values — Centre (CE), capital Yaoundé.
+#
+# Co-located with the Yaoundé core. The CE node still runs as a
+# regional federation peer (not a core component) so the
+# regional-node chart's lifecycle is identical to all other
+# regions; this avoids per-region template branches in the chart.
+
+region:
+  code: "CE"
+  name: "Centre"
+  capital: "Yaoundé"
+  # Set by the architect after running infra/host-bootstrap/13-vault-pki-federation.sh.
+  # Format: "<REGION>:<rotation-seq>". Rotation cadence: 90 days.
+  signingKeyId: "CE:1"
+
+federation:
+  coreEndpoint: "vigil-federation.core.vigilapex.cm:9443"
+  coreWireguardPubkey: "<<core-wireguard-pubkey-set-during-cutover>>"
+  maxBacklog: 1000000
+  retainHours: 168
+
+adapters:
+  # CE is the seat of government; we run the broadest sectoral set here
+  # plus the housing programs and the central energy feed.
+  enabled:
+    - "mintp-public-works"
+    - "minsante-health"
+    - "minedub-basic-ed"
+    - "minesec-secondary-ed"
+    - "dgi-attestations"
+    - "minepat-bip"
+    - "minhdu-housing"
+    - "minee-energy"
+
+postgres:
+  primaryHost: "postgres-primary.core.vigilapex.cm"
+  primaryPort: 5432
+  replicationUser: "vigil_replica"
+  maxLagSeconds: 60
+
+vault:
+  subordinateCaUrl: "https://vault.core.vigilapex.cm/v1/pki-region-ce/ca"
+
+# Multi-site NAS replication (consumed by infra/host-bootstrap/13-multi-site-replication.sh).
+multiSiteReplication:
+  # The Yaoundé core pulls /srv/vigil/first-contact and /srv/vigil/audit-archive
+  # from this regional NAS over WireGuard.
+  regionalNas:
+    host: "nas-ce.regions.vigilapex.cm"
+    rsyncModule: "vigil-region-ce"
+    bandwidthLimitKbps: 50000  # 50 Mbps cap
+  retentionDays: 90
+
+networkPolicy:
+  enabled: true
+  coreCidr: "10.99.0.0/24"

@@ -1,0 +1,88 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default-deny + per-component allowlists. Egress to the core is
+# allowed only over the WireGuard CIDR (.Values.networkPolicy.coreCidr).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "default-deny") }}
+  labels:
+    {{- include "regional-node.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    # CoreDNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Federation egress — only the core CIDR over the gRPC port + WG.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "federation-egress") }}
+  labels:
+    {{- include "regional-node.componentLabels" (dict "root" . "component" "federation-agent") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "regional-node.componentSelector" (dict "root" . "component" "federation-agent") | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.coreCidr | quote }}
+      ports:
+        - protocol: TCP
+          port: 9443  # gRPC
+    # Local Redis access
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# adapter-runner egress — wide-open for adapter target sites + local
+# Redis. The architect refines per-region in values-<region>.yaml when
+# specific source-IP-allowlists matter.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "adapter-egress") }}
+  labels:
+    {{- include "regional-node.componentLabels" (dict "root" . "component" "adapter-runner") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "regional-node.componentSelector" (dict "root" . "component" "adapter-runner") | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Block other regional nodes' WireGuard CIDR (we don't
+              # cross-reach), block all RFC1918 except the local POD
+              # network and the core CIDR.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+        # Re-allow local cluster + core
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.coreCidr | quote }}
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+{{- end }}

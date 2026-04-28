@@ -1,0 +1,153 @@
+# regional-node base values. Each region installs with one of the
+# 10 `values-<region>.yaml` files override.
+#
+# Naming follows the pattern `vigil-region-<code>-<component>` so
+# multiple regions running on the same k3s cluster (test only) don't
+# collide.
+
+# ----------------------------------------------------------------------
+# Region identity — overridden per region.
+# ----------------------------------------------------------------------
+region:
+  # ISO-3166-2 -style code: CE | LT | NW | SW | OU | SU | ES | EN | NO | AD
+  code: "CE"
+  # Human-readable
+  name: "Centre"
+  # Capital city of the region (where the node is hosted)
+  capital: "Yaoundé"
+  # ed25519 public key fingerprint (signing-key id) — the federation
+  # stream service verifies envelopes against this.
+  signingKeyId: "<<region-signing-key-id-from-vault-pki>>"
+
+# ----------------------------------------------------------------------
+# Federation — points the regional node at the Yaoundé core.
+# ----------------------------------------------------------------------
+federation:
+  # gRPC endpoint of the central FederationStream service (running in
+  # the umbrella chart at the Yaoundé core). Reached over WireGuard.
+  coreEndpoint: "vigil-federation.core.vigilapex.cm:9443"
+  # WireGuard peer public key for the core; the regional WireGuard
+  # config trusts only this peer.
+  coreWireguardPubkey: "<<core-wireguard-pubkey>>"
+  # Backlog limits before the regional adapter pauses ingest.
+  maxBacklog: 1000000
+  # Federation-stream resilience window — how long the regional Redis
+  # queue retains envelopes if the core is unreachable.
+  retainHours: 168 # 7 days
+
+# ----------------------------------------------------------------------
+# Adapter allocation — per-region (overridden by each values-<region>.yaml).
+# This list comes from the architect's source-coverage decision in
+# docs/PHASE-3-FEDERATION.md §3 and is reviewed once a year.
+# ----------------------------------------------------------------------
+adapters:
+  enabled: []  # populated per region; e.g. ["armp-main", "minmap-portal"]
+
+# ----------------------------------------------------------------------
+# Regional Postgres replica — read-only stream from Yaoundé primary.
+# ----------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16.4-alpine"
+  resources:
+    requests: { memory: "1Gi", cpu: "500m" }
+    limits:   { memory: "4Gi", cpu: "2" }
+  persistence:
+    size: 100Gi
+  primaryHost: "postgres-primary.core.vigilapex.cm"
+  primaryPort: 5432
+  replicationUser: "vigil_replica"
+  # Replication lag warning threshold — exceeding this for > 5 min
+  # fires the regional Prometheus alert.
+  maxLagSeconds: 60
+
+# ----------------------------------------------------------------------
+# Regional Vault subordinate — receives PKI delegation from Yaoundé root.
+# ----------------------------------------------------------------------
+vault:
+  enabled: true
+  image:
+    repository: hashicorp/vault
+    tag: "1.17.5"
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "2Gi", cpu: "1" }
+  persistence:
+    size: 10Gi
+  # The subordinate-CA cert is provisioned by the Yaoundé root via
+  # the K3 bootstrap script. We point at the URL where it's fetched
+  # at first boot.
+  subordinateCaUrl: "https://vault.core.vigilapex.cm/v1/pki/issue/{{ .Values.region.code }}"
+
+# ----------------------------------------------------------------------
+# Regional Redis — federation-stream backlog queue.
+# ----------------------------------------------------------------------
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7.4-alpine"
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }
+    limits:   { memory: "2Gi", cpu: "1" }
+  persistence:
+    size: 20Gi
+
+# ----------------------------------------------------------------------
+# Regional IPFS node — pins documents fetched in-region.
+# ----------------------------------------------------------------------
+ipfs:
+  enabled: true
+  image:
+    repository: ipfs/kubo
+    tag: "v0.30.0"
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "4Gi", cpu: "2" }
+  persistence:
+    size: 200Gi
+  clusterCoordinator: "ipfs-cluster.core.vigilapex.cm:9094"
+
+# ----------------------------------------------------------------------
+# adapter-runner — pulls the source-id list above.
+# ----------------------------------------------------------------------
+adapterRunner:
+  image:
+    repository: vigil-apex/adapter-runner
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests: { memory: "512Mi", cpu: "500m" }
+    limits:   { memory: "4Gi", cpu: "2" }
+
+# ----------------------------------------------------------------------
+# federation-stream agent — drains the regional Redis to the core gRPC.
+# ----------------------------------------------------------------------
+federationAgent:
+  image:
+    repository: vigil-apex/federation-agent
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests: { memory: "128Mi", cpu: "100m" }
+    limits:   { memory: "512Mi", cpu: "500m" }
+
+# ----------------------------------------------------------------------
+# Storage class + security defaults — same shape as the umbrella.
+# ----------------------------------------------------------------------
+storageClass: ""
+
+podSecurity:
+  enforced: restricted
+
+global:
+  imagePullPolicy: IfNotPresent
+  imageRegistry: ghcr.io/water-hacker/vigil-apex
+
+networkPolicy:
+  enabled: true
+  # Egress allowlist — regional node MUST be able to reach the core
+  # over the WireGuard CIDR + the regional ISP DNS resolver only.
+  coreCidr: "10.99.0.0/24"

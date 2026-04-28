@@ -85,6 +85,19 @@ This phase requires the **CEMAC region** to also fund or co-fund — the
 single-architect model does not scale to 10 nodes. Phase 3 budget is
 projected at $1.2M-$1.8M USD over 12 months, not in scope for this MVP.
 
+**Scaffold status (closed 2026-04-28):** the architectural scaffold for
+Phase 3 is now committed in tree under `docs/PHASE-3-FEDERATION.md`
+(K1), `infra/k8s/charts/regional-node/` + 10 per-region values files
+(K2/K5), `infra/host-bootstrap/13-vault-pki-federation.sh` (K3),
+`packages/federation-stream/` (K4),
+`infra/host-bootstrap/13-multi-site-replication.sh` + systemd units
+(K6), and the council architectural-review brief at
+`docs/institutional/council-phase-3-review.md` (K7). Execution remains
+gated on (i) CEMAC funding release against the $1.2M–$1.8M envelope
+and (ii) the council 4-of-5 architectural-review vote. The architect
+is not authorised to begin per-region cutover ceremonies before both
+gates clear.
+
 ---
 
 ## Phase 4 — Full Decentralisation with ZK-Proofs (year 3+)

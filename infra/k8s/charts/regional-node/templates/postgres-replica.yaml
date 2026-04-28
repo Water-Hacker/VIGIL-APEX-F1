@@ -1,0 +1,103 @@
+{{- if .Values.postgres.enabled }}
+# Streaming-replica StatefulSet. Reads only — no client writes here.
+# Workers in the regional node ONLY query through this; writes flow
+# centrally via the federation-agent → core gRPC stream.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "postgres-replica") }}
+  labels:
+    {{- include "regional-node.componentLabels" (dict "root" . "component" "postgres-replica") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "regional-node.componentName" (dict "root" . "component" "postgres-replica-headless") }}
+  selector:
+    matchLabels:
+      {{- include "regional-node.componentSelector" (dict "root" . "component" "postgres-replica") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "regional-node.componentLabels" (dict "root" . "component" "postgres-replica") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "regional-node.podSecurity" . | nindent 8 }}
+      initContainers:
+        # Bootstrap the replica from the primary via pg_basebackup.
+        # Idempotent: skips when /var/lib/postgresql/data/pgdata is
+        # already populated.
+        - name: pgbasebackup
+          image: {{ include "regional-node.image" (dict "root" . "image" .Values.postgres.image) }}
+          securityContext:
+            {{- include "regional-node.containerSecurity" . | nindent 12 }}
+            readOnlyRootFilesystem: false
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "regional-node.componentName" (dict "root" . "component" "replica-credentials") }}
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              if [ -f /var/lib/postgresql/data/pgdata/PG_VERSION ]; then
+                echo "[init] replica already bootstrapped"
+                exit 0
+              fi
+              pg_basebackup \
+                -h {{ .Values.postgres.primaryHost }} \
+                -p {{ .Values.postgres.primaryPort }} \
+                -U {{ .Values.postgres.replicationUser }} \
+                -D /var/lib/postgresql/data/pgdata \
+                -X stream \
+                -P -R -W
+              # `pg_basebackup -R` writes standby.signal automatically.
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      containers:
+        - name: postgres-replica
+          image: {{ include "regional-node.image" (dict "root" . "image" .Values.postgres.image) }}
+          securityContext:
+            {{- include "regional-node.containerSecurity" . | nindent 12 }}
+            readOnlyRootFilesystem: false
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          command: ["postgres"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            exec:
+              command:
+                - psql
+                - -U
+                - postgres
+                - -c
+                - SELECT pg_is_in_recovery()
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}
+{{- end }}

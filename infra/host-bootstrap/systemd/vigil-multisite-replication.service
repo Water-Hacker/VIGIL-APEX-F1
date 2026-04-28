@@ -1,0 +1,16 @@
+[Unit]
+Description=VIGIL APEX multi-site NAS replication (Phase-3 federation)
+Wants=network-online.target wg-quick@wg-vigil.service
+After=network-online.target wg-quick@wg-vigil.service
+# Run BEFORE the nightly archive so the regional pulls land in
+# /srv/vigil/region-archive/ in time to be swept up by 10-vigil-backup.sh.
+Before=vigil-backup.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/vigil/multi-site-replication.env
+ExecStart=/usr/local/bin/vigil-multisite-replication
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=4h

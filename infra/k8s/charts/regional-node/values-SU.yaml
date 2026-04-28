@@ -1,0 +1,46 @@
+# Regional values — Sud (SU), capital Ebolowa.
+#
+# Hosts the Kribi deep-water port and gas projects → minee-energy
+# is enabled to track regional energy contracts.
+
+region:
+  code: "SU"
+  name: "Sud"
+  capital: "Ebolowa"
+  signingKeyId: "SU:1"
+
+federation:
+  coreEndpoint: "vigil-federation.core.vigilapex.cm:9443"
+  coreWireguardPubkey: "<<core-wireguard-pubkey-set-during-cutover>>"
+  maxBacklog: 1000000
+  retainHours: 168
+
+adapters:
+  enabled:
+    - "mintp-public-works"
+    - "minsante-health"
+    - "minedub-basic-ed"
+    - "minesec-secondary-ed"
+    - "dgi-attestations"
+    - "minepat-bip"
+    - "minee-energy"
+
+postgres:
+  primaryHost: "postgres-primary.core.vigilapex.cm"
+  primaryPort: 5432
+  replicationUser: "vigil_replica"
+  maxLagSeconds: 60
+
+vault:
+  subordinateCaUrl: "https://vault.core.vigilapex.cm/v1/pki-region-su/ca"
+
+multiSiteReplication:
+  regionalNas:
+    host: "nas-su.regions.vigilapex.cm"
+    rsyncModule: "vigil-region-su"
+    bandwidthLimitKbps: 50000
+  retentionDays: 90
+
+networkPolicy:
+  enabled: true
+  coreCidr: "10.99.0.0/24"

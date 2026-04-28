@@ -1,0 +1,47 @@
+# Regional values — Est (ES), capital Bertoua.
+#
+# Forested region, important for forestry / mining adjacencies.
+# Energy adapter on for hydroelectric tracking.
+
+region:
+  code: "ES"
+  name: "Est"
+  capital: "Bertoua"
+  signingKeyId: "ES:1"
+
+federation:
+  coreEndpoint: "vigil-federation.core.vigilapex.cm:9443"
+  coreWireguardPubkey: "<<core-wireguard-pubkey-set-during-cutover>>"
+  maxBacklog: 1000000
+  retainHours: 168
+
+adapters:
+  enabled:
+    - "mintp-public-works"
+    - "minsante-health"
+    - "minedub-basic-ed"
+    - "minesec-secondary-ed"
+    - "dgi-attestations"
+    - "minepat-bip"
+    - "minee-energy"
+
+postgres:
+  primaryHost: "postgres-primary.core.vigilapex.cm"
+  primaryPort: 5432
+  replicationUser: "vigil_replica"
+  maxLagSeconds: 60
+
+vault:
+  subordinateCaUrl: "https://vault.core.vigilapex.cm/v1/pki-region-es/ca"
+
+multiSiteReplication:
+  regionalNas:
+    host: "nas-es.regions.vigilapex.cm"
+    rsyncModule: "vigil-region-es"
+    # Lower bandwidth ceiling — Bertoua uplink is constrained.
+    bandwidthLimitKbps: 25000
+  retentionDays: 90
+
+networkPolicy:
+  enabled: true
+  coreCidr: "10.99.0.0/24"

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "adapter-runner") }}
+  labels:
+    {{- include "regional-node.componentLabels" (dict "root" . "component" "adapter-runner") | nindent 4 }}
+spec:
+  replicas: {{ .Values.adapterRunner.replicas }}
+  selector:
+    matchLabels:
+      {{- include "regional-node.componentSelector" (dict "root" . "component" "adapter-runner") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "regional-node.componentLabels" (dict "root" . "component" "adapter-runner") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "regional-node.podSecurity" . | nindent 8 }}
+      containers:
+        - name: adapter-runner
+          image: {{ include "regional-node.image" (dict "root" . "image" .Values.adapterRunner.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "regional-node.containerSecurity" . | nindent 12 }}
+            readOnlyRootFilesystem: true
+          env:
+            - name: VIGIL_REGION_CODE
+              value: {{ .Values.region.code | quote }}
+            - name: VIGIL_REGION_NAME
+              value: {{ .Values.region.name | quote }}
+            - name: REDIS_HOST
+              value: {{ include "regional-node.componentName" (dict "root" . "component" "redis") }}
+            - name: VAULT_ADDR
+              value: http://{{ include "regional-node.componentName" (dict "root" . "component" "vault") }}:8200
+            - name: VIGIL_REGIONAL_NODE
+              value: "true"
+            # Phase-3 — only the source-ids listed in
+            # `.Values.adapters.enabled` register at boot. Filtering is
+            # done by the adapter-runner's `_register.ts` reading the
+            # ENABLED_SOURCE_IDS env var.
+            - name: ENABLED_SOURCE_IDS
+              value: {{ join "," .Values.adapters.enabled | quote }}
+            # The federation queue stream — regional adapter-runner
+            # writes here instead of central Redis.
+            - name: FEDERATION_QUEUE_STREAM
+              value: "vigil:federation:outbound"
+          ports:
+            - name: metrics
+              containerPort: 9100
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: first-contact
+              mountPath: /srv/vigil/first-contact
+          resources:
+            {{- toYaml .Values.adapterRunner.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 60
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+        - name: first-contact
+          persistentVolumeClaim:
+            claimName: {{ include "regional-node.componentName" (dict "root" . "component" "first-contact") }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "first-contact") }}
+  labels:
+    {{- include "regional-node.componentLabels" (dict "root" . "component" "adapter-runner") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.storageClass }}
+  storageClassName: {{ .Values.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 50Gi

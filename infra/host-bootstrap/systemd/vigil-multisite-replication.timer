@@ -1,0 +1,12 @@
+[Unit]
+Description=Multi-site NAS replication timer
+
+[Timer]
+# 01:30 UTC — earlier than 10-vigil-backup.sh (02:30 Africa/Douala = 01:30
+# UTC), so the per-region pulls finish before the nightly archive starts.
+OnCalendar=*-*-* 01:30:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

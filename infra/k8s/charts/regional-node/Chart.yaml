@@ -1,0 +1,36 @@
+apiVersion: v2
+name: regional-node
+description: |-
+  VIGIL APEX — regional ingest node (Phase 3 federation).
+  One install per Cameroonian region. Subchart of the parent
+  `vigil-apex` umbrella but typically installed standalone on the
+  regional k3s cluster (the umbrella runs centrally in Yaoundé).
+
+  See docs/PHASE-3-FEDERATION.md for the architecture. CEMAC
+  region funding gates the actual rollout; this chart is committed
+  in tree as a Phase-3 scaffold so a future cutover is not blocked
+  on chart authorship.
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - vigil-apex
+  - phase-3
+  - federation
+  - regional
+
+home: https://vigilapex.cm
+sources:
+  - https://github.com/Water-Hacker/VIGIL-APEX
+
+maintainers:
+  - name: Junior Thuram Nana
+    email: satoshinakamotobull@gmail.com
+
+annotations:
+  artifacthub.io/license: UNLICENSED
+  vigil-apex.cm/phase: "3"
+
+dependencies: []

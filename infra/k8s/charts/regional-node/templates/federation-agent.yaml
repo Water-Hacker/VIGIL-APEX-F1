@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "regional-node.componentName" (dict "root" . "component" "federation-agent") }}
+  labels:
+    {{- include "regional-node.componentLabels" (dict "root" . "component" "federation-agent") | nindent 4 }}
+spec:
+  replicas: {{ .Values.federationAgent.replicas }}
+  strategy:
+    type: Recreate # the agent holds a long-lived gRPC stream; rolling = duplicate writes
+  selector:
+    matchLabels:
+      {{- include "regional-node.componentSelector" (dict "root" . "component" "federation-agent") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "regional-node.componentLabels" (dict "root" . "component" "federation-agent") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "regional-node.podSecurity" . | nindent 8 }}
+      containers:
+        - name: federation-agent
+          image: {{ include "regional-node.image" (dict "root" . "image" .Values.federationAgent.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "regional-node.containerSecurity" . | nindent 12 }}
+            readOnlyRootFilesystem: true
+          env:
+            - name: VIGIL_REGION_CODE
+              value: {{ .Values.region.code | quote }}
+            - name: FEDERATION_CORE_ENDPOINT
+              value: {{ .Values.federation.coreEndpoint | quote }}
+            - name: FEDERATION_QUEUE_STREAM
+              value: "vigil:federation:outbound"
+            - name: FEDERATION_MAX_BACKLOG
+              value: {{ .Values.federation.maxBacklog | quote }}
+            - name: FEDERATION_RETAIN_HOURS
+              value: {{ .Values.federation.retainHours | quote }}
+            - name: REDIS_HOST
+              value: {{ include "regional-node.componentName" (dict "root" . "component" "redis") }}
+            - name: VAULT_ADDR
+              value: http://{{ include "regional-node.componentName" (dict "root" . "component" "vault") }}:8200
+            - name: SIGNING_KEY_ID
+              value: {{ .Values.region.signingKeyId | quote }}
+          ports:
+            - name: metrics
+              containerPort: 9100
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.federationAgent.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }

@@ -12,6 +12,7 @@ the chain reflects who reached out to whom and when.
 | [`conac-engagement-letter.md`](./conac-engagement-letter.md) | Commission Nationale Anti-Corruption (CONAC), Cameroon | Countersigned engagement scoping VIGIL APEX as a tier-1 dossier source | unlocks the Phase-2 "CONAC engagement letter countersigned" gate (ROADMAP) |
 | [`antic-declaration.md`](./antic-declaration.md) | Agence Nationale des Technologies de l'Information et de la Communication (ANTIC), Cameroon | Filed declaration under Loi 2010/021 — required to lawfully process personal data on the platform | unlocks the Phase-2 "ANTIC declaration accepted (W-23)" gate |
 | [`council-pillar-candidate-brief.md`](./council-pillar-candidate-brief.md) | Each of 5 council-pillar candidates (judicial, civil society, academic, technical, religious) | Signed commitment letter from each pillar — required for the 5-of-5 council that decides escalations under §22 of the v5.1 commercial agreement | unlocks "Council standup" (M4 of TRUTH.md §J) |
+| [`council-phase-3-review.md`](./council-phase-3-review.md) | The constituted Governance Council (5 pillars) | 4-of-5 architectural-review approval of the Phase-3 federation architecture, before per-region cutover ceremonies begin | gates Phase-3 execution (`ROADMAP.md` §Phase 3) once CEMAC funding is released |
 
 ## How to use
 

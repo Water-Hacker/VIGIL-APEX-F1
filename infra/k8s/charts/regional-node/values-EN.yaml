@@ -1,0 +1,47 @@
+# Regional values — Extrême-Nord (EN), capital Maroua.
+#
+# Sahel zone; Boko Haram-adjacent operating context. Bandwidth
+# is limited; conservative adapter set.
+
+region:
+  code: "EN"
+  name: "Extrême-Nord"
+  capital: "Maroua"
+  signingKeyId: "EN:1"
+
+federation:
+  coreEndpoint: "vigil-federation.core.vigilapex.cm:9443"
+  coreWireguardPubkey: "<<core-wireguard-pubkey-set-during-cutover>>"
+  # Lower backlog cap (less RAM available on the regional NAS).
+  maxBacklog: 500000
+  retainHours: 168
+
+adapters:
+  enabled:
+    - "mintp-public-works"
+    - "minsante-health"
+    - "minedub-basic-ed"
+    - "minesec-secondary-ed"
+    - "dgi-attestations"
+    - "minepat-bip"
+
+postgres:
+  primaryHost: "postgres-primary.core.vigilapex.cm"
+  primaryPort: 5432
+  replicationUser: "vigil_replica"
+  # Higher max-lag threshold tolerated for the Sahel uplink.
+  maxLagSeconds: 180
+
+vault:
+  subordinateCaUrl: "https://vault.core.vigilapex.cm/v1/pki-region-en/ca"
+
+multiSiteReplication:
+  regionalNas:
+    host: "nas-en.regions.vigilapex.cm"
+    rsyncModule: "vigil-region-en"
+    bandwidthLimitKbps: 15000  # 15 Mbps cap
+  retentionDays: 90
+
+networkPolicy:
+  enabled: true
+  coreCidr: "10.99.0.0/24"

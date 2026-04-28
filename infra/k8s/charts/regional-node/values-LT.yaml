@@ -1,0 +1,50 @@
+# Regional values — Littoral (LT), capital Douala.
+#
+# Douala is Cameroon's economic capital and BEAC's regional HQ.
+# The LT node carries the BEAC payments adapter when the BEAC MOU
+# is in place (gated; see docs/decisions/log.md).
+
+region:
+  code: "LT"
+  name: "Littoral"
+  capital: "Douala"
+  signingKeyId: "LT:1"
+
+federation:
+  coreEndpoint: "vigil-federation.core.vigilapex.cm:9443"
+  coreWireguardPubkey: "<<core-wireguard-pubkey-set-during-cutover>>"
+  maxBacklog: 1000000
+  retainHours: 168
+
+adapters:
+  enabled:
+    - "mintp-public-works"
+    - "minsante-health"
+    - "minedub-basic-ed"
+    - "minesec-secondary-ed"
+    - "dgi-attestations"
+    - "minepat-bip"
+    - "minhdu-housing"
+    - "minee-energy"
+    # MOU-gated; remains disabled until BEAC engagement letter signed.
+    # - "beac-payments"
+
+postgres:
+  primaryHost: "postgres-primary.core.vigilapex.cm"
+  primaryPort: 5432
+  replicationUser: "vigil_replica"
+  maxLagSeconds: 60
+
+vault:
+  subordinateCaUrl: "https://vault.core.vigilapex.cm/v1/pki-region-lt/ca"
+
+multiSiteReplication:
+  regionalNas:
+    host: "nas-lt.regions.vigilapex.cm"
+    rsyncModule: "vigil-region-lt"
+    bandwidthLimitKbps: 50000
+  retentionDays: 90
+
+networkPolicy:
+  enabled: true
+  coreCidr: "10.99.0.0/24"
