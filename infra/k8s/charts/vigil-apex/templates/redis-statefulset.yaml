@@ -1,0 +1,88 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-headless") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/redis-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: redis
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.redis.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+            readOnlyRootFilesystem: false  # redis writes to /data
+          ports:
+            - name: redis
+              containerPort: 6379
+          command: ["/bin/sh", "/etc/redis/redis-entrypoint.sh"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/redis
+              readOnly: true
+            - name: redis-secret
+              mountPath: /run/redis-secret
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'redis-cli -a "$(cat /run/redis-secret/password)" ping | grep -q PONG'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'redis-cli -a "$(cat /run/redis-secret/password)" ping | grep -q PONG'
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-config") }}
+            defaultMode: 0755
+        - name: redis-secret
+          secret:
+            secretName: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-secret") }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.persistence.size }}
+{{- end }}

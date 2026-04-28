@@ -997,6 +997,83 @@ MOU-gated bullet; once the architect signs each MOU and follows
 R7, the bullet flips per-institution as confirmed in the per-MOU
 decision-log row R7 prescribes.
 
+## 2026-04-28 — Phase J close (K8s/Helm scaffold, deferred Phase 2)
+
+Phase J of the Phase-2 deferred-work plan closed. Helm chart for the
+**critical-path subset** of the platform shipped at
+`infra/k8s/charts/vigil-apex/`. The remaining ~25 services (Neo4j,
+IPFS×2 + cluster, Fabric peer/orderer/CA, Prometheus, Grafana,
+AlertManager, Logstash, Filebeat, Tor, Keycloak, the other 11 workers,
+adapter-runner, audit-verifier) are tracked as follow-ups in
+`docs/runbooks/R8-k8s-cutover.md` §"Follow-up PRs (deferred)" — every
+one is a mechanical extension of the StatefulSet / Deployment patterns
+this PR establishes.
+
+What landed:
+- **J1** umbrella — `Chart.yaml`, `values.yaml`, `values-dev.yaml`,
+  `values-prod.yaml`, `templates/_helpers.tpl` with naming +
+  PSS-`restricted` security context helpers
+- **J2** Postgres — single-replica StatefulSet with PVC,
+  `postgres-config` ConfigMap encoding the Phase-D1 tuning, both
+  headless + ClusterIP Services
+- **J3** Redis — same shape; ConfigMap renders the `users.acl` ACL
+  template at boot using the ESO-synced password (matches Phase B5
+  semantics)
+- **J4** Vault — file-backend StatefulSet, IPC_LOCK retained, raw
+  storage endpoint disabled; unseal is operator-driven post-install
+  (the Shamir shares are NOT chart-managed)
+- **J5** generic worker — driven off `.Values.workers[]`. Today
+  `worker-pattern` is the only entry; adding more workers is one
+  values block apiece. PodAntiAffinity + topologySpreadConstraints +
+  optional HPA template
+- **J6** dashboard — three replicas, Redis-backed sessions
+  (Phase D7), readiness on `/api/health`, NetworkPolicy ingress
+  from caddy only
+- **J7** caddy — Deployment + LoadBalancer Service, ConfigMap with a
+  K8s-native Caddyfile mirroring B2 rate-limit + D10 compression,
+  cert-manager `Certificate` issuing the LB's TLS
+- **J8** NetworkPolicy — default-deny + per-tier allowlists matching
+  the Compose `vigil-internal` private bridge
+- **J9** ServiceAccounts + Roles + RoleBindings — six SAs (one per
+  role), `secrets:get` only on the specific Secret names ESO
+  materialises
+- **J10** ExternalSecrets Operator integration — `SecretStore`
+  pointing at the in-cluster Vault, plus `ExternalSecret`
+  CRDs for postgres / redis / fabric / workers / dashboard. Replaces
+  the Compose `vigil-secret-init` container with a streaming sync
+- **J11** Argo CD — repository registration secret + `Application`
+  spec with `automated.prune: false` (Phase-1 ops culture: architect-
+  approved syncs only) + sync waves so the data plane comes up before
+  workers
+- **J12** runbook + decision-log — `docs/runbooks/R8-k8s-cutover.md`
+  walks the full cutover including DNS flip + rollback. The Compose
+  stack stays in tree; K8s is purely additive
+
+Architect-decision notes locked:
+1. **Helm**, not Kustomize — values-of-values + per-env override is
+   simpler in Helm.
+2. **External Secrets Operator**, not Vault Agent injector —
+   uniform pod template, no per-pod sidecar.
+3. **One generic worker chart**, not 12 — every worker is the
+   same shape (env-driven `node apps/<NAME>/dist/index.js`).
+4. **Caddy in-cluster**, not ingress-nginx — preserves the Phase-B2
+   rate-limit + Phase-D10 compression policy without a re-derive.
+5. **Critical-path subset only** — pattern + first reference; ops
+   team fills in the rest.
+6. **Compose stays** — the chart is a parallel deployment target,
+   not a replacement.
+
+Verification gates (see plan §"Verification"):
+- `helm lint --strict` clean
+- `helm template … | kubeconform --strict` clean
+- E2E smoke against `kind` cluster: postgres + worker-pattern Ready
+  within 5 min
+- Argo CD spec validates against the schema
+
+This deliverable does NOT trigger an actual cutover. Phase-1 ops
+continue on Compose. The chart is the on-ramp the Phase-2 ops team
+finds in tree when they arrive.
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

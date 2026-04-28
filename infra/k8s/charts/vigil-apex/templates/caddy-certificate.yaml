@@ -1,0 +1,26 @@
+{{- if and .Values.caddy.enabled .Values.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "caddy-tls") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "caddy") | nindent 4 }}
+spec:
+  # Stored as a K8s Secret; Caddy reads it from /etc/caddy-certs.
+  # The Caddyfile's `auto_https on` falls back to its own ACME if
+  # cert-manager hasn't issued yet — covers cold-start and reissue.
+  secretName: {{ include "vigil-apex.componentName" (dict "root" . "component" "caddy-tls") }}
+  issuerRef:
+    name: {{ .Values.certManager.clusterIssuer }}
+    kind: ClusterIssuer
+  dnsNames:
+    {{- range .Values.caddy.hosts }}
+    - {{ . | quote }}
+    {{- end }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: 2160h    # 90 days
+  renewBefore: 360h  # 15 days
+{{- end }}

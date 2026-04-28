@@ -1,0 +1,70 @@
+{{- if .Values.caddy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "caddy") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "caddy") | nindent 4 }}
+spec:
+  replicas: {{ .Values.caddy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "caddy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "caddy") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/caddy-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "caddy") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: caddy
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.caddy.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+            readOnlyRootFilesystem: false # caddy writes ACME state to /data
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+          volumeMounts:
+            - name: config
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: cfg
+              mountPath: /config
+          resources:
+            {{- toYaml .Values.caddy.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "caddy-config") }}
+        - name: data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: cfg
+          emptyDir:
+            sizeLimit: 256Mi
+{{- end }}

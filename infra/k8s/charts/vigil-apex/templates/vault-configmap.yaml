@@ -1,0 +1,24 @@
+{{- if .Values.vault.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-config") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 4 }}
+data:
+  config.hcl: |
+    storage "file" {
+      path = "/vault/file"
+    }
+    listener "tcp" {
+      address     = "{{ .Values.vault.config.address }}"
+      tls_disable = "true"
+    }
+    api_addr     = "{{ .Values.vault.config.api_addr }}"
+    cluster_addr = "{{ .Values.vault.config.cluster_addr }}"
+    ui = false
+    disable_mlock = false
+    log_level = "info"
+    log_format = "json"
+    raw_storage_endpoint = false
+{{- end }}

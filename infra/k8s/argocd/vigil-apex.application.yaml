@@ -1,0 +1,53 @@
+# Argo CD Application for the VIGIL APEX umbrella chart.
+#
+# Sync waves (annotations) ensure the data plane comes up before the
+# workers + dashboard try to reach it:
+#   wave -2 : ServiceAccounts, Roles, RoleBindings, NetworkPolicy
+#   wave -1 : ConfigMaps + ExternalSecrets
+#   wave  0 : Postgres, Redis, Vault StatefulSets
+#   wave  1 : Workers, Dashboard
+#   wave  2 : Caddy + Certificate
+#
+# `automated.prune: false` is deliberate — Phase-1 ops culture is
+# architect-approved syncs only. Prune-on-sync gets enabled by the
+# Phase-2 ops team after their first incident.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vigil-apex
+  namespace: argocd
+  finalizers:
+    # Cascade-delete the chart resources when the Application is
+    # deleted. Without this, removing the Application orphans every
+    # resource it created.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Water-Hacker/VIGIL-APEX
+    targetRevision: main
+    path: infra/k8s/charts/vigil-apex
+    helm:
+      releaseName: vigil
+      valueFiles:
+        - values.yaml
+        # Per-env override; replace with values-prod.yaml for prod cluster.
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vigil
+  syncPolicy:
+    automated:
+      prune: false      # architect-approved syncs only (Phase 1 culture)
+      selfHeal: true    # heal drift, but don't delete
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+  revisionHistoryLimit: 10

@@ -1,0 +1,179 @@
+# VIGIL APEX — base values. Override per-env via values-{dev,prod}.yaml.
+#
+# Naming convention: every resource is `vigil-apex-<component>` so
+# multi-tenant clusters can install us into a non-default namespace
+# without collisions. The shared `_helpers.tpl` derives names from
+# `.Values.fullnameOverride` when set.
+
+global:
+  # Pinned by the architect; bumps require a decision-log entry.
+  imageRegistry: ghcr.io/water-hacker/vigil-apex
+  imagePullPolicy: IfNotPresent
+  # Per-cluster region label propagated onto every Pod for the
+  # F11 multi-region failover script.
+  clusterRegion: cm-yaounde
+  # Architect-pinned image tag root. Per-component overrides allowed
+  # below; default keeps every image at appVersion.
+  imageTag: "0.1.0"
+
+# StorageClass — operations override per cluster. `""` means cluster
+# default; named SCs (e.g. "fast-ssd") are honoured if present.
+storageClass: ""
+
+# Pod-security standards — `restricted` per the SRD §17. Anything
+# weaker requires architect sign-off in decisions/log.md.
+podSecurity:
+  enforced: restricted
+  audit: restricted
+  warn: restricted
+
+# ----------------------------------------------------------------------
+# Data plane
+# ----------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16.4-alpine"
+  resources:
+    requests: { memory: "1Gi", cpu: "500m" }
+    limits:   { memory: "8Gi", cpu: "4" }
+  persistence:
+    size: 200Gi
+  # Tuning passed into postgresql.conf via the ConfigMap
+  config:
+    max_connections: 200
+    shared_buffers: 512MB
+    work_mem: 16MB
+    statement_timeout: 30000
+    idle_in_transaction_session_timeout: 300000
+
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7.4-alpine"
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "8Gi", cpu: "2" }
+  persistence:
+    size: 50Gi
+  # ACL config is rendered from a ConfigMap template using the password
+  # synced in by ExternalSecrets at /etc/redis/secrets.
+  config:
+    maxmemory: "6gb"
+    maxmemoryPolicy: "noeviction"
+
+vault:
+  enabled: true
+  image:
+    repository: hashicorp/vault
+    tag: "1.17.5"
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "2Gi", cpu: "1" }
+  persistence:
+    size: 20Gi
+  # The unseal Shamir shares are NOT chart-managed — they're a
+  # per-cluster Secret created by the operator after install.
+  config:
+    address: "0.0.0.0:8200"
+    api_addr: "http://vigil-vault:8200"
+    cluster_addr: "http://vigil-vault:8201"
+
+# ----------------------------------------------------------------------
+# Worker plane (parametric fan-out)
+# ----------------------------------------------------------------------
+workers:
+  - name: worker-pattern
+    image:
+      repository: vigil-apex/worker-pattern
+      tag: "0.1.0"
+    replicas: 3
+    env:
+      OTEL_SERVICE_NAME: worker-pattern
+      WORKER_NAME: worker-pattern
+      PROMETHEUS_PORT: "9100"
+    resources:
+      requests: { memory: "512Mi", cpu: "250m" }
+      limits:   { memory: "2Gi", cpu: "1" }
+    autoscaling:
+      enabled: false
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilization: 70
+  # Add new workers here — the worker-deployment.yaml template iterates.
+  # Each worker's Deployment, Service, and (optional) HPA fall out for
+  # free; ExternalSecret reuse is automatic via the shared
+  # `vigil-apex-worker-secrets` reference.
+
+# ----------------------------------------------------------------------
+# UI plane
+# ----------------------------------------------------------------------
+dashboard:
+  enabled: true
+  image:
+    repository: vigil-apex/dashboard
+    tag: "0.1.0"
+  replicas: 3
+  env:
+    NODE_ENV: production
+    SESSION_STORE: redis
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }
+    limits:   { memory: "1Gi", cpu: "500m" }
+
+caddy:
+  enabled: true
+  image:
+    repository: vigil-caddy
+    tag: "rl-2.8" # B2 — caddy-ratelimit plugin baked in
+  replicas: 2
+  service:
+    # `LoadBalancer` for external traffic. cert-manager handles ACME.
+    type: LoadBalancer
+  hosts:
+    - vigilapex.cm
+    - www.vigilapex.cm
+    - verify.vigilapex.cm
+    - tip.vigilapex.cm
+    - kc.vigilapex.cm
+  resources:
+    requests: { memory: "128Mi", cpu: "100m" }
+    limits:   { memory: "512Mi", cpu: "500m" }
+
+# ----------------------------------------------------------------------
+# Cert-manager — issues the Caddy LoadBalancer's TLS cert
+# ----------------------------------------------------------------------
+certManager:
+  enabled: true
+  clusterIssuer: letsencrypt-prod
+  email: ops@vigilapex.cm
+
+# ----------------------------------------------------------------------
+# ExternalSecrets — Vault as the secret store
+# ----------------------------------------------------------------------
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  vaultPath: "secret/vigil"
+  authMethod: kubernetes  # SA token → Vault role
+  vaultRole: vigil-eso
+
+# ----------------------------------------------------------------------
+# NetworkPolicy
+# ----------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Components allowed to reach Postgres/Redis/Vault directly.
+  dataPlaneClients:
+    - vigil-apex-dashboard
+    - vigil-apex-worker-pattern
+    # other workers add themselves here as their charts land
+
+# ----------------------------------------------------------------------
+# Observability — most Phase-1 metrics ship via the worker side-car
+# ----------------------------------------------------------------------
+observability:
+  prometheusScrape: true
+  prometheusPort: 9100

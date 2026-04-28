@@ -1,0 +1,42 @@
+apiVersion: v2
+name: vigil-apex
+description: |-
+  VIGIL APEX — anti-corruption platform for Cameroon.
+  Phase-2 Kubernetes scaffold (J of the country-grade plan). Critical-path
+  subset only; the remaining ~25 services land in follow-up charts that
+  copy the patterns established here. See docs/runbooks/R8-k8s-cutover.md
+  for the migration walkthrough.
+
+# Phase 1 of the chart: data plane (Postgres + Redis + Vault) +
+# one worker template + dashboard + caddy + cross-cutting
+# (NetworkPolicy, RBAC, ExternalSecrets). The chart is intentionally
+# generic on workers — `.Values.workers[]` drives a fan-out so any
+# new worker is one values entry, not a new template.
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - vigil-apex
+  - anti-corruption
+  - cameroun
+  - phase-2
+
+home: https://vigilapex.cm
+sources:
+  - https://github.com/Water-Hacker/VIGIL-APEX
+
+maintainers:
+  - name: Junior Thuram Nana
+    email: satoshinakamotobull@gmail.com
+
+annotations:
+  artifacthub.io/category: security
+  artifacthub.io/license: UNLICENSED
+
+# Operator dependencies — ExternalSecretsOperator + cert-manager are
+# pre-required. Argo CD is optional. We do NOT pull them as subcharts
+# because each cluster operator may install them at a different
+# version + namespace.
+dependencies: []

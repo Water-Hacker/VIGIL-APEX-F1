@@ -1,0 +1,44 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-config") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    timeout 300
+    aclfile /etc/redis/users.acl
+    appendonly yes
+    appendfsync everysec
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    save 900 1
+    save 300 10
+    save 60 10000
+    maxmemory {{ .Values.redis.config.maxmemory }}
+    maxmemory-policy {{ .Values.redis.config.maxmemoryPolicy }}
+    loglevel notice
+  users.acl.template: |
+    user default off nopass nocommands
+    user vigil_app on >__VIGIL_REDIS_PASSWORD__ ~* &* +@all
+  redis-entrypoint.sh: |
+    #!/bin/sh
+    # Phase B5 — render ACL with the synced password, then exec redis-server.
+    set -eu
+    PASSWORD="$(cat /run/redis-secret/password)"
+    PASSWORD="${PASSWORD}" awk '
+      { gsub(/__VIGIL_REDIS_PASSWORD__/, ENVIRON["PASSWORD"]); print }
+    ' /etc/redis/users.acl.template > /tmp/users.acl
+    cp /etc/redis/redis.conf /tmp/redis.conf
+    # ACL file path in conf points at /etc/redis/users.acl which is the
+    # ConfigMap mount; we cannot write into a ConfigMap volume so we
+    # symlink via tmpfs.
+    sed -i 's|aclfile /etc/redis/users.acl|aclfile /tmp/users.acl|' /tmp/redis.conf
+    unset PASSWORD
+    exec redis-server /tmp/redis.conf
+{{- end }}

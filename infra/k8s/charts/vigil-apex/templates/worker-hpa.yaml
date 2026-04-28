@@ -1,0 +1,27 @@
+{{- range .Values.workers }}
+{{- $worker := . }}
+{{- $root := $ }}
+{{- if and $worker.autoscaling $worker.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" $root "component" $worker.name) }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" $root "component" $worker.name) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "vigil-apex.componentName" (dict "root" $root "component" $worker.name) }}
+  minReplicas: {{ $worker.autoscaling.minReplicas }}
+  maxReplicas: {{ $worker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $worker.autoscaling.targetCPUUtilization }}
+{{- end }}
+{{- end }}

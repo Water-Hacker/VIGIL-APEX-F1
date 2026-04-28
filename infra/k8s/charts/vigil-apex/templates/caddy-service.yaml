@@ -1,0 +1,25 @@
+{{- if .Values.caddy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "caddy") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "caddy") | nindent 4 }}
+  annotations:
+    {{- if eq .Values.caddy.service.type "LoadBalancer" }}
+    # GCP/AWS/Azure pass-through for X-Forwarded-For preservation.
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    {{- end }}
+spec:
+  type: {{ .Values.caddy.service.type }}
+  externalTrafficPolicy: Local
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "caddy") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: https
+      port: 443
+      targetPort: https
+{{- end }}

@@ -1,0 +1,104 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-headless") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 8 }}
+      annotations:
+        # Force pod restart when ConfigMap content changes
+        checksum/config: {{ include (print $.Template.BasePath "/postgres-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      # WAL archive volume — see configmap for the archive_command.
+      # Empty by default; ops sets `--set postgres.walArchiveSize=...`
+      # when the architect commits to off-cluster shipping.
+      containers:
+        - name: postgres
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.postgres.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+            # Postgres image needs a writable data dir + tmpfs at /tmp;
+            # everything else is read-only.
+            readOnlyRootFilesystem: false
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: vigil
+            - name: POSTGRES_USER
+              value: vigil
+            # Password syncs in via ExternalSecret → vigil-apex-postgres-secret.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-secret") }}
+                  key: password
+            - name: POSTGRES_INITDB_ARGS
+              value: "--encoding=UTF-8 --locale=en_US.UTF-8 --auth=scram-sha-256"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: wal-archive
+              mountPath: /wal-archive
+            - name: config
+              mountPath: /etc/postgresql/postgresql.conf
+              subPath: postgresql.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          command: ["postgres"]
+          args: ["-c", "config_file=/etc/postgresql/postgresql.conf"]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "vigil", "-d", "vigil"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "vigil", "-d", "vigil"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-config") }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: wal-archive
+          emptyDir:
+            sizeLimit: 10Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}
+{{- end }}

@@ -1,0 +1,100 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "dashboard") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "dashboard") | nindent 4 }}
+spec:
+  replicas: {{ .Values.dashboard.replicas }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "dashboard") | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "dashboard") | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: {{ .Values.observability.prometheusScrape | quote }}
+        prometheus.io/port: {{ .Values.observability.prometheusPort | quote }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "dashboard") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "dashboard") | nindent 20 }}
+      containers:
+        - name: dashboard
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.dashboard.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: metrics
+              containerPort: {{ .Values.observability.prometheusPort }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: TZ
+              value: Africa/Douala
+            - name: POSTGRES_HOST
+              value: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres") }}
+            - name: REDIS_HOST
+              value: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis") }}
+            - name: VAULT_ADDR
+              value: http://{{ include "vigil-apex.componentName" (dict "root" . "component" "vault") }}:8200
+            {{- range $k, $v := .Values.dashboard.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-secret") }}
+                  key: password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-secret") }}
+                  key: password
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /.next/cache
+          resources:
+            {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: cache
+          emptyDir:
+            sizeLimit: 512Mi
+{{- end }}

@@ -1,0 +1,28 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-config") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+data:
+  postgresql.conf: |
+    listen_addresses = '*'
+    max_connections = {{ .Values.postgres.config.max_connections }}
+    shared_buffers = {{ .Values.postgres.config.shared_buffers }}
+    work_mem = {{ .Values.postgres.config.work_mem }}
+    statement_timeout = {{ .Values.postgres.config.statement_timeout }}
+    idle_in_transaction_session_timeout = {{ .Values.postgres.config.idle_in_transaction_session_timeout }}
+    # Phase E2 — surface pool / saturation metrics through pg_stat_statements
+    shared_preload_libraries = 'pg_stat_statements'
+    pg_stat_statements.track = all
+    # WAL archiving for vigil-backup (Phase F1) — on-cluster the archive
+    # path is a PVC mount; ops decides whether to also stream to Synology.
+    wal_level = replica
+    archive_mode = on
+    archive_command = 'test ! -f /wal-archive/%f && cp %p /wal-archive/%f'
+    log_destination = 'stderr'
+    log_line_prefix = '%t [%p]: user=%u,db=%d,app=%a,client=%h '
+    log_lock_waits = on
+    log_min_duration_statement = 1000
+{{- end }}

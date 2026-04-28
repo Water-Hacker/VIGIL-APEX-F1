@@ -1,0 +1,97 @@
+{{- if .Values.vault.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "vault") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/vault-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      # IPC_LOCK is required by Vault to prevent secrets from being
+      # paged to swap. PSS `restricted` forbids it; ops who need
+      # production-grade unsealing must apply `restricted` only AFTER
+      # confirming the kernel has `vm.swappiness = 0` set, OR install
+      # this Pod into a privileged namespace by overriding the labels.
+      containers:
+        - name: vault
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.vault.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            capabilities:
+              add: ["IPC_LOCK"]
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false # vault writes to /vault/file
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 8200
+            - name: cluster
+              containerPort: 8201
+          env:
+            - name: VAULT_ADDR
+              value: "http://0.0.0.0:8200"
+          command: ["vault"]
+          args: ["server", "-config=/vault/config/config.hcl"]
+          volumeMounts:
+            - name: data
+              mountPath: /vault/file
+            - name: logs
+              mountPath: /vault/logs
+            - name: config
+              mountPath: /vault/config
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: 8200
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-config") }}
+        - name: logs
+          emptyDir:
+            sizeLimit: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.vault.persistence.size }}
+{{- end }}

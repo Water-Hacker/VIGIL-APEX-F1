@@ -1,0 +1,19 @@
+{{- range .Values.workers }}
+{{- $worker := . }}
+{{- $root := $ }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" $root "component" $worker.name) }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" $root "component" $worker.name) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" $root "component" $worker.name) | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ $root.Values.observability.prometheusPort }}
+      targetPort: metrics
+{{- end }}

@@ -1,0 +1,56 @@
+# Production overrides — Yaoundé primary cluster.
+
+global:
+  clusterRegion: cm-yaounde
+
+storageClass: "fast-ssd"
+
+postgres:
+  resources:
+    requests: { memory: "4Gi", cpu: "2" }
+    limits:   { memory: "16Gi", cpu: "8" }
+  persistence:
+    size: 500Gi
+
+redis:
+  resources:
+    requests: { memory: "1Gi", cpu: "500m" }
+    limits:   { memory: "8Gi", cpu: "2" }
+  persistence:
+    size: 100Gi
+
+vault:
+  resources:
+    requests: { memory: "512Mi", cpu: "250m" }
+    limits:   { memory: "2Gi", cpu: "1" }
+  persistence:
+    size: 50Gi
+
+workers:
+  - name: worker-pattern
+    image:
+      repository: vigil-apex/worker-pattern
+      tag: "0.1.0"
+    replicas: 5
+    env:
+      OTEL_SERVICE_NAME: worker-pattern
+      WORKER_NAME: worker-pattern
+      PROMETHEUS_PORT: "9100"
+    resources:
+      requests: { memory: "1Gi", cpu: "500m" }
+      limits:   { memory: "4Gi", cpu: "2" }
+    autoscaling:
+      enabled: true
+      minReplicas: 5
+      maxReplicas: 20
+      targetCPUUtilization: 70
+
+dashboard:
+  replicas: 5
+
+caddy:
+  replicas: 3
+
+certManager:
+  enabled: true
+  clusterIssuer: letsencrypt-prod

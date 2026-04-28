@@ -1,0 +1,22 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "dashboard") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "dashboard") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "dashboard") | nindent 4 }}
+  # Phase D7 — round-robin across replicas. Sessions live in Redis;
+  # no sticky-session affinity needed.
+  sessionAffinity: None
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+    - name: metrics
+      port: {{ .Values.observability.prometheusPort }}
+      targetPort: metrics
+{{- end }}

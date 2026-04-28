@@ -1,0 +1,18 @@
+# Argo CD repository registration. The architect creates this once
+# per cluster install. Subsequent Application resources reference the
+# repo by URL.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vigil-apex-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  type: git
+  url: https://github.com/Water-Hacker/VIGIL-APEX
+  # SSH key OR personal-access token go here. ESO-managed in production:
+  # the actual install pulls these from secret/vigil/argocd/repo-creds.
+  # password: <PAT>
+  # username: vigil-deploy

@@ -1,0 +1,71 @@
+# Dev-cluster overrides — kind / minikube / k3d. Use for the
+# install smoke described in docs/runbooks/R8-k8s-cutover.md.
+
+global:
+  clusterRegion: dev-local
+
+storageClass: "standard"  # kind/minikube default
+
+postgres:
+  resources:
+    requests: { memory: "256Mi", cpu: "100m" }
+    limits:   { memory: "1Gi", cpu: "500m" }
+  persistence:
+    size: 5Gi
+  config:
+    max_connections: 50
+    shared_buffers: 128MB
+
+redis:
+  resources:
+    requests: { memory: "128Mi", cpu: "50m" }
+    limits:   { memory: "512Mi", cpu: "250m" }
+  persistence:
+    size: 1Gi
+  config:
+    maxmemory: "256mb"
+    maxmemoryPolicy: "allkeys-lru"
+
+vault:
+  resources:
+    requests: { memory: "128Mi", cpu: "50m" }
+    limits:   { memory: "512Mi", cpu: "250m" }
+  persistence:
+    size: 1Gi
+
+workers:
+  - name: worker-pattern
+    image:
+      repository: vigil-apex/worker-pattern
+      tag: "dev"
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-pattern
+      WORKER_NAME: worker-pattern
+      PROMETHEUS_PORT: "9100"
+    resources:
+      requests: { memory: "128Mi", cpu: "50m" }
+      limits:   { memory: "512Mi", cpu: "500m" }
+    autoscaling:
+      enabled: false
+
+dashboard:
+  replicas: 1
+  resources:
+    requests: { memory: "128Mi", cpu: "50m" }
+    limits:   { memory: "512Mi", cpu: "500m" }
+
+caddy:
+  replicas: 1
+  service:
+    type: NodePort  # kind / minikube don't have LB by default
+  hosts:
+    - localhost
+
+certManager:
+  enabled: false  # Dev clusters use self-signed via Caddy's internal mTLS
+
+externalSecrets:
+  enabled: true
+  refreshInterval: "5m"
+  vaultRole: vigil-eso-dev
