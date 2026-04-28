@@ -942,6 +942,61 @@ The pattern coverage gate at `packages/patterns/vitest.config.ts`
 steady-state floor; new patterns land with their own fixture file
 before merge per the H5 CI hook.
 
+## 2026-04-28 — MOU-gated direct adapters (Phase-2-prep)
+
+Three new adapters scaffolded so MOU-day with MINFI / BEAC / ANIF
+is a credentials swap, not a re-architecture. All three live in the
+registry pre-MOU but emit zero events while their `<NAME>_ENABLED`
+env var is unset — the no-op design lets the worker pool stay uniform
+across environments.
+
+- `apps/adapter-runner/src/adapters/minfi-bis.ts` — MINFI Budget
+  Information System direct API. Authentication is mTLS with a
+  client cert issued by MINFI's internal CA at the MOU ceremony;
+  paginated payment fetch with cursor; emits `payment_order` events
+  carrying `recipient_rccm` / `recipient_niu` / `beneficiary_bank_country`
+  so the existing P-E-003 + P-C-005 patterns light up immediately.
+- `apps/adapter-runner/src/adapters/beac-payments.ts` — BEAC
+  payment-system bridge over OAuth2 client_credentials. In-process
+  token cache with 60-s pre-expiry refresh. BEAC pre-filters on
+  their side (cross-border, sanctioned-jurisdiction, sanctions-match,
+  FATF greylist) so we receive a digest, not the full transaction
+  set — privacy/scope constraint of the v5.1 commercial agreement.
+  Sanctions-flagged rows emit `sanction` events; the rest emit
+  `payment_order`.
+- `apps/adapter-runner/src/adapters/anif-amlscreen.ts` — ANIF (Cameroon
+  FIU) AML/PEP screening. Authentication is an `X-ANIF-Key` header
+  (rotated quarterly per F10 timer). Emits `pep_match` records for
+  the national PEP register (broader than OFAC) plus `sanction`
+  records ANIF aggregates from CEMAC / AU / UN. **MOU constraint:**
+  PEP rationale text MUST NOT surface on the public `/verify` page;
+  worker-dossier strips it when ANIF is the only citation source.
+
+Activation runbook at `docs/runbooks/R7-mou-activation.md` —
+step-by-step credential provisioning, env flip, restart, verify, and
+rollback. Per-MOU sections so any subset can land independently.
+
+Wiring landed alongside:
+- `apps/adapter-runner/src/adapters/_register.ts` — three new
+  side-effect imports under a "MOU-gated direct APIs" header
+- `infra/sources.json` — three new entries with `tier: "mou-gated"`
+  and notes documenting the activation gate
+- `infra/host-bootstrap/05-secret-materialisation.sh` — conditional
+  Vault → /run/secrets blocks for each MOU (only runs when its
+  `_ENABLED` env var is `1`, so a partial rollout doesn't abort the
+  whole bootstrap)
+- `apps/worker-adapter-repair/src/types.ts` — adds all three to
+  `CRITICAL_ADAPTERS`. Auto-promotion is disabled because the
+  "selector" here is really an API endpoint shape committed to in
+  the MOU; any change requires architect approval.
+- `commitlint.config.cjs` — new commit scopes `minfi-bis`,
+  `beac-payments`, `anif-amlscreen`
+
+The ROADMAP Phase-2 stanza already shows this work as part of the
+MOU-gated bullet; once the architect signs each MOU and follows
+R7, the bullet flips per-institution as confirmed in the per-MOU
+decision-log row R7 prescribes.
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

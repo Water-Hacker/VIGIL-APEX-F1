@@ -22,6 +22,14 @@ import './dgtcfm-treasury.js';
 import './dgi-attestations.js';
 import './minepat-bip.js';
 
+// ---- MOU-gated direct APIs (Phase-2-prep placeholders, no-op until enabled) ----
+// Each adapter remains in the registry pre-MOU but emits zero events when its
+// `<NAME>_ENABLED` env var is not '1'. Flipping live is a credentials swap, not
+// a code change — see the per-file header for the activation checklist.
+import './minfi-bis.js';
+import './beac-payments.js';
+import './anif-amlscreen.js';
+
 // ---- Sectoral ministries (largest procurement budgets) ----
 import './mintp-public-works.js';
 import './minee-energy.js';

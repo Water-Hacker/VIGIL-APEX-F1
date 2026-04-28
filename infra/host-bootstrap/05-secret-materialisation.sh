@@ -74,6 +74,24 @@ materialise secret/vigil/fabric/org1/tls_root    pem  "${SECRET_ROOT}/fabric_tls
 materialise secret/vigil/fabric/org1/client_cert pem  "${SECRET_ROOT}/fabric_client_cert"
 materialise secret/vigil/fabric/org1/client_key  pem  "${SECRET_ROOT}/fabric_client_key"
 
+# Phase-2 MOU-gated adapters. The materialise calls are conditional on the
+# corresponding ENABLED env var so a partial MOU rollout (one of MINFI / BEAC
+# / ANIF signed, the others pending) doesn't abort the whole bootstrap. When
+# ENABLED is unset we skip — the adapter then no-ops at runtime.
+if [[ "${MINFI_BIS_ENABLED:-0}" == "1" ]]; then
+  materialise secret/vigil/minfi-bis/client_cert pem "${SECRET_ROOT}/minfi_bis_client_cert"
+  materialise secret/vigil/minfi-bis/client_key  pem "${SECRET_ROOT}/minfi_bis_client_key"
+  materialise secret/vigil/minfi-bis/ca_cert     pem "${SECRET_ROOT}/minfi_bis_ca_cert"
+fi
+if [[ "${BEAC_ENABLED:-0}" == "1" ]]; then
+  materialise secret/vigil/beac/client_id     value "${SECRET_ROOT}/beac_client_id"
+  materialise secret/vigil/beac/client_secret value "${SECRET_ROOT}/beac_client_secret"
+  materialise secret/vigil/beac/tenant_id     value "${SECRET_ROOT}/beac_tenant_id"
+fi
+if [[ "${ANIF_ENABLED:-0}" == "1" ]]; then
+  materialise secret/vigil/anif/api_key       value "${SECRET_ROOT}/anif_api_key"
+fi
+
 # Per-worker Vault tokens — one short-lived AppRole-derived token each.
 # `vault token create` is invoked separately by 06-vault-policies.sh; this
 # script consumes the result.

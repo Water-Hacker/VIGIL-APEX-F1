@@ -375,6 +375,51 @@
       "honor_robots": true,
       "contact": { "ministry": null, "email": null, "tier": "public-no-contact" },
       "notes": "Free for qualifying anti-corruption bodies; key in Vault."
+    },
+    {
+      "id": "minfi-bis",
+      "name_fr": "MINFI Budget Information System (API directe — sous MOU)",
+      "name_en": "MINFI Budget Information System (direct API — MOU-gated)",
+      "url": "https://bis.minfi.cm/api/v3",
+      "jurisdiction": "CMR",
+      "evidence_grade": "HIGH",
+      "cron": "0 4 * * *",
+      "rate_interval_ms": 5000,
+      "daily_request_cap": 50000,
+      "fetch_strategy": "api",
+      "honor_robots": false,
+      "contact": { "ministry": "MINFI / DGTCFM", "email": "dgtcfm.transparence@minfi.cm", "tier": "mou-gated" },
+      "notes": "Phase-2 placeholder. Disabled until MINFI_BIS_ENABLED=1 + Vault credentials provisioned (mTLS client cert)."
+    },
+    {
+      "id": "beac-payments",
+      "name_fr": "BEAC — passerelle système de paiement (sous MOU)",
+      "name_en": "BEAC — payment-system bridge (MOU-gated)",
+      "url": "https://api.beac.int/payments/v1",
+      "jurisdiction": "CEMAC",
+      "evidence_grade": "HIGH",
+      "cron": "0 6 * * *",
+      "rate_interval_ms": 86400000,
+      "daily_request_cap": 5,
+      "fetch_strategy": "api",
+      "honor_robots": false,
+      "contact": { "ministry": "BEAC Yaoundé", "email": "info@beac.int", "tier": "mou-gated" },
+      "notes": "Phase-2 placeholder. Disabled until BEAC_ENABLED=1 + OAuth2 client_credentials provisioned."
+    },
+    {
+      "id": "anif-amlscreen",
+      "name_fr": "ANIF — registre PPE et liste de sanctions (sous MOU)",
+      "name_en": "ANIF — PEP register + sanctions list (MOU-gated)",
+      "url": "https://anif.minfi.cm/api/v2",
+      "jurisdiction": "CMR",
+      "evidence_grade": "HIGH",
+      "cron": "0 5 * * *",
+      "rate_interval_ms": 86400000,
+      "daily_request_cap": 5,
+      "fetch_strategy": "api",
+      "honor_robots": false,
+      "contact": { "ministry": "ANIF (CRF Cameroun)", "email": "anif@minfi.cm", "tier": "mou-gated" },
+      "notes": "Phase-2 placeholder. Disabled until ANIF_ENABLED=1 + API key provisioned. Note: PEP rationale text MUST NOT be surfaced on /verify per the MOU; worker-dossier strips it."
     }
   ]
 }

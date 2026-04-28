@@ -28,7 +28,12 @@ export const CRITICAL_ADAPTERS: ReadonlySet<string> = new Set([
   'dgi-attestations',
   'cour-des-comptes',
   'minfi-portal',
+  // MOU-gated direct APIs — auto-promote MUST NOT flip the selector
+  // (it's really an API endpoint shape committed to in the MOU).
+  // Architect approval required for any change.
+  'minfi-bis',
   'beac-payments',
+  'anif-amlscreen',
 ]);
 
 export function isCritical(sourceId: string): boolean {

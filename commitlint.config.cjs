@@ -77,6 +77,10 @@ module.exports = {
         'ring-3',
         'ring-4',
         'ring-5',
+        // Phase-2 MOU-gated adapters
+        'minfi-bis',
+        'beac-payments',
+        'anif-amlscreen',
       ],
     ],
     'subject-case': [2, 'never', ['upper-case', 'pascal-case', 'start-case']],
