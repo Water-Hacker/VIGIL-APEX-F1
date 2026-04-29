@@ -1,9 +1,9 @@
 import { GovernanceRepo, getDb } from '@vigil/db-postgres';
 import { notFound } from 'next/navigation';
 
-import { getLocale, loadMessages, t } from '../../../../lib/i18n.js';
+import { getLocale, loadMessages, t } from '../../../../lib/i18n';
 
-import { VoteCeremony } from './vote-ceremony.js';
+import { VoteCeremony } from './vote-ceremony';
 
 export const dynamic = 'force-dynamic';
 

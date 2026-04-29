@@ -14,6 +14,7 @@ export const zSha256Hex = z
   .string()
   .regex(/^[a-f0-9]{64}$/i, 'Must be a 64-hex-char SHA-256 digest')
   .transform((s) => s.toLowerCase());
+export type Sha256Hex = z.infer<typeof zSha256Hex>;
 
 export const zEthAddress = z
   .string()
@@ -23,6 +24,7 @@ export const zEthAddress = z
 export const zIpfsCid = z
   .string()
   .regex(/^b[a-z2-7]{55,}$/, 'Must be a CIDv1 base32');
+export type DocumentCid = z.infer<typeof zIpfsCid>;
 
 export const zPatternId = z
   .string()

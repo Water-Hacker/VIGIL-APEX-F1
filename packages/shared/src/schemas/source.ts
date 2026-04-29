@@ -70,6 +70,7 @@ export const zSourceEventKind = z.enum([
   'gazette_appointment',
   'pep_match',
   'press_article',
+  'satellite_imagery',
   'other',
 ]);
 export type SourceEventKind = z.infer<typeof zSourceEventKind>;

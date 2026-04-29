@@ -87,11 +87,11 @@ export function l4InsufficientPath(content: unknown): GuardResult {
   const s = typeof content === 'string' ? content : JSON.stringify(content);
   if (!INSUFFICIENT_RE.test(s)) return PASS('L4');
   // If the response IS insufficient_evidence, it must be ONLY that shape
-  const z = z
+  const schema = z
     .object({ status: z.literal('insufficient_evidence'), reason: z.string().min(1).max(500) })
     .strict();
   const obj = typeof content === 'string' ? JSON.parse(content) : content;
-  if (!z.safeParse(obj).success) {
+  if (!schema.safeParse(obj).success) {
     return { passed: false, layer: 'L4', reason: 'malformed insufficient_evidence shape' };
   }
   return PASS('L4');

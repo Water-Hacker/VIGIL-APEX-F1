@@ -1,6 +1,6 @@
-import { getLocale, loadMessages, t } from '../../../lib/i18n.js';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
 
-import { StatusLookup } from './lookup.js';
+import { StatusLookup } from './lookup';
 
 export const dynamic = 'force-dynamic';
 

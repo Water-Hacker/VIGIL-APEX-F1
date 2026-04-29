@@ -115,7 +115,7 @@ export class PolygonAnchor {
 
   /** Read on-chain commitment count — used for verification. */
   async totalCommitments(): Promise<number> {
-    const n = (await this.contract.totalCommitments()) as bigint;
+    const n = (await this.contract.getFunction('totalCommitments').staticCall()) as bigint;
     return Number(n);
   }
 
@@ -126,7 +126,7 @@ export class PolygonAnchor {
     committer: string;
     timestamp: number;
   }> {
-    const r = (await this.contract.getCommitment(id)) as [bigint, bigint, string, string, bigint];
+    const r = (await this.contract.getFunction('getCommitment').staticCall(id)) as [bigint, bigint, string, string, bigint];
     return {
       fromSeq: Number(r[0]),
       toSeq: Number(r[1]),

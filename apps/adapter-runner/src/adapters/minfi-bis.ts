@@ -86,10 +86,10 @@ class MinfiBisAdapter extends Adapter {
     // header level but never authenticated the TLS handshake.
     const dispatcher = new Agent({
       connect: {
-        cert,
-        key,
-        ca,
         rejectUnauthorized: true,
+        ...(cert !== null && { cert }),
+        ...(key !== null && { key }),
+        ...(ca !== null && { ca }),
       },
     });
 

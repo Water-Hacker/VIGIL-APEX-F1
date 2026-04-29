@@ -12,7 +12,6 @@
  */
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { createLogger } from '@vigil/observability';
 
@@ -21,8 +20,7 @@ import { closePool, getPool } from '../client.js';
 const logger = createLogger({ service: 'db-migrate' });
 
 async function main(): Promise<void> {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const migrationsDir = path.resolve(here, '../../../drizzle');
+  const migrationsDir = path.resolve(__dirname, '../../drizzle');
 
   const pool = await getPool();
   const client = await pool.connect();

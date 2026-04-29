@@ -44,12 +44,12 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       try {
         while (!cancelled) {
-          // XREAD BLOCK 15000 COUNT 50 STREAMS <name> <lastId>
+          // XREAD COUNT 50 BLOCK 15000 STREAMS <name> <lastId>
           const result = (await queue().redis.xread(
-            'BLOCK',
-            15_000,
             'COUNT',
             50,
+            'BLOCK',
+            15_000,
             'STREAMS',
             'vigil:realtime:broadcast',
             lastId,

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import type { DeadLetterRow } from '../../lib/dead-letter.server.js';
+import type { DeadLetterRow } from '../../lib/dead-letter.server';
 
 interface Labels {
   retryOne: string;

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { getFindingDetail } from '../../../../lib/findings.server.js';
+import { getFindingDetail } from '../../../../lib/findings.server';
 
 export const dynamic = 'force-dynamic';
 

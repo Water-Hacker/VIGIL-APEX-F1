@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { decideProposal } from '../../../../../lib/adapter-repair.server.js';
+import { decideProposal } from '../../../../../lib/adapter-repair.server';
 
 export const dynamic = 'force-dynamic';
 

@@ -4,6 +4,7 @@
   "private": true,
   "description": "CONAC SFTP delivery worker — manifest, ACK loop, format-adapter layer (W-25).",
   "license": "UNLICENSED",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",

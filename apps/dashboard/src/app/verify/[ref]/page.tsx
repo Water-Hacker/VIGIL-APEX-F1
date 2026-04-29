@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation';
 
-import { getLocale, loadMessages, t } from '../../../lib/i18n.js';
-import { getVerifyView } from '../../../lib/verify.server.js';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
+import { getVerifyView } from '../../../lib/verify.server';
 
-import { HashCheckWidget } from './hash-check.js';
+import { HashCheckWidget } from './hash-check';
 
 export const dynamic = 'force-dynamic';
 

@@ -23,6 +23,7 @@
     "@vigil/security": "workspace:*",
     "@vigil/shared": "workspace:*",
     "node-cron": "^3.0.3",
+    "playwright": "^1.47.2",
     "robots-parser": "^3.0.1",
     "undici": "^6.19.8",
     "zod": "^3.23.8"

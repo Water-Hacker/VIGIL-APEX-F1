@@ -1,8 +1,8 @@
 import { TipRepo, getDb } from '@vigil/db-postgres';
 
-import { getLocale, loadMessages, t } from '../../../lib/i18n.js';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
 
-import { TipDecryptForm } from './decrypt-form.js';
+import { TipDecryptForm } from './decrypt-form';
 
 export const dynamic = 'force-dynamic';
 

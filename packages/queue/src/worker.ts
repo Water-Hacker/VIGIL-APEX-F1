@@ -57,7 +57,7 @@ const DEDUP_AND_ACK_LUA = `
 export interface WorkerBaseConfig<TPayload> {
   readonly name: string;
   readonly stream: StreamName;
-  readonly schema: z.ZodType<TPayload>;
+  readonly schema: z.ZodType<TPayload, z.ZodTypeDef, unknown>;
   readonly client: QueueClient;
   readonly logger?: Logger;
   /** Max in-flight messages. Default 8. */

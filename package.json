@@ -56,7 +56,6 @@
     "eslint-plugin-import": "^2.30.0",
     "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-unicorn": "^55.0.0",
-    "gitleaks": "^8.18.4",
     "husky": "^9.1.6",
     "license-checker": "^25.0.1",
     "lint-staged": "^15.2.10",

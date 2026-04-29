@@ -1,7 +1,7 @@
-import { getLocale, loadMessages, t } from '../../../lib/i18n.js';
-import { listPendingProposals } from '../../../lib/adapter-repair.server.js';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
+import { listPendingProposals } from '../../../lib/adapter-repair.server';
 
-import { DecisionForm } from './decision-form.js';
+import { DecisionForm } from './decision-form';
 
 export const dynamic = 'force-dynamic';
 

@@ -29,13 +29,13 @@ export class SourceRepo {
         target: sourceSchema.adapterHealth.source_id,
         set: {
           status: row.status,
-          last_run_at: row.last_run_at,
-          last_success_at: row.last_success_at,
-          last_error: row.last_error,
-          consecutive_failures: row.consecutive_failures,
-          rows_in_last_run: row.rows_in_last_run,
-          next_scheduled_at: row.next_scheduled_at,
           updated_at: new Date(),
+          ...(row.last_run_at !== undefined && { last_run_at: row.last_run_at }),
+          ...(row.last_success_at !== undefined && { last_success_at: row.last_success_at }),
+          ...(row.last_error !== undefined && { last_error: row.last_error }),
+          ...(row.consecutive_failures !== undefined && { consecutive_failures: row.consecutive_failures }),
+          ...(row.rows_in_last_run !== undefined && { rows_in_last_run: row.rows_in_last_run }),
+          ...(row.next_scheduled_at !== undefined && { next_scheduled_at: row.next_scheduled_at }),
         },
       });
   }

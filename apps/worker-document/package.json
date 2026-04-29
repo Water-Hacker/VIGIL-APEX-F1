@@ -4,6 +4,7 @@
   "private": true,
   "description": "Document fetch → SHA-256 → MIME → OCR → IPFS pin pipeline.",
   "license": "UNLICENSED",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",

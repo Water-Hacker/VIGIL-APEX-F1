@@ -4,6 +4,7 @@
   "private": true,
   "description": "Renders bilingual FR/EN PDF dossiers; signs with YubiKey-backed GPG; pins to IPFS.",
   "license": "UNLICENSED",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",

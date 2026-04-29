@@ -1,7 +1,7 @@
 import { getDb } from '@vigil/db-postgres';
 import { sql } from 'drizzle-orm';
 
-import { getLocale, loadMessages, t } from '../../lib/i18n.js';
+import { getLocale, loadMessages, t } from '../../lib/i18n';
 
 export const dynamic = 'force-dynamic';
 

@@ -1,7 +1,7 @@
-import { getLocale, loadMessages, t } from '../../lib/i18n.js';
-import { getCalibrationView } from '../../lib/calibration.server.js';
+import { getLocale, loadMessages, t } from '../../lib/i18n';
+import { getCalibrationView } from '../../lib/calibration.server';
 
-import { RunNowButton } from './run-now.js';
+import { RunNowButton } from './run-now';
 
 export const dynamic = 'force-dynamic';
 

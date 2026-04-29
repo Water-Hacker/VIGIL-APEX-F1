@@ -72,7 +72,7 @@ export class LlmRouter {
    *             quote-match can verify excerpts against source documents.
    */
   async call<T>(
-    opts: LlmCallOptions & { responseSchema?: z.ZodSchema<T> },
+    opts: LlmCallOptions & { responseSchema?: z.ZodType<T, z.ZodTypeDef, unknown> },
     ctx?: GuardContext,
   ): Promise<LlmCallResult<T extends string ? string : T>> {
     this.cost.enforceBeforeCall();

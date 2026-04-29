@@ -1,7 +1,7 @@
-import { getLocale, loadMessages, t } from '../../lib/i18n.js';
-import { listDeadLetter } from '../../lib/dead-letter.server.js';
+import { getLocale, loadMessages, t } from '../../lib/i18n';
+import { listDeadLetter } from '../../lib/dead-letter.server';
 
-import { DeadLetterTable } from './table.js';
+import { DeadLetterTable } from './table';
 
 export const dynamic = 'force-dynamic';
 

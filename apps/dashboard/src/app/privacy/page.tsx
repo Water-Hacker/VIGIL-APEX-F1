@@ -1,4 +1,4 @@
-import { getLocale, loadMessages } from '../../lib/i18n.js';
+import { getLocale, loadMessages } from '../../lib/i18n';
 
 export const dynamic = 'force-dynamic';
 

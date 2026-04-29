@@ -20,7 +20,8 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^10.0.1",
+    "@simplewebauthn/server": "^11.0.0",
+    "@simplewebauthn/types": "^10.0.0",
     "@vigil/observability": "workspace:*",
     "@vigil/shared": "workspace:*",
     "libsodium-wrappers-sumo": "^0.7.13",

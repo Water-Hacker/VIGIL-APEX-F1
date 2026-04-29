@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 
-import { getLocale, loadMessages, t } from '../../../lib/i18n.js';
-import { getFindingDetail } from '../../../lib/findings.server.js';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
+import { getFindingDetail } from '../../../lib/findings.server';
 
 export const dynamic = 'force-dynamic';
 

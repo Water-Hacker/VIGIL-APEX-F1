@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { incrementRetry, markResolved } from '../../../../lib/dead-letter.server.js';
+import { incrementRetry, markResolved } from '../../../../lib/dead-letter.server';
 
 export const dynamic = 'force-dynamic';
 

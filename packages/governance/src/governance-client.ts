@@ -28,7 +28,7 @@ export class GovernanceReadClient {
     abstain: number;
     recuse: number;
   }> {
-    const r = (await this.contract.getProposal(idx)) as [string, string, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
+    const r = (await this.contract.getFunction('getProposal').staticCall(idx)) as [string, string, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
     return {
       findingHash: r[0],
       uri: r[1],
@@ -43,11 +43,11 @@ export class GovernanceReadClient {
   }
 
   async totalProposals(): Promise<number> {
-    return Number((await this.contract.totalProposals()) as bigint);
+    return Number((await this.contract.getFunction('totalProposals').staticCall()) as bigint);
   }
 
   async quorumRequired(): Promise<number> {
-    return Number((await this.contract.quorumRequired()) as bigint);
+    return Number((await this.contract.getFunction('quorumRequired').staticCall()) as bigint);
   }
 
   /** Watch contract events. Returns an unsubscribe function. */

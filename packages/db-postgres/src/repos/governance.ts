@@ -19,13 +19,13 @@ export class GovernanceRepo {
         set: {
           pillar: row.pillar,
           display_name: row.display_name,
-          yubikey_serial: row.yubikey_serial,
-          yubikey_aaguid: row.yubikey_aaguid,
           enrolled_at: row.enrolled_at,
-          resigned_at: row.resigned_at,
           bio_fr: row.bio_fr,
           bio_en: row.bio_en,
-          is_active: row.is_active,
+          ...(row.yubikey_serial !== undefined && { yubikey_serial: row.yubikey_serial }),
+          ...(row.yubikey_aaguid !== undefined && { yubikey_aaguid: row.yubikey_aaguid }),
+          ...(row.resigned_at !== undefined && { resigned_at: row.resigned_at }),
+          ...(row.is_active !== undefined && { is_active: row.is_active }),
         },
       });
   }

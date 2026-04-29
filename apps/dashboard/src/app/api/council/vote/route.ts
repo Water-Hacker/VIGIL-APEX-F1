@@ -6,7 +6,7 @@ import { Constants } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import type { AuthenticationResponseJSON } from '@simplewebauthn/server';
+import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 
 /**
  * POST /api/council/vote

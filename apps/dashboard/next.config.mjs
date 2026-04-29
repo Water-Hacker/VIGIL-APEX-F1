@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 
+import { createRequire } from 'node:module';
+
 // Per-surface CSP — operator dashboards, public verify, and the tip portal
 // each have different trust requirements. Defining them here (rather than
 // at the Caddy layer) means they ship together with the route code, so a
@@ -103,6 +105,20 @@ const nextConfig = {
         ],
       },
     ];
+  },
+  webpack: (config) => {
+    // libsodium-wrappers-sumo@0.7.16 ships an ESM build that references a
+    // sibling .mjs file that pnpm hoists to a different package directory,
+    // which webpack cannot resolve. Force resolution through the package's
+    // CJS main entry, which is self-contained.
+    const sumoCjs = createRequire(import.meta.url).resolve(
+      'libsodium-wrappers-sumo',
+    );
+    config.resolve.alias = {
+      ...(config.resolve.alias ?? {}),
+      'libsodium-wrappers-sumo$': sumoCjs,
+    };
+    return config;
   },
 };
 

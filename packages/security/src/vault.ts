@@ -51,7 +51,7 @@ export class VaultClient {
       apiVersion: 'v1',
       endpoint: addr,
       token,
-      namespace: namespace ?? undefined,
+      ...(namespace !== undefined && { namespace }),
     });
     const c = new VaultClient(client, opts);
     await c.startTokenRenew();

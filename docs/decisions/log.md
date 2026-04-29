@@ -1803,6 +1803,228 @@ separate signed commit per OPERATIONS.md §3, then flip Status to FINAL.
 
 ---
 
+## DECISION-009  Workspace typecheck/build unblock — path-map switch + dep reconciliation
+
+| Field | Value |
+|---|---|
+| Date | 2026-04-29 |
+| Decided by | Junior Thuram Nana, Sovereign Architect (executed by build agent under explicit "PROCEED" authorisation) |
+| Status | PROVISIONAL |
+
+### Decision (proposed)
+
+A clean checkout failed `pnpm typecheck` with **1909 TypeScript errors across
+30 of 34 workspace projects** and `pnpm build` with 20 of 33 build failures.
+This pass restores green typecheck (47/47) and green build (33/33) without
+relaxing any of the strict-mode flags committed in [tsconfig.base.json](../../tsconfig.base.json).
+
+#### A — Build topology: path map points at compiled `dist/`
+
+[tsconfig.base.json](../../tsconfig.base.json) `paths` block previously mapped
+every `@vigil/*` to `packages/*/src`. Cross-package imports pulled raw `.ts`
+into each consumer's TS program; with `rootDir: "src"` per package, this
+produced **1472 TS6059 "not under rootDir" errors** (~77% of total). Switched
+the path map to point at `packages/*/dist`. Apps now consume the published
+`.d.ts` declarations emitted by each package's own `tsc -p` step. Turbo's
+existing `build → ^build` topology already encodes the required ordering, so
+no `pipeline` change was needed. Project references (the canonical alternative
+considered) would have required `composite: true` on every package and
+references entries on every consumer — a much larger diff with the same
+runtime behaviour.
+
+#### B — Phantom and missing dependencies reconciled
+
+- Removed the bogus `gitleaks: ^8.18.4` npm devDependency from
+  [package.json](../../package.json). The `gitleaks` script invokes the Go
+  binary, which is now installed via `apt install gitleaks` (8.26.0). The
+  npm package called `gitleaks` is unrelated and only goes up to v1.0.0,
+  which is what blocked `pnpm install` on a fresh checkout.
+- Added direct deps where workers imported a library transitively but didn't
+  declare it: `playwright` → adapter-runner; `ioredis` → @vigil/adapters
+  (used by Tier 3 rate-limiter / robots checker); `drizzle-orm` →
+  worker-anchor, worker-score, worker-minfi-api, worker-adapter-repair,
+  dashboard; `pg` + `@types/pg` → audit-verifier; `libsodium-wrappers-sumo`
+  + types → dashboard; `@vigil/queue` (workspace) → dashboard.
+
+#### C — Upstream version drift resolved
+
+- `@simplewebauthn/server`: bumped from `^10.0.1` to `^11.0.0`. The fido.ts
+  source already used the v11 `credential` API field; v10 still expected
+  `authenticator`, so the code never typechecked against the declared
+  version. `@simplewebauthn/browser` bumped likewise.
+- `@simplewebauthn/types` added as explicit dep to packages/security and
+  apps/dashboard. `AuthenticationResponseJSON` and `RegistrationResponseJSON`
+  are not re-exported from the server package's main entry; correct import
+  source is the types package.
+- `@anthropic-ai/sdk`: bumped from `^0.30.1` to `^0.40.0`. v0.30 predates
+  prompt-caching support on `TextBlockParam`, which the provider relies on
+  per SRD §18 cost discipline (claude-api skill: "apps built with this
+  skill should include prompt caching").
+
+#### D — exactOptionalPropertyTypes call-site fixes
+
+[packages/security/src/vault.ts](../../packages/security/src/vault.ts) and
+[packages/db-postgres/src/repos/{governance,source}.ts](../../packages/db-postgres/src/repos/)
+had drizzle update sets explicitly assigning `undefined` to optional
+columns. Strict-mode rejects this. Refactored to the **conditional spread**
+pattern already established at
+[packages/db-postgres/src/repos/finding.ts](../../packages/db-postgres/src/repos/finding.ts):
+`...(value !== undefined && { value })`. This preserves null/value writes
+while letting drizzle treat `undefined` as omit. Same pattern applied to
+[apps/adapter-runner/src/adapters/minfi-bis.ts](../../apps/adapter-runner/src/adapters/minfi-bis.ts)
+mTLS material loading, where `Buffer | null` from `readMtlsMaterial()` is
+now spread conditionally into `undici.Agent.connect`.
+
+#### E — Schema additions surfaced by callers
+
+- [packages/shared/src/schemas/common.ts](../../packages/shared/src/schemas/common.ts):
+  exported the inferred types `Sha256Hex` and `DocumentCid` (the latter
+  aliased to `z.infer<typeof zIpfsCid>`). worker-conac-sftp casts to these
+  at the manifest boundary; they had no other home.
+- [packages/shared/src/schemas/source.ts](../../packages/shared/src/schemas/source.ts):
+  added `'satellite_imagery'` to `zSourceEventKind`. Patterns
+  `P-D-001/002/003/005` filter on this kind for ground-truth verification
+  (per SRD §21.4 satellite-corroborated patterns); the literal was missing
+  from the enum, making four pattern files non-compileable.
+
+#### F — Surgical code fixes
+
+- [packages/queue/src/worker.ts](../../packages/queue/src/worker.ts):
+  widened `WorkerBaseConfig.schema` from `z.ZodType<TPayload>` to
+  `z.ZodType<TPayload, z.ZodTypeDef, unknown>`. ZodObject literals with
+  optional fields infer a more permissive input type than output;
+  unconstraining the input parameter makes them assignable.
+- [packages/llm/src/router.ts](../../packages/llm/src/router.ts): same
+  treatment to `responseSchema?: z.ZodType<T, z.ZodTypeDef, unknown>`.
+- [packages/llm/src/guards.ts](../../packages/llm/src/guards.ts): renamed
+  the local TDZ-shadowed `const z = z.object(...)` to `const schema = ...`.
+  The shadow caused TS7022 + TS2448 cascade.
+- [packages/governance/src/governance-client.ts](../../packages/governance/src/governance-client.ts)
+  and [packages/audit-chain/src/polygon-anchor.ts](../../packages/audit-chain/src/polygon-anchor.ts):
+  switched dynamic `contract.method(...)` calls to ethers v6's
+  `contract.getFunction('method').staticCall(...)`. Previously the dynamic
+  property was `ContractMethod | undefined`, which TS2722-rejected the
+  invocation. The explicit `getFunction()` returns a non-undefined handle.
+- [packages/db-postgres/src/scripts/migrate.ts](../../packages/db-postgres/src/scripts/migrate.ts):
+  replaced the CJS-illegal `import.meta.url` with `__dirname`, and
+  corrected the relative path to drizzle/ (the previous `../../../drizzle`
+  resolved to `packages/drizzle/` from any plausible runtime cwd).
+- [contracts/contracts/VIGILAnchor.sol](../../contracts/contracts/VIGILAnchor.sol):
+  added explicit `import {Ownable}` so the constructor's
+  `Ownable(msg.sender)` reference resolves under Solidity 0.8.27 + OZ 5.0.
+
+#### G — Three workers switched to ESM
+
+worker-document, worker-conac-sftp, and worker-dossier import ESM-only
+upstream packages (`kubo-rpc-client`, `file-type`, `franc`). Previously
+their `package.json` had no `"type"` (defaults to CJS), and TS emitted
+`require()` calls that would fail at runtime. Setting
+`"type": "module"` flips emit to ESM. Source already uses the `.js`
+extension on relative imports, which is the ESM-required form.
+
+#### H — Dashboard webpack adjustments
+
+[apps/dashboard/next.config.mjs](../../apps/dashboard/next.config.mjs)
+gained a webpack `resolve.alias` mapping `libsodium-wrappers-sumo` to its
+CJS main entry via `createRequire(import.meta.url).resolve(...)`. The v0.7.16
+ESM build references a sibling `.mjs` in a different pnpm package
+directory that webpack cannot resolve. Mapping to the self-contained CJS
+build is the documented community workaround.
+[apps/dashboard/tsconfig.json](../../apps/dashboard/tsconfig.json) gained
+`baseUrl: "."` and a local `@/*` paths entry — the dashboard source uses
+the Next.js conventional `@/lib/...` alias which had no resolver. Twenty-
+some `.js`-suffixed relative imports in dashboard pages were stripped to
+match `moduleResolution: "bundler"` semantics.
+
+#### I — Contracts test refactor
+
+[contracts/test/VIGILGovernance.test.ts](../../contracts/test/VIGILGovernance.test.ts)
+was written against an older two-arg `openProposal(findingHash, uri)`
+signature. The current contract uses the commit-reveal flow per
+VIGILGovernance.sol §180 (commit `keccak256(findingHash, uri, salt,
+sender)`, wait `REVEAL_DELAY = 2 minutes`, then
+`openProposal(findingHash, uri, salt)`). Added an
+`openWithCommitReveal()` helper at the top of the test file and routed
+all six failing assertions through it. Tests now reflect the actual
+on-chain protocol.
+
+### Outcome
+
+| Metric | Before | After |
+|---|---|---|
+| `pnpm typecheck` errors | 1909 | 0 |
+| Workspace projects with errors | 30 / 34 | 0 |
+| `pnpm build` failures | 20 / 33 | 0 |
+| Stale `.d.ts` polluting `packages/*/src/` | 136 files | 0 |
+
+CI's `typecheck` and `lint` jobs at [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
+should now pass on `main`. Turbo cache key is identical pre/post for
+unchanged packages, so the local build is deterministic.
+
+### Alternatives considered
+
+- **TypeScript project references (composite mode)**. Rejected for this
+  pass — touches every package's `tsconfig.json` and adds a `references`
+  array per consumer. Same result as the path-map switch with ~25× the diff.
+  Re-open if `tsc -b` watch-mode performance becomes a concern.
+- **Loosening `exactOptionalPropertyTypes`**. Rejected — SRD §20 strictness
+  is binding; conditional-spread is the established repo pattern.
+- **Pinning `@simplewebauthn/server` at v10 and rewriting fido.ts to the
+  v10 API**. Rejected — code intent (the `credential` field name) clearly
+  reflects v11. The `@types/node` pattern in the workspace is to track
+  upstream LTS.
+- **Casting drizzle update sets to `any`**. Rejected — would silently
+  re-allow the very class of bugs the strict mode is designed to catch.
+
+### Rationale
+
+Without this pass, every Phase 1 worker would deploy from a build that has
+never typechecked end-to-end. EXEC §43.3 holds the build agent responsible
+for "compileable code at every commit"; the prior PROVISIONAL DECISION-008
+production-readiness pass shipped behaviour-correct hardening but did not
+compile cleanly on a fresh checkout. This pass is the precondition for any
+further code work in Phase 1.
+
+### Reversibility
+
+Every change is a localised diff:
+- The path map swap is one block in [tsconfig.base.json](../../tsconfig.base.json);
+  reverting `dist` → `src` undoes the topology choice.
+- Each dep addition / version bump is a single line in a `package.json`.
+- Conditional-spread refactors are textually local and behaviour-preserving
+  for any input that drizzle accepted before.
+- ESM-mode flips on three workers are reversible via dropping `"type":
+  "module"`; relative-import `.js` extensions remain valid in either mode.
+
+### Audit chain reference
+
+audit_event_id: pending (audit chain ships per DECISION-008 Tier 6; this
+entry will be migrated retroactively at first chain-init per EXEC §37.3 —
+recognised exemption pattern in `scripts/check-decisions.ts`).
+
+### Architect sign-off
+
+PROVISIONAL pending architect review. To promote: review each subsection
+(A–I) as a separate signed commit per OPERATIONS.md §3, then flip Status
+to FINAL. Recommend reviewing in order A → B → C, since later subsections
+depend on the earlier ones holding.
+
+### Follow-up notes (not blocking)
+
+- The `eslint-config-next` peer-dep mismatch (ESLint 9 vs config requiring
+  ^7/^8) is a non-fatal warning at `pnpm install` time; dashboard build
+  emits one ESLint "Invalid Options" warning ("useEslintrc, extensions has
+  been removed") before falling back to its own linter. Tracked for a
+  future ESLint flat-config migration; does not block the build.
+- The `hardhat-gas-reporter` peer-dep mismatch on `@nomicfoundation/hardhat-toolbox`
+  is similarly non-fatal.
+- `@anthropic-ai/sdk` is now `^0.40.0`; latest stable is 0.91.x. Bumping
+  further is desirable per claude-api skill guidance ("default to the
+  latest and most capable Claude models") but out of scope for an unblock
+  pass.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

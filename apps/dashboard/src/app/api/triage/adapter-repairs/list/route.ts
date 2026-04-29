@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { listPendingProposals } from '../../../../../lib/adapter-repair.server.js';
+import { listPendingProposals } from '../../../../../lib/adapter-repair.server';
 
 export const dynamic = 'force-dynamic';
 
