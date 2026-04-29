@@ -7,7 +7,7 @@ import {
   type AdapterRunContext,
 } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
+import { Agent, request } from 'undici';
 import { z } from 'zod';
 
 /**
@@ -80,6 +80,19 @@ class MinfiBisAdapter extends Adapter {
     const key = readMtlsMaterial('MINFI_BIS_CLIENT_KEY', '/run/secrets/minfi_bis_client_key');
     const ca = readMtlsMaterial('MINFI_BIS_CA_CERT', '/run/secrets/minfi_bis_ca_cert');
 
+    // Tier 3 hardening — wire the mTLS material into a real undici Agent so
+    // the request actually presents the client certificate. The previous
+    // shape only loaded the bytes and `void`-ed them; that worked at the
+    // header level but never authenticated the TLS handshake.
+    const dispatcher = new Agent({
+      connect: {
+        cert,
+        key,
+        ca,
+        rejectUnauthorized: true,
+      },
+    });
+
     const since = process.env.MINFI_BIS_LOOKBACK_HOURS
       ? `?since=${new Date(Date.now() - Number(process.env.MINFI_BIS_LOOKBACK_HOURS) * 3600_000).toISOString()}`
       : '?since=' + new Date(Date.now() - 25 * 3600_000).toISOString(); // 25h covers daily cron + slack
@@ -92,14 +105,11 @@ class MinfiBisAdapter extends Adapter {
       const r = await request(url, {
         method: 'GET',
         headers: {
-          'user-agent': Constants.ADAPTER_DEFAULT_USER_AGENT,
+          'user-agent': Constants.getAdapterUserAgent(),
           accept: 'application/json',
         },
-        // mTLS: undici supports `dispatcher` with a TLS-enabled Agent; in dev
-        // we fall back to the headers-only path. Production replaces this
-        // with a TLS-configured undici.Agent that wires the cert/key/ca below.
+        dispatcher,
       });
-      void cert; void key; void ca; // referenced by the prod TLS agent
 
       if (r.statusCode === 401 || r.statusCode === 403) {
         throw new Errors.SourceBlockedError(SOURCE_ID, { url, status: r.statusCode });

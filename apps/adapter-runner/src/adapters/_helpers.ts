@@ -129,7 +129,7 @@ export async function apiJsonFetch<T>(
   extraHeaders: Readonly<Record<string, string>> = {},
 ): Promise<{ data: T; status: number; responseSha: string; rawText: string }> {
   const headers: Record<string, string> = {
-    'user-agent': Constants.ADAPTER_DEFAULT_USER_AGENT,
+    'user-agent': Constants.getAdapterUserAgent(),
     accept: 'application/json',
     ...extraHeaders,
   };
@@ -206,7 +206,7 @@ export function provenance(
   status: number,
   responseSha: string,
   ctx: AdapterRunContext,
-  ua: string = Constants.ADAPTER_DEFAULT_USER_AGENT,
+  ua: string = Constants.getAdapterUserAgent(),
 ): Schemas.SourceEvent['provenance'] {
   return {
     url,

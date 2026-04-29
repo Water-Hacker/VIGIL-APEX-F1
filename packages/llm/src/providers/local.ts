@@ -43,7 +43,17 @@ export class LocalLlmProvider implements ProviderClient {
 
   constructor(opts: LocalProviderOptions = {}) {
     this.logger = opts.logger ?? createLogger({ service: 'llm-local' });
-    this.baseUrl = opts.baseUrl ?? process.env.LOCAL_LLM_BASE_URL ?? 'http://host.docker.internal:11434';
+    // The tier-2 sovereign LLM is reached via an explicit base URL — either
+    // injected by the caller or set in env. We refuse to silently target
+    // host.docker.internal: a misconfigured local-tier route would mask
+    // failures behind ECONNREFUSED rather than surface "DEGRADED" mode.
+    const baseUrl = opts.baseUrl ?? process.env.LOCAL_LLM_BASE_URL;
+    if (!baseUrl) {
+      throw new Error(
+        'LocalLlmProvider: baseUrl unset. Set LOCAL_LLM_BASE_URL or pass opts.baseUrl. The tier-2 sovereign LLM endpoint must be explicit.',
+      );
+    }
+    this.baseUrl = baseUrl;
     this.primary = opts.modelPrimary ?? process.env.LOCAL_LLM_MODEL_PRIMARY ?? 'qwen2.5:72b';
     this.fallback = opts.modelFallback ?? process.env.LOCAL_LLM_MODEL_FALLBACK ?? 'deepseek-r1:70b';
     this.timeoutMs = opts.timeoutMs ?? 120_000;

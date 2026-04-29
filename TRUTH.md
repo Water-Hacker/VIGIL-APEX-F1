@@ -113,7 +113,7 @@ distributes ingestion, not authority.
 
 | Fact | Value | Source | Status |
 |---|---|---|---|
-| Source count | **26** (13 Cameroonian + 13 international) | SRD §10 (resolves W-05) | committed |
+| Source count | **27** (14 Cameroonian + 13 international; +1 vs original 26 — adds `anif-amlscreen` MOU-gated AML feed, see DECISION-008) | SRD §10 (resolves W-05) | committed |
 | Pattern count | **43** | SRD §21; BUILD-V2 §45-52 (resolves W-04) | committed |
 | Pattern categories | 8 (A=procurement, B=BO, C=price, D=performance, E=sanctions, F=network, G=document, H=temporal) | SRD §21.2 | committed |
 | Database — authoritative | PostgreSQL 16 + TimescaleDB + pgvector | SRD §07 | committed |

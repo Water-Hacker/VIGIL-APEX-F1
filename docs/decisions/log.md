@@ -1586,6 +1586,223 @@ Status to FINAL.
 
 ---
 
+## DECISION-008  Production-readiness pass (Tier 1–7)
+
+| Field | Value |
+|---|---|
+| Date | 2026-04-28 |
+| Decided by | Junior Thuram Nana, Sovereign Architect (proposed by build agent under approved plan `lucky-doodling-hennessy`) |
+| Status | PROVISIONAL |
+
+### Decision (proposed)
+
+Land seven tiers of production-hardening per the architect-approved plan.
+Tier 1–4 are mechanical / config hygiene with zero behaviour change for
+correctly-configured environments. Tier 5 is forward-leaning Phase 4
+work (WebAuthn assertion verifier + civil-society read-only portal)
+landed early per architect election. Tier 6 adds critical-path test
+suites. Tier 7 is this entry.
+
+#### Tier 1 — fail-closed gates
+
+| File | Behaviour |
+|---|---|
+| `apps/worker-anchor/src/index.ts` | Refuses boot on null/empty `POLYGON_ANCHOR_CONTRACT`; warns when `POLYGON_RPC_URL` falls back to public RPC |
+| `apps/audit-verifier/src/index.ts` | Same null-address + RPC-fallback discipline |
+| `apps/worker-conac-sftp/src/index.ts` | New `requiredEnv()` and `requireGpgFingerprint()` helpers refuse empty / `PLACEHOLDER` / non-40-hex fingerprints; signer manifest `name` reads `SIGNER_NAME` env |
+| `apps/worker-dossier/src/index.ts` | gpg-sign failure now returns retry instead of writing unsigned dossier; explicit `VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER=true` opt-in only allowed pre-Phase-1 + non-production. Boot-time GPG fingerprint validation |
+| `packages/federation-stream/src/server.ts` | Insecure-mode fallback only when `VIGIL_FEDERATION_INSECURE_OK=true`; otherwise throws on missing TLS material |
+| `apps/worker-minfi-api/src/index.ts` | New `loadMinfiMtls()` pre-checks each cert/key/ca path with `existsSync` before `readFileSync` |
+| `apps/adapter-runner/src/index.ts` | `PROXY_TOR_ENABLED=1` now requires explicit `PROXY_TOR_SOCKS_HOST` |
+| `packages/llm/src/providers/local.ts` | Refuses to default `LOCAL_LLM_BASE_URL` to `host.docker.internal`; tier-2 sovereign LLM endpoint must be explicit |
+| `packages/db-postgres/drizzle.config.ts` | Throws if `POSTGRES_URL` unset — drizzle migrations cannot silently target a localhost dev DB |
+
+#### Tier 2 — config hygiene
+
+`.env.example` gained 64 entries previously read in code: connection-string
+aliases (POSTGRES_URL, REDIS_URL), Sentry / DEPLOY_ENV, NEXT_PUBLIC_*,
+TURNSTILE_SECRET_KEY, ADAPTER_FIRST_CONTACT_ARCHIVE,
+ADAPTER_REPAIR_THRESHOLD, OCR_POOL_SIZE, AUDIT_VERIFY_INTERVAL_MS,
+SIGNER_NAME, GPG_FINGERPRINT, MINFI_API_*, MOU-gated adapter envs
+(ANIF/BEAC/MINFI_BIS) including the new `ANIF_PEP_SURFACE_ALLOWED`,
+ALEPH_API_KEY / OPENCORPORATES_API_KEY, federation envs (Phase-3
+scaffold-only), Fabric envs (Phase-2 scaffold-only),
+VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER, VIGIL_FEDERATION_INSECURE_OK,
+LLM_MONTHLY_CIRCUIT_FRACTION, PLAYWRIGHT_BASE_URL, CI.
+
+`packages/shared/src/constants.ts` adds `getAdapterUserAgent()` honouring
+the `ADAPTER_USER_AGENT` env override. Wired into the two upstream
+helpers `apps/adapter-runner/src/adapters/_helpers.ts` and
+`packages/adapters/src/fingerprint.ts`. Per-adapter callers retain the
+`ADAPTER_DEFAULT_USER_AGENT` constant for back-compat.
+
+The hardcoded signer name in `apps/worker-conac-sftp/src/index.ts` is now
+env-driven via `SIGNER_NAME`. Refuses to ship if unset / `PLACEHOLDER`.
+
+The ~30 orphaned `.env.example` keys (phase gates, ECE thresholds,
+Keycloak admin) were retained pending wiring into their respective
+runtime paths (docker-compose env-file passthroughs). Removing in this
+pass risked breaking deployment recipes; flagged for follow-up.
+
+#### Tier 3 — adapter base hardening
+
+New `packages/adapters/src/`:
+
+- `rate-limit.ts` — `DailyRateLimiter` with Redis-backed daily counter
+  keyed by `adapter:ratelimit:<src>:<yyyy-mm-dd>`, 36 h TTL covers day
+  rollover. Pre-flight gate refuses fetches once `daily_request_cap` is
+  reached; the counter increments only on successful runs (failed /
+  blocked attempts don't burn the budget).
+- `robots.ts` — `RobotsChecker` with cache-once-per-24h Redis cache
+  and a real RFC-9309-style longest-match parser. When registry sets
+  `honor_robots: true`, refuses fetches violating `Disallow`.
+  Failure-to-fetch robots is treated as allow.
+- `backoff.ts` — `runWithBackoff` retries 3× at 0/10s/30s on transient
+  errors only (5xx / ECONNRESET / ETIMEDOUT / ENOTFOUND); 4xx propagates
+  immediately so the first-contact handler still runs.
+
+Wired into `apps/adapter-runner/src/run-one.ts` as pre-flight gates;
+constructed once at adapter-runner main.
+
+`apps/adapter-runner/src/adapters/minfi-bis.ts` — wired the previously-
+ignored mTLS bytes into a real `undici.Agent` dispatcher; production
+TLS handshake now actually presents the client cert.
+
+`apps/adapter-runner/src/adapters/anif-amlscreen.ts` — added
+`ANIF_PEP_SURFACE_ALLOWED` egress gate. PEP rows are stripped at the
+adapter unless the env explicitly opts in. Sanction rows remain
+unaffected (they're public commitments).
+
+#### Tier 4 — source-count reconciliation
+
+`TRUTH.md` Section C bumped 26 → 27 with a footnote pointing to this
+decision. `infra/sources.json` `version` 1 → 2 with a `_note` field
+pointing to DECISION-008. The 27th source is `anif-amlscreen` (MOU-
+gated AML feed added post-original-26).
+
+#### Tier 5 — Phase-4 forward work
+
+WebAuthn assertion verification (closes the C5b TODO):
+
+- `packages/db-postgres/drizzle/0006_webauthn_challenge.sql` — adds
+  `governance.webauthn_challenge` table with TTL semantics; adds
+  `member.webauthn_credential_id`, `member.webauthn_public_key`,
+  `member.webauthn_counter` columns.
+- `packages/db-postgres/src/schema/governance.ts` mirrors the schema in
+  Drizzle. New `bytea` custom type for the COSE public key.
+- `packages/db-postgres/src/repos/governance.ts` adds
+  `insertWebauthnChallenge`, `findOpenWebauthnChallenge`,
+  `consumeWebauthnChallenge`, `bumpWebauthnCounter`.
+- `apps/dashboard/src/app/api/council/vote/challenge/route.ts` — new
+  `GET` issues a 32-byte challenge bound to (proposal_id, voter_address,
+  member_id), persists with 15-min TTL.
+- `apps/dashboard/src/app/api/council/vote/route.ts` — replaces the
+  `void parsed.data.webauthn_assertion` line with a real
+  `verifyAuthentication` call (from `@vigil/security`) bound to the open
+  challenge. Bumps the WebAuthn counter on success and consumes the
+  challenge so it can't be replayed.
+
+Civil-society read-only portal:
+
+- `apps/dashboard/src/lib/civil-society.server.ts` — three accessors:
+  `listAuditLogPage`, `listClosedProposals`, `listCouncilComposition`.
+  Subject IDs in audit-log rows are masked to a deterministic short
+  hash (W-15 surface). Council composition exposes pillar fill state
+  only; no individual identities (EXEC §13).
+- Three pages under `apps/dashboard/src/app/civil-society/`:
+  `audit-log`, `proposals-closed`, `council-composition`.
+- `apps/dashboard/src/middleware.ts` adds `/civil-society` route rule
+  allowing `civil_society`, `auditor`, or `architect` Keycloak roles.
+
+#### Tier 6 — critical-path tests
+
+Seven new test files:
+
+- `packages/audit-chain/__tests__/canonical.test.ts` — bodyHash
+  determinism (key order, NFC unicode), rowHash chain, null prev_hash
+  semantics.
+- `packages/governance/__tests__/quorum.test.ts` — 3-of-5 escalate,
+  4-of-5 release, recusal-as-abstain, expiry, double-vote rejection.
+- `packages/security/__tests__/sodium.test.ts` — sealed-box round-trip,
+  cross-keypair rejection, tamper detection.
+- `packages/security/__tests__/shamir.test.ts` — 3-of-5 reconstruction
+  (any 3 of 5 succeed; 2 of 5 don't), duplicate-X / zero-X / length-
+  inconsistent rejection. Uses an in-test split helper since
+  production code only exposes combine.
+- `packages/adapters/__tests__/backoff.test.ts` — transient
+  classification, retry budget, no-retry-on-4xx.
+- `packages/adapters/__tests__/robots.test.ts` — agent-specific
+  override, longest-match path rule, cache-then-reuse, 404-as-allow,
+  fail-open on network error.
+- `packages/adapters/__tests__/rate-limit.test.ts` — under cap allows,
+  at cap refuses, day-rollover yields fresh bucket, TTL set.
+
+The 43-pattern fixture suite was already complete in
+`packages/patterns/test/category-*` (44 test files; one per pattern
+plus a registry-baseline). Earlier ring-completeness audit incorrectly
+reported zero pattern tests; corrected here.
+
+Audit-verifier `verifyCrossWitness` test deferred — current function
+signature hardcodes `pg.Pool` and `FabricBridge`; testing requires a
+refactor to accept abstract DB and bridge interfaces. Tracked as
+follow-up.
+
+### Alternatives considered
+
+- Aggressive rewrite of the 30 orphaned `.env.example` keys (wire all
+  into code, remove the rest). Rejected — many are docker-compose
+  env-file passthroughs and Keycloak admin tooling that lives outside
+  the Node runtime. Removing them risks deployment recipe breakage.
+- Implement L8/L9/L10/L12 worker-extract hallucination guards. Rejected
+  again — they require char_span / language-detect / entity-tagging
+  plumbing at the worker-extract layer that doesn't exist in this
+  pass's scope.
+- Delete the empty `apps/api/.gitkeep` directory. Rejected — vestigial
+  but harmless (no `package.json`, so pnpm workspace ignores it);
+  destructive without architect explicit confirmation.
+
+### Rationale
+
+The pass closes seven concrete operational risks:
+
+1. Misconfigured workers no longer boot silently with placeholder
+   contract addresses, fingerprints, or PostgreSQL URLs.
+2. Dossiers cannot ship to CONAC unsigned in production (chain-of-
+   custody breach prevented).
+3. Federation server cannot fall back to plaintext gRPC without
+   explicit opt-in.
+4. MINFI mTLS handshake actually presents the client cert (was
+   header-only before).
+5. ANIF PEP rows cannot leak to the operator UI without an explicit
+   egress flag.
+6. Adapter rate-limit and robots.txt commitments are now enforced at
+   runtime, not advisory.
+7. Council vote-mirror entries can no longer be filed without a real
+   WebAuthn assertion bound to a server-issued challenge.
+
+### Reversibility
+
+Each tier is an independent group of diffs and trivially revertible.
+The migration `0006_webauthn_challenge.sql` adds nullable columns and
+a table — running it forward is safe; running its reverse is just
+DROP TABLE + ALTER DROP COLUMN.
+
+### Audit chain reference
+
+audit_event_id: pending (audit chain ships in the prior commit; this
+entry will be migrated retroactively at first chain-init per
+EXEC §37.3 — recognised exemption pattern in
+`scripts/check-decisions.ts`).
+
+### Architect sign-off
+
+PROVISIONAL pending architect review. The seven tiers were planned in
+`/home/kali/.claude/plans/lucky-doodling-hennessy.md` (architect-
+approved before Tier 1 started). To promote: review each tier as a
+separate signed commit per OPERATIONS.md §3, then flip Status to FINAL.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

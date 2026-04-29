@@ -90,4 +90,41 @@ export class GovernanceRepo {
       .limit(1);
     return rows[0] ?? null;
   }
+
+  async insertWebauthnChallenge(row: typeof govSchema.webauthnChallenge.$inferInsert): Promise<void> {
+    await this.db.insert(govSchema.webauthnChallenge).values(row);
+  }
+
+  async findOpenWebauthnChallenge(proposalId: string, voterAddress: string) {
+    const rows = await this.db
+      .select()
+      .from(govSchema.webauthnChallenge)
+      .where(
+        and(
+          eq(govSchema.webauthnChallenge.proposal_id, proposalId),
+          eq(govSchema.webauthnChallenge.voter_address, voterAddress.toLowerCase()),
+        ),
+      )
+      .orderBy(sql`issued_at DESC`)
+      .limit(1);
+    const row = rows[0] ?? null;
+    if (!row) return null;
+    if (row.consumed_at !== null) return null;
+    if (new Date(row.expires_at).getTime() < Date.now()) return null;
+    return row;
+  }
+
+  async consumeWebauthnChallenge(id: string): Promise<void> {
+    await this.db
+      .update(govSchema.webauthnChallenge)
+      .set({ consumed_at: new Date() })
+      .where(eq(govSchema.webauthnChallenge.id, id));
+  }
+
+  async bumpWebauthnCounter(memberId: string, newCounter: number): Promise<void> {
+    await this.db
+      .update(govSchema.member)
+      .set({ webauthn_counter: newCounter })
+      .where(eq(govSchema.member.id, memberId));
+  }
 }

@@ -27,6 +27,26 @@ import { buildManifest, type FormatAdapterVersion } from './format-adapter.js';
 
 const logger = createLogger({ service: 'worker-conac-sftp' });
 
+function requiredEnv(name: string): string {
+  const v = process.env[name];
+  if (!v || v.trim() === '' || v.startsWith('PLACEHOLDER')) {
+    throw new Error(
+      `${name} is unset or PLACEHOLDER; refusing to ship dossier with incomplete signer manifest`,
+    );
+  }
+  return v;
+}
+
+function requireGpgFingerprint(): string {
+  const v = process.env.GPG_FINGERPRINT;
+  if (!v || v.startsWith('PLACEHOLDER') || !/^[0-9A-Fa-f]{40}$/.test(v.replace(/\s+/g, ''))) {
+    throw new Error(
+      'GPG_FINGERPRINT is unset, PLACEHOLDER, or not a 40-hex-char OpenPGP fingerprint; CONAC manifests cannot ship unsigned',
+    );
+  }
+  return v.replace(/\s+/g, '').toUpperCase();
+}
+
 const zPayload = z.object({
   finding_id: z.string().uuid(),
   dossier_ref: z.string().regex(/^VA-\d{4}-\d{4,6}$/),
@@ -140,8 +160,8 @@ class ConacSftpWorker extends WorkerBase<Payload> {
           en_pdf: { sha256: enPdf.sha256, bytes: enPdf.bytes.length },
           evidence_archive: { sha256: '0'.repeat(64), bytes: 0 },
           signer: {
-            name: 'Junior Thuram Nana',
-            pgp_fingerprint: process.env.GPG_FINGERPRINT ?? 'PLACEHOLDER',
+            name: requiredEnv('SIGNER_NAME'),
+            pgp_fingerprint: requireGpgFingerprint(),
             signed_at: new Date().toISOString(),
           },
           audit_anchor: { audit_event_id: 'pending', polygon_tx_hash: null },

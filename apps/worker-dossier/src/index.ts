@@ -162,14 +162,31 @@ class DossierWorker extends WorkerBase<Payload> {
     const pdfBytes = await readFile(pdfPath);
     const pdfSha256 = createHash('sha256').update(pdfBytes).digest('hex');
 
-    // GPG sign — YubiKey-backed; gpg-agent prompts for touch
-    let signature: Buffer | null = null;
-    let signatureFingerprint: string | null = null;
+    // GPG sign — YubiKey-backed; gpg-agent prompts for touch.
+    // Production discipline: an unsigned dossier breaks chain-of-custody for
+    // CONAC delivery + Polygon anchor. We refuse to write the row unless
+    // signing succeeds, EXCEPT when the operator has explicitly opted into
+    // the dev fallback. The opt-in is scoped to non-production phases only.
+    let signature: Buffer;
+    let signatureFingerprint: string;
     try {
       signature = await gpgDetachSign(pdfBytes, { fingerprint: this.gpgFingerprint });
       signatureFingerprint = this.gpgFingerprint;
     } catch (e) {
-      logger.error({ err: e }, 'gpg-sign-failed; continuing unsigned (dev only)');
+      const devUnsignedAllowed =
+        process.env.VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER === 'true' &&
+        process.env.NODE_ENV !== 'production' &&
+        Number(process.env.VIGIL_PHASE ?? '0') < 1;
+      if (!devUnsignedAllowed) {
+        logger.error({ err: e }, 'gpg-sign-failed; refusing to write unsigned dossier');
+        return { kind: 'retry', reason: 'gpg-sign-failed', delay_ms: 60_000 };
+      }
+      logger.warn(
+        { err: e },
+        'gpg-sign-failed; continuing UNSIGNED — VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER opt-in',
+      );
+      signature = Buffer.alloc(0);
+      signatureFingerprint = `DEV-UNSIGNED-${this.gpgFingerprint}`;
     }
 
     // IPFS pin
@@ -179,6 +196,7 @@ class DossierWorker extends WorkerBase<Payload> {
 
     // Persist dossier row — sibling worker-conac-sftp reads this by finding_id
     // to discover both language variants before delivery.
+    const signed = signature.length > 0;
     await this.dossierRepo.insert({
       id: randomUUID(),
       ref,
@@ -187,8 +205,8 @@ class DossierWorker extends WorkerBase<Payload> {
       status: 'rendered',
       pdf_sha256: pdfSha256,
       pdf_cid: cid,
-      signature_fingerprint: signatureFingerprint,
-      signature_at: signature ? new Date() : null,
+      signature_fingerprint: signed ? signatureFingerprint : signatureFingerprint, // dev fallback prefixes "DEV-UNSIGNED-" so downstream can detect
+      signature_at: signed ? new Date() : null,
       rendered_at: new Date(),
       delivered_at: null,
       acknowledged_at: null,
@@ -257,12 +275,19 @@ async function main(): Promise<void> {
   const dossierRepo = new DossierRepo(db);
   const entityRepo = new EntityRepo(db);
 
+  const gpgFingerprint = process.env.GPG_FINGERPRINT;
+  if (!gpgFingerprint || gpgFingerprint.startsWith('PLACEHOLDER') ||
+      !/^[0-9A-Fa-f]{40}$/.test(gpgFingerprint.replace(/\s+/g, ''))) {
+    throw new Error(
+      'GPG_FINGERPRINT is unset, PLACEHOLDER, or not a valid 40-hex OpenPGP fingerprint; refusing to start worker-dossier',
+    );
+  }
   const worker = new DossierWorker(
     findingRepo,
     dossierRepo,
     entityRepo,
     process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001',
-    process.env.GPG_FINGERPRINT ?? 'PLACEHOLDER_FP_REPLACE_AT_M0c',
+    gpgFingerprint.replace(/\s+/g, '').toUpperCase(),
     queue,
   );
   await worker.start();

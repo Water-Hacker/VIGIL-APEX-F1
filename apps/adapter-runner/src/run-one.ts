@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { Adapter, ProxyManager } from '@vigil/adapters';
+import { DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
 import type { SourceRepo } from '@vigil/db-postgres';
 import {
   adapterRunsTotal,
@@ -8,7 +9,7 @@ import {
   type Logger,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
-import { Errors, type Schemas } from '@vigil/shared';
+import { Constants, Errors, type Schemas } from '@vigil/shared';
 
 /**
  * Payload fields adapters use to advertise a downstream document URL.
@@ -105,15 +106,70 @@ export interface RunOneArgs {
   readonly sourceRepo: SourceRepo;
   readonly correlationId: string;
   readonly logger: Logger;
+  readonly rateLimiter?: DailyRateLimiter;
+  readonly robotsChecker?: RobotsChecker;
 }
 
 export async function runOne(args: RunOneArgs): Promise<void> {
-  const { src, adapter, proxyMgr, queue, sourceRepo, correlationId, logger } = args;
+  const {
+    src,
+    adapter,
+    proxyMgr,
+    queue,
+    sourceRepo,
+    correlationId,
+    logger,
+    rateLimiter,
+    robotsChecker,
+  } = args;
   const childLogger = logger.child({ source: src.id, correlation_id: correlationId });
 
   await withCorrelation(correlationId, 'adapter-runner', async () => {
     const previous = await sourceRepo.getHealth(src.id).catch(() => null);
     const wasBlocked = previous?.status === 'blocked';
+
+    // Tier 3 pre-flight: refuse to fetch if today's daily cap is reached.
+    if (rateLimiter && Number(src.daily_request_cap) > 0) {
+      const allowed = await rateLimiter.allow(src.id, Number(src.daily_request_cap));
+      if (!allowed) {
+        const count = await rateLimiter.count(src.id);
+        childLogger.warn(
+          { cap: src.daily_request_cap, count },
+          'rate-limit-cap-reached; skipping run',
+        );
+        await sourceRepo.upsertHealth({
+          source_id: src.id,
+          status: previous?.status ?? 'green',
+          last_run_at: new Date(),
+          last_success_at: previous?.last_success_at ?? null,
+          last_error: 'rate-limit-cap-reached',
+          consecutive_failures: previous?.consecutive_failures ?? 0,
+          rows_in_last_run: 0,
+          next_scheduled_at: null,
+        });
+        return;
+      }
+    }
+
+    // Tier 3 pre-flight: robots.txt honoring (registry-driven).
+    if (robotsChecker && src.honor_robots && src.url) {
+      const ua = Constants.getAdapterUserAgent();
+      const allowed = await robotsChecker.isAllowed(src.url, ua);
+      if (!allowed) {
+        childLogger.warn({ url: src.url, ua }, 'robots-disallow; skipping run');
+        await sourceRepo.upsertHealth({
+          source_id: src.id,
+          status: 'amber',
+          last_run_at: new Date(),
+          last_success_at: previous?.last_success_at ?? null,
+          last_error: 'robots-disallow',
+          consecutive_failures: previous?.consecutive_failures ?? 0,
+          rows_in_last_run: 0,
+          next_scheduled_at: null,
+        });
+        return;
+      }
+    }
 
     const proxy = proxyMgr.endpointFor(src.id, wasBlocked);
     childLogger.info({ proxy: proxy.tier }, 'adapter-run-start');
@@ -182,6 +238,9 @@ export async function runOne(args: RunOneArgs): Promise<void> {
         });
       }
 
+      if (rateLimiter) {
+        await rateLimiter.increment(src.id);
+      }
       childLogger.info(
         { events: resultRows, docs: result.documents.length, elapsed_ms: result.elapsed_ms },
         'adapter-run-ok',

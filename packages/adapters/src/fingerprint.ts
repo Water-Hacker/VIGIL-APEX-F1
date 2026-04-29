@@ -27,7 +27,7 @@ const VIEWPORT_POOL: ReadonlyArray<{ width: number; height: number }> = [
 export function pickFingerprint(seed?: string): FingerprintProfile {
   const i = seed ? hashToInt(seed) : Math.floor(Math.random() * VIEWPORT_POOL.length);
   return {
-    userAgent: Constants.ADAPTER_DEFAULT_USER_AGENT,
+    userAgent: Constants.getAdapterUserAgent(),
     viewport: VIEWPORT_POOL[i % VIEWPORT_POOL.length]!,
     timezone: 'Africa/Douala',
     locale: i % 2 === 0 ? 'fr-CM' : 'en-CM',

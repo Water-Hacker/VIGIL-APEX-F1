@@ -38,10 +38,20 @@ async function main(): Promise<void> {
   const chain = new HashChain(pool, logger);
 
   const signer = new UnixSocketSignerAdapter();
-  const polygonContract =
-    process.env.POLYGON_ANCHOR_CONTRACT ?? '0x0000000000000000000000000000000000000000';
+  const polygonContract = process.env.POLYGON_ANCHOR_CONTRACT;
+  if (!polygonContract || /^0x0+$/i.test(polygonContract)) {
+    throw new Error(
+      'POLYGON_ANCHOR_CONTRACT is unset or null-address; refusing to start worker-anchor. Set the deployed contract address before boot.',
+    );
+  }
+  const polygonRpcUrl = process.env.POLYGON_RPC_URL;
+  if (!polygonRpcUrl) {
+    logger.warn(
+      'POLYGON_RPC_URL unset; falling back to public polygon-rpc.com — SRD §22 expects an authenticated provider (Alchemy/Infura) in production',
+    );
+  }
   const anchor = new PolygonAnchor({
-    rpcUrl: process.env.POLYGON_RPC_URL ?? 'https://polygon-rpc.com',
+    rpcUrl: polygonRpcUrl ?? 'https://polygon-rpc.com',
     contractAddress: polygonContract,
     signer,
     chainId: Number(process.env.POLYGON_CHAIN_ID ?? 137),

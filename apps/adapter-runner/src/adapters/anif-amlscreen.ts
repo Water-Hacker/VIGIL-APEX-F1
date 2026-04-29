@@ -121,7 +121,21 @@ class AnifAmlScreenAdapter extends Adapter {
     }
 
     const events: Schemas.SourceEvent[] = [];
-    for (const pep of parsed.data.pep_records) {
+    // Tier 3 hardening — PEP-data egress gate. ANIF supplies politically
+    // exposed-person matches; surfacing those to the operator UI requires
+    // the architect to explicitly opt in via ANIF_PEP_SURFACE_ALLOWED. A
+    // misconfigured `ANIF_ENABLED=1` without the egress flag must NOT
+    // cause PEP rows to land. Sanction rows (Section list, OFAC echoes)
+    // remain available since those are public commitments.
+    const pepSurfaceAllowed = process.env.ANIF_PEP_SURFACE_ALLOWED === '1';
+    if (!pepSurfaceAllowed && parsed.data.pep_records.length > 0) {
+      this.logger.warn(
+        { pep_records_dropped: parsed.data.pep_records.length },
+        'anif pep_match events stripped at adapter — set ANIF_PEP_SURFACE_ALLOWED=1 to surface',
+      );
+    }
+    const pepRecords = pepSurfaceAllowed ? parsed.data.pep_records : [];
+    for (const pep of pepRecords) {
       events.push(
         this.makeEvent({
           kind: 'pep_match',

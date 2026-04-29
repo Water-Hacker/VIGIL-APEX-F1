@@ -200,8 +200,17 @@ export class FederationStreamServer {
         ? grpc.ServerCredentials.createSsl(clientCa, [{ private_key: key, cert_chain: cert }], true)
         : grpc.ServerCredentials.createSsl(null, [{ private_key: key, cert_chain: cert }], false);
     } else {
+      // Insecure-mode is gated behind an explicit opt-in. Phase-3 cutover
+      // runbooks must NEVER set VIGIL_FEDERATION_INSECURE_OK; when missing,
+      // the server refuses to start. This protects against a misconfigured
+      // production deploy silently degrading to plaintext gRPC.
+      if (process.env.VIGIL_FEDERATION_INSECURE_OK !== 'true') {
+        throw new Error(
+          'federation-stream: tlsCertPath/tlsKeyPath unset and VIGIL_FEDERATION_INSECURE_OK is not "true"; refusing to start without TLS',
+        );
+      }
       this.logger.warn(
-        'federation-stream-server-insecure (no TLS cert/key configured; intended for in-process tests + dev only)',
+        'federation-stream-server-insecure (VIGIL_FEDERATION_INSECURE_OK=true; for in-process tests + dev only)',
       );
       credentials = grpc.ServerCredentials.createInsecure();
     }

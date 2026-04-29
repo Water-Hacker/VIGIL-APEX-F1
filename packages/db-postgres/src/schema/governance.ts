@@ -1,5 +1,22 @@
 import { sql } from 'drizzle-orm';
-import { boolean, index, integer, pgSchema, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  customType,
+  index,
+  integer,
+  pgSchema,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 export const governanceSchema = pgSchema('governance');
 
@@ -17,10 +34,31 @@ export const member = governanceSchema.table(
     bio_fr: text('bio_fr').notNull(),
     bio_en: text('bio_en').notNull(),
     is_active: boolean('is_active').notNull().default(true),
+    // 0006 — WebAuthn assertion-verify (Tier 5 / DECISION-008)
+    webauthn_credential_id: text('webauthn_credential_id'),
+    webauthn_public_key: bytea('webauthn_public_key'),
+    webauthn_counter: bigint('webauthn_counter', { mode: 'number' }).notNull().default(0),
   },
   (t) => ({
     addressUnique: unique('member_address_unique').on(t.eth_address),
     activeIdx: index('member_active_idx').on(t.is_active, t.pillar),
+  }),
+);
+
+export const webauthnChallenge = governanceSchema.table(
+  'webauthn_challenge',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    member_id: uuid('member_id'),
+    voter_address: text('voter_address').notNull(),
+    proposal_id: uuid('proposal_id').notNull(),
+    challenge_b64u: text('challenge_b64u').notNull(),
+    issued_at: timestamp('issued_at', { withTimezone: true }).notNull().defaultNow(),
+    expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumed_at: timestamp('consumed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    voterIdx: index('webauthn_challenge_voter_idx').on(t.voter_address, t.expires_at),
   }),
 );
 

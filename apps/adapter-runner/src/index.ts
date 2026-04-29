@@ -10,7 +10,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { ProxyManager, AdapterRegistry } from '@vigil/adapters';
+import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
 import { SourceRepo, getDb } from '@vigil/db-postgres';
 import {
   createLogger,
@@ -63,7 +63,16 @@ async function main(): Promise<void> {
     logger.warn({ err: e }, 'bright-data-credentials-not-set; only direct egress active');
   }
 
-  // Proxy manager + adapter registry
+  // Proxy manager + adapter registry. Tor egress requires explicit host
+  // configuration; refusing to silently fall back to localhost prevents the
+  // tier-3 escalation path from "succeeding" against a local socket that
+  // doesn't exist (silent ECONNREFUSED → adapter-down).
+  const torEnabled = process.env.PROXY_TOR_ENABLED === '1';
+  if (torEnabled && !process.env.PROXY_TOR_SOCKS_HOST) {
+    throw new Error(
+      'PROXY_TOR_ENABLED=1 requires PROXY_TOR_SOCKS_HOST; refusing to default to localhost',
+    );
+  }
   const proxyMgr = new ProxyManager({
     hetznerDcEnabled: true,
     ...(brightDataUser !== undefined && { brightDataUsername: brightDataUser }),
@@ -82,6 +91,10 @@ async function main(): Promise<void> {
   registerShutdown('queue', () => queue.close());
   const db = await getDb();
   const sourceRepo = new SourceRepo(db);
+
+  // Tier 3 hardening — rate-limit + robots.txt enforcement (Tier 3, W-13).
+  const rateLimiter = new DailyRateLimiter(queue.redis);
+  const robotsChecker = new RobotsChecker(queue.redis);
 
   // Schedule each registered adapter that has an entry in sources.json
   const tasks: ScheduledTask[] = [];
@@ -108,6 +121,8 @@ async function main(): Promise<void> {
           sourceRepo,
           correlationId,
           logger,
+          rateLimiter,
+          robotsChecker,
         }).catch((e) => logger.error({ err: e, source: src.id }, 'run-one-failed'));
       },
       { timezone: 'Africa/Douala', scheduled: true },

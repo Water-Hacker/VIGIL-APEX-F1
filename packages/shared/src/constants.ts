@@ -81,9 +81,17 @@ export const CALIBRATION_PER_PATTERN_TARGET = 200;
  * Protocol — adapter discipline
  * ===========================================================================*/
 
-/** Default identification when scraping a public source. SRD §13.4. */
+/** Default identification when scraping a public source. SRD §13.4.
+ *  At runtime, code should call `getAdapterUserAgent()` to honour the
+ *  ADAPTER_USER_AGENT env override per OPERATIONS.md. */
 export const ADAPTER_DEFAULT_USER_AGENT =
   'VIGIL-APEX/1.0 (anti-corruption pilot, +https://vigilapex.cm/contact)';
+
+/** Resolves the User-Agent to send on adapter requests. Honours the
+ *  ADAPTER_USER_AGENT env override; falls back to ADAPTER_DEFAULT_USER_AGENT. */
+export function getAdapterUserAgent(): string {
+  return process.env.ADAPTER_USER_AGENT?.trim() || ADAPTER_DEFAULT_USER_AGENT;
+}
 
 export const ADAPTER_MIN_REQUEST_INTERVAL_MS = 2_000;
 export const ADAPTER_DAILY_REQUEST_CAP_DEFAULT = 10_000;

@@ -38,9 +38,19 @@ async function main(): Promise<void> {
   const pool = await getPool();
   const chain = new HashChain(pool, logger);
   const signer = new UnixSocketSignerAdapter();
+  const polygonContract = process.env.POLYGON_ANCHOR_CONTRACT;
+  if (!polygonContract || /^0x0+$/i.test(polygonContract)) {
+    throw new Error(
+      'POLYGON_ANCHOR_CONTRACT is unset or null-address; refusing to start audit-verifier.',
+    );
+  }
+  const polygonRpcUrl = process.env.POLYGON_RPC_URL;
+  if (!polygonRpcUrl) {
+    logger.warn('POLYGON_RPC_URL unset; falling back to public polygon-rpc.com');
+  }
   const anchor = new PolygonAnchor({
-    rpcUrl: process.env.POLYGON_RPC_URL ?? 'https://polygon-rpc.com',
-    contractAddress: process.env.POLYGON_ANCHOR_CONTRACT ?? '0x0000000000000000000000000000000000000000',
+    rpcUrl: polygonRpcUrl ?? 'https://polygon-rpc.com',
+    contractAddress: polygonContract,
     signer,
     chainId: Number(process.env.POLYGON_CHAIN_ID ?? 137),
     logger,

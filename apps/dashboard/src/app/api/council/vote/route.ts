@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 import { GovernanceRepo, getDb } from '@vigil/db-postgres';
+import { verifyAuthentication } from '@vigil/security';
 import { Constants } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
+
+import type { AuthenticationResponseJSON } from '@simplewebauthn/server';
 
 /**
  * POST /api/council/vote
@@ -48,11 +51,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid', issues: parsed.error.issues }, { status: 400 });
   }
 
-  // TODO Phase C5b — verify the WebAuthn assertion against the council
-  // member's enrolled credential (security/fido.ts). Skipped here so the
-  // happy path stays self-contained; full verifier ships with C15a.
-  void parsed.data.webauthn_assertion;
-
   const db = await getDb();
   const repo = new GovernanceRepo(db);
 
@@ -68,6 +66,49 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (member.pillar !== parsed.data.voter_pillar) {
     return NextResponse.json({ error: 'pillar-address-mismatch' }, { status: 403 });
+  }
+
+  // C5b — WebAuthn assertion verification (Tier 5 / DECISION-008).
+  // The browser already broadcast the on-chain tx via vigil-polygon-signer;
+  // this proves the same authenticated session signed the matching off-chain
+  // mirror under the council member's enrolled credential.
+  if (!member.webauthn_credential_id || !member.webauthn_public_key) {
+    return NextResponse.json(
+      { error: 'webauthn-not-enrolled', detail: 'no enrolled credential for this member' },
+      { status: 409 },
+    );
+  }
+  const challenge = await repo.findOpenWebauthnChallenge(parsed.data.proposal_id, voterAddress);
+  if (!challenge) {
+    return NextResponse.json(
+      { error: 'no-open-challenge', detail: 'request a fresh challenge via GET /api/council/vote/challenge' },
+      { status: 409 },
+    );
+  }
+  const rpId = process.env.WEBAUTHN_RP_ID ?? 'vigilapex.cm';
+  const expectedOrigin = process.env.WEBAUTHN_RP_ORIGIN
+    ? process.env.WEBAUTHN_RP_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+    : [`https://${rpId}`];
+  try {
+    const result = await verifyAuthentication({
+      response: parsed.data.webauthn_assertion as AuthenticationResponseJSON,
+      expectedChallenge: challenge.challenge_b64u,
+      rp: { rpName: 'VIGIL APEX', rpId, origin: expectedOrigin },
+      credential: {
+        credentialId: member.webauthn_credential_id,
+        publicKey: new Uint8Array(member.webauthn_public_key as unknown as Buffer),
+        counter: Number(member.webauthn_counter),
+      },
+    });
+    await repo.consumeWebauthnChallenge(challenge.id);
+    if (result.newCounter !== Number(member.webauthn_counter)) {
+      await repo.bumpWebauthnCounter(member.id, result.newCounter);
+    }
+  } catch (e) {
+    return NextResponse.json(
+      { error: 'webauthn-verify-failed', detail: e instanceof Error ? e.message : 'unknown' },
+      { status: 401 },
+    );
   }
 
   const existing = await repo.getVote(parsed.data.proposal_id, voterAddress);

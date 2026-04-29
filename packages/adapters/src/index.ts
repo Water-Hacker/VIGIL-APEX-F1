@@ -10,3 +10,6 @@ export * from './registry.js';
 export * from './proxy.js';
 export * from './fingerprint.js';
 export * from './first-contact.js';
+export * from './rate-limit.js';
+export * from './robots.js';
+export * from './backoff.js';
