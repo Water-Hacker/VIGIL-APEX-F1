@@ -1,6 +1,6 @@
 import { Neo4jClient, Cypher } from '@vigil/db-neo4j';
-import { getDb } from '@vigil/db-postgres';
-import { LlmRouter } from '@vigil/llm';
+import { CallRecordRepo, getDb } from '@vigil/db-postgres';
+import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
   createLogger,
   installShutdownHandler,
@@ -33,29 +33,14 @@ type Payload = z.infer<typeof zPayload>;
 /**
  * Resolution strategy:
  *   1. Rule-pass: deterministic deduplication (RCCM number, exact-match name, NIU)
- *   2. LLM-pass: for ambiguous candidates, ask Haiku 4.5 to merge or split
+ *   2. LLM-pass: for ambiguous candidates, ask Haiku 4.5 to merge or split.
+ *      Routed through `SafeLlmRouter` (DECISION-011) so the call carries a
+ *      registered prompt name + version, hits the canary check, runs at the
+ *      doctrine-default temperature, and persists a `llm.call_record` row.
  *   3. Review queue: pairs in 0.70-0.92 similarity band → er_review_queue
  *
  * Per SRD §15.5.1.
  */
-
-const ER_SYSTEM = `
-You disambiguate Cameroonian person and company aliases across French and English.
-You receive a list of name strings; output their canonical clusters with a confidence score.
-
-Output JSON shape:
-{
-  "clusters": [
-    {"canonical": "<best canonical name>", "aliases": ["<alias1>", "..."], "kind": "person|company|public_body", "confidence": 0.0..1.0}
-  ]
-}
-
-Rules:
-- Treat 'Jean-Paul MBARGA', 'J.P. Mbarga', 'Mbarga J.' as the same person if context permits.
-- Companies with identical RCCM numbers are the same company; otherwise treat them as distinct.
-- Confidence < 0.70 → output as separate single-element clusters (let the review queue handle it).
-- If you cannot disambiguate, return {"status":"insufficient_evidence","reason":"..."}.
-`.trim();
 
 const zErResp = z.object({
   clusters: z.array(
@@ -71,7 +56,8 @@ const zErResp = z.object({
 class EntityWorker extends WorkerBase<Payload> {
   constructor(
     private readonly neo4j: Neo4jClient,
-    private readonly llm: LlmRouter,
+    private readonly safe: SafeLlmRouter,
+    private readonly modelId: string,
     queue: QueueClient,
   ) {
     super({
@@ -89,18 +75,24 @@ class EntityWorker extends WorkerBase<Payload> {
     if (aliases.length === 0) return { kind: 'ack' };
 
     try {
-      const r = await this.llm.call<z.infer<typeof zErResp>>({
-        task: 'entity_resolution',
-        modelClassOverride: 'haiku',
-        system: ER_SYSTEM,
-        user: `Aliases:\n${aliases.map((a, i) => `${i + 1}. ${a}`).join('\n')}`,
+      const rendered = Safety.globalPromptRegistry.latest('entity.resolve-aliases');
+      if (!rendered) {
+        logger.error('entity-resolve-prompt-missing');
+        return { kind: 'retry', reason: 'prompt-not-registered', delay_ms: 60_000 };
+      }
+      const tmpl = rendered.render({ aliases });
+      const outcome = await this.safe.call<z.infer<typeof zErResp>>({
+        findingId: null,
+        assessmentId: null,
+        promptName: 'entity.resolve-aliases',
+        task: tmpl.user,
+        sources: [],
         responseSchema: zErResp,
-        maxTokens: 2000,
-        ...(env.correlation_id && { correlationId: env.correlation_id }),
+        modelId: this.modelId,
       });
 
       // For each cluster, upsert canonical + aliases in Neo4j
-      for (const cluster of r.content.clusters) {
+      for (const cluster of outcome.value.clusters) {
         const id = Ids.newEntityId() as string;
         await this.neo4j.run(Cypher.upsertEntity, {
           id,
@@ -160,12 +152,28 @@ async function main(): Promise<void> {
   const llm = new LlmRouter({ anthropicApiKey: apiKey });
 
   // Touch the postgres pool for warm health
-  await getDb();
+  const db = await getDb();
+  const callRecordRepo = new CallRecordRepo(db);
 
-  const worker = new EntityWorker(neo4j, llm, queue);
+  if (!Safety.adversarialPromptsRegistered()) {
+    throw new Error('AI-Safety canonical prompts missing from globalPromptRegistry');
+  }
+  const safe = new SafeLlmRouter(llm, logger, {
+    record: async (input) => {
+      await callRecordRepo.record({
+        ...input,
+        temperature: input.temperature.toString(),
+        cost_usd: input.cost_usd.toString(),
+        called_at: new Date(input.called_at),
+      });
+    },
+  });
+  const modelId = process.env.ENTITY_RESOLUTION_MODEL ?? 'claude-haiku-4-5';
+
+  const worker = new EntityWorker(neo4j, safe, modelId, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
-  logger.info('worker-entity-ready');
+  logger.info({ modelId }, 'worker-entity-ready');
 }
 
 main().catch((e: unknown) => {

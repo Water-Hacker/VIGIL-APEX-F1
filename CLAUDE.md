@@ -16,9 +16,12 @@ Before any other action, read these in order:
 4. **docs/source/BUILD-COMPANION-v1.md** — procedural backbone, prompts, phases.
 5. **docs/source/BUILD-COMPANION-v2.md** — implementation reference (every adapter, pattern, worker, contract).
 6. **docs/source/HSK-v1.md** — YubiKey Estate Manual.
-7. **docs/decisions/log.md** — committed decisions and current phase pointer.
-8. **docs/weaknesses/INDEX.md** — current weakness fix status.
-9. **ROADMAP.md, OPERATIONS.md, THREAT-MODEL-CMR.md** — strategic context.
+7. **docs/source/AI-SAFETY-DOCTRINE-v1.md** — DECISION-011 (Bayesian certainty engine + 16 LLM-failure-mode defences).
+8. **docs/source/TAL-PA-DOCTRINE-v1.md** — DECISION-012 (Total Action Logging with Public Anchoring; the watcher is watched).
+9. **docs/decisions/log.md** — committed decisions and current phase pointer.
+10. **docs/weaknesses/INDEX.md** — current weakness fix status.
+11. **docs/work-program/PHASE-1-COMPLETION.md** — exhaustive remaining-work tracker (architect-blocked items in Track F).
+12. **ROADMAP.md, OPERATIONS.md, THREAT-MODEL-CMR.md, docs/security/threat-coverage-matrix.md** — strategic + threat-coverage context.
 
 After loading, **confirm load** with a short summary. Do NOT generate code yet.
 Wait for the architect to specify the phase and the work block.
@@ -27,15 +30,15 @@ Wait for the architect to specify the phase and the work block.
 
 ## Phase gates (you cannot bypass these)
 
-| Phase | Cannot start until |
-|---|---|
-| **Phase 0 scaffold** | `docs/decisions/DRY-RUN-DECISION.md` exists with `Status: GO` or `GO-with-note` |
-| **Phase 1 data plane** | (a) YubiKeys delivered AND (b) ≥ 2 council members named in `personal/council-candidates/` |
-| **Phase 2 intelligence** | First-contact protocol acknowledgement from at least 1 regulator (or explicit decision to operate under public-data law) |
-| **Phase 5 tip ingestion** | All 5 council members enrolled (3-of-5 quorum needed for tip decryption) |
-| **Phase 6 CONAC delivery** | CONAC engagement letter countersigned |
-| **Phase 7 anchoring + governance** | Polygon-signer YubiKey provisioned with mainnet wallet funded |
-| **Phase 9 calibration** | ≥ 30 ground-truth-labelled cases in `personal/calibration-seed/seed.csv` |
+| Phase                              | Cannot start until                                                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Phase 0 scaffold**               | `docs/decisions/DRY-RUN-DECISION.md` exists with `Status: GO` or `GO-with-note`                                          |
+| **Phase 1 data plane**             | (a) YubiKeys delivered AND (b) ≥ 2 council members named in `personal/council-candidates/`                               |
+| **Phase 2 intelligence**           | First-contact protocol acknowledgement from at least 1 regulator (or explicit decision to operate under public-data law) |
+| **Phase 5 tip ingestion**          | All 5 council members enrolled (3-of-5 quorum needed for tip decryption)                                                 |
+| **Phase 6 CONAC delivery**         | CONAC engagement letter countersigned                                                                                    |
+| **Phase 7 anchoring + governance** | Polygon-signer YubiKey provisioned with mainnet wallet funded                                                            |
+| **Phase 9 calibration**            | ≥ 30 ground-truth-labelled cases in `personal/calibration-seed/seed.csv`                                                 |
 
 If the architect asks you to start a phase whose precondition is not met,
 **refuse** and explain which precondition is missing. This is per EXEC §43.2.
@@ -77,7 +80,7 @@ Per SRD §20, the following rules bind every prompt and every code generation:
 - Prompts in BUILD-COMPANION are **authoritative payloads**, not descriptions.
 - Temperature for extraction = 0.0; classification = 0.2; translation = 0.4; devil's-advocate = 0.6. Never higher.
 - Every LLM extraction must include `{document_cid, page, char_span}` citations.
-- The system prompt always instructs: *"if you cannot answer from the provided sources, return `{\"status\": \"insufficient_evidence\"}`"*.
+- The system prompt always instructs: _"if you cannot answer from the provided sources, return `{\"status\": \"insufficient_evidence\"}`"_.
 
 ---
 

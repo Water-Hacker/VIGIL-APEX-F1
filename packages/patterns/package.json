@@ -11,6 +11,11 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./dist/*": "./dist/*",
+    "./register-all": {
+      "types": "./dist/register-all.d.ts",
+      "default": "./dist/register-all.js"
     }
   },
   "files": [

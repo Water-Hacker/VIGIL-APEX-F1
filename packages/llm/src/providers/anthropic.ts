@@ -51,10 +51,7 @@ export class AnthropicProvider implements ProviderClient {
     this.modelByClass = {
       opus: opts.modelOpus ?? process.env.ANTHROPIC_MODEL_OPUS ?? 'claude-opus-4-7',
       sonnet: opts.modelSonnet ?? process.env.ANTHROPIC_MODEL_SONNET ?? 'claude-sonnet-4-6',
-      haiku:
-        opts.modelHaiku ??
-        process.env.ANTHROPIC_MODEL_HAIKU ??
-        'claude-haiku-4-5-20251001',
+      haiku: opts.modelHaiku ?? process.env.ANTHROPIC_MODEL_HAIKU ?? 'claude-haiku-4-5-20251001',
     };
     this.circuit =
       opts.circuit ??
@@ -89,12 +86,12 @@ export class AnthropicProvider implements ProviderClient {
 
     const start = Date.now();
     try {
-      // Prompt caching (`cache_control: { type: 'ephemeral' }`) on the system
-      // block: the 12-layer anti-hallucination wrapper (SRD §20) is byte-
-      // identical across every call from the same worker, so we mark it as
-      // cacheable. Cached reads bill at ~10% of normal input-token cost,
-      // dropping the per-call price ~80% on the system prompt — the single
-      // largest input segment on most VIGIL prompts.
+      // Prompt caching on the system block (SDK ≥ 0.91): the 12-layer
+      // anti-hallucination wrapper (SRD §20) is byte-identical across every
+      // call from the same worker, so we mark it cacheable with a 1h TTL.
+      // Cached reads bill at ~10% of normal input-token cost; the longer
+      // TTL beats the default 5m for VIGIL's steady-state load (workers
+      // typically issue > 1 call per minute against the same system block).
       const res = await this.client.messages.create({
         model,
         max_tokens: maxTokens,
@@ -104,7 +101,7 @@ export class AnthropicProvider implements ProviderClient {
           {
             type: 'text',
             text: opts.system,
-            cache_control: { type: 'ephemeral' },
+            cache_control: { type: 'ephemeral', ttl: '1h' },
           },
         ],
         messages: [{ role: 'user', content: opts.user }],
@@ -168,23 +165,25 @@ export class AnthropicProvider implements ProviderClient {
   ): Promise<LlmCallResult> {
     const start = Date.now();
     const customId = `vigil-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const batchClient = (this.client as unknown as {
-      messages: {
-        batches: {
-          create: (b: unknown) => Promise<{ id: string }>;
-          retrieve: (id: string) => Promise<{
-            processing_status: 'in_progress' | 'ended';
-            results_url: string | null;
-          }>;
-          results: (id: string) => AsyncIterable<{
-            custom_id: string;
-            result:
-              | { type: 'succeeded'; message: Anthropic.Message }
-              | { type: 'errored'; error: { type: string; message: string } };
-          }>;
+    const batchClient = (
+      this.client as unknown as {
+        messages: {
+          batches: {
+            create: (b: unknown) => Promise<{ id: string }>;
+            retrieve: (id: string) => Promise<{
+              processing_status: 'in_progress' | 'ended';
+              results_url: string | null;
+            }>;
+            results: (id: string) => AsyncIterable<{
+              custom_id: string;
+              result:
+                | { type: 'succeeded'; message: Anthropic.Message }
+                | { type: 'errored'; error: { type: string; message: string } };
+            }>;
+          };
         };
-      };
-    }).messages.batches;
+      }
+    ).messages.batches;
 
     const created = await batchClient.create({
       requests: [
@@ -196,7 +195,7 @@ export class AnthropicProvider implements ProviderClient {
             temperature,
             ...(opts.stopSequences !== undefined && { stop_sequences: [...opts.stopSequences] }),
             system: [
-              { type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } },
+              { type: 'text', text: opts.system, cache_control: { type: 'ephemeral', ttl: '1h' } },
             ],
             messages: [{ role: 'user', content: opts.user }],
           },

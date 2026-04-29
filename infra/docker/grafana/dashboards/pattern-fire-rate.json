@@ -1,0 +1,84 @@
+{
+  "uid": "vigil-patterns",
+  "title": "Pattern fire-rate by category",
+  "description": "Each P-X-NNN match-count in 24h + strength distribution.",
+  "tags": [
+    "vigil",
+    "patterns"
+  ],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "Africa/Douala",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Pattern strength p50 / p95",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le, pattern_id) (rate(vigil_pattern_strength_bucket[1h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Match counts by category",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (category) (increase(vigil_pattern_strength_count[1h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    }
+  ],
+  "editable": true
+}

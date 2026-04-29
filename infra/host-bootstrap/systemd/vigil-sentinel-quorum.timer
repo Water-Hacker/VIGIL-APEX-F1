@@ -1,0 +1,12 @@
+[Unit]
+Description=5-minute trigger for vigil-sentinel-quorum.service
+
+[Timer]
+# Every 5 minutes, offset 47s from the wall-clock minute boundary to
+# avoid collision with the high-sig anchor's 5s tick.
+OnCalendar=*:0/5:47
+Persistent=true
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

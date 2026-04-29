@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly trigger for vigil-sentinel-tor.service
+
+[Timer]
+# Every hour, 23 minutes past — offset from the 00 minute to avoid
+# colliding with the polygon-anchor batch + the multi-site replication
+# pull, both of which bunch on the hour.
+OnCalendar=*:23:00
+Persistent=true
+RandomizedDelaySec=2m
+
+[Install]
+WantedBy=timers.target

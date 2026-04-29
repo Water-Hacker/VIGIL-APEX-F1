@@ -34,7 +34,7 @@ type Stage =
  * Council vote ceremony (Phase C5). The flow:
  *   1. Member picks a choice + optional recuse reason.
  *   2. Browser requests a WebAuthn assertion from the member's enrolled
- *      YubiKey (challenge from /api/council/vote/challenge — TODO C5b).
+ *      YubiKey (challenge from /api/council/vote/challenge — DECISION-008 C5b).
  *   3. The page invokes the local vigil-polygon-signer helper (W-10 fallback
  *      pulls a desktop helper download URL for non-Chrome environments).
  *   4. On tx-hash receipt, POST /api/council/vote with the assertion + tx.

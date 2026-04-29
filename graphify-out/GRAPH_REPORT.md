@@ -2,7 +2,7 @@
 
 ## Corpus Check
 
-- 504 files · ~483,066 words
+- 504 files · ~483,064 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -1006,11 +1006,11 @@ Nodes (1): Aggregated outbound payload — one event per project per run.
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `GET()` connect `Community 7` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 8`, `Community 10`, `Community 11`, `Community 16`, `Community 18`, `Community 20`, `Community 21`, `Community 22`?**
-  _High betweenness centrality (0.174) - this node is a cross-community bridge._
+  _High betweenness centrality (0.183) - this node is a cross-community bridge._
 - **Why does `main()` connect `Community 6` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 7`, `Community 8`, `Community 10`, `Community 11`, `Community 12`, `Community 13`, `Community 14`, `Community 16`, `Community 18`, `Community 21`?**
-  _High betweenness centrality (0.168) - this node is a cross-community bridge._
+  _High betweenness centrality (0.164) - this node is a cross-community bridge._
 - **Why does `map()` connect `Community 1` to `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 7`, `Community 10`, `Community 11`, `Community 12`, `Community 14`, `Community 17`, `Community 18`, `Community 20`, `Community 26`, `Community 28`?**
-  _High betweenness centrality (0.140) - this node is a cross-community bridge._
+  _High betweenness centrality (0.127) - this node is a cross-community bridge._
 - **Are the 70 inferred relationships involving `VigilError` (e.g. with `VaultClient` and `Thin wrapper over hvac for Vault KV-v2 reads + auto-token-renewal.  Mirrors `@vi`) actually correct?**
   _`VigilError` has 70 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 62 inferred relationships involving `GET()` (e.g. with `_handle()` and `healthz()`) actually correct?**

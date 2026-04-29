@@ -10,3 +10,4 @@ export * from './metrics.js';
 export * from './tracing.js';
 export * from './correlation.js';
 export * from './shutdown.js';
+export * from './sentinel-quorum.js';

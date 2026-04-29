@@ -1,0 +1,78 @@
+{
+  "uid": "vigil-tips",
+  "title": "Tip portal volume",
+  "description": "Submissions/day + decryption-queue depth (W-09 Tor onion v3).",
+  "tags": [
+    "vigil",
+    "tip"
+  ],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "Africa/Douala",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Tips today",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vigil_events_consumed_total{stream=\"vigil:tip:submitted\"}[24h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Submissions per hour",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vigil_events_consumed_total{stream=\"vigil:tip:submitted\"}[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    }
+  ],
+  "editable": true
+}

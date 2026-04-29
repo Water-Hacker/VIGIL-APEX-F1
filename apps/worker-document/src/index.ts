@@ -19,12 +19,14 @@ import {
 } from '@vigil/queue';
 import { Ids, Schemas } from '@vigil/shared';
 import { fileTypeFromBuffer } from 'file-type';
-import { franc } from 'franc';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import { request } from 'undici';
 import { z } from 'zod';
 
+import { detectLanguage } from './lang.js';
 import { OcrPool } from './ocr-pool.js';
+
+export { detectLanguage };
 
 const logger = createLogger({ service: 'worker-document' });
 
@@ -183,34 +185,9 @@ class DocumentWorker extends WorkerBase<DocPayload> {
       'tos',
       'other',
     ];
-    return (allowed.includes(hint as Schemas.DocumentKind) ? hint : 'other') as Schemas.DocumentKind;
-  }
-}
-
-/**
- * Map an ISO-639-3 code (franc output) to the DocumentLanguage enum
- * stored in `source.documents.language`. Cameroon's primary language is
- * French; Fulfulde and Ewondo are recognised as `unknown` until Phase 2
- * Pulaar/Ewondo adapters land. `und` (undetermined) defaults to French
- * for procurement-flow docs but to `unknown` for structured payloads.
- */
-function detectLanguage(text: string | null, mime: Schemas.DocumentMime): Schemas.DocumentLanguage {
-  if (mime === 'application/json' || mime === 'application/xml') return 'unknown';
-  if (!text || text.trim().length < 24) {
-    // Too little text to detect — fall back to FR (Cameroonian default).
-    return 'fr';
-  }
-  const code = franc(text, { minLength: 24 });
-  switch (code) {
-    case 'fra':
-      return 'fr';
-    case 'eng':
-      return 'en';
-    case 'ful': // Fulfulde — Cameroon Adamawa region
-    case 'ewo': // Ewondo — Centre / South region
-      return 'unknown';
-    default:
-      return 'fr';
+    return (
+      allowed.includes(hint as Schemas.DocumentKind) ? hint : 'other'
+    ) as Schemas.DocumentKind;
   }
 }
 

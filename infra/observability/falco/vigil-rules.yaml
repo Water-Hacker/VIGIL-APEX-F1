@@ -1,0 +1,188 @@
+# Falco rules — VIGIL APEX runtime intrusion detection.
+#
+# Per SRD §03.5. Loaded alongside the upstream Falco default ruleset.
+# Tuned for the Phase-1 docker-compose footprint on the Hetzner host.
+#
+# Severity policy:
+#   CRITICAL → page on-call + audit-of-audit row + halt suspect container
+#   HIGH     → page on-call
+#   WARNING  → dashboard alert only
+#   INFO     → metric only
+
+- macro: vigil_app_containers
+  condition: >
+    container.image.repository in (
+      "vigil-apex/dashboard",
+      "vigil-apex/api",
+      "vigil-apex/worker-anchor",
+      "vigil-apex/worker-audit-watch",
+      "vigil-apex/worker-conac-sftp",
+      "vigil-apex/worker-counter-evidence",
+      "vigil-apex/worker-document",
+      "vigil-apex/worker-dossier",
+      "vigil-apex/worker-entity",
+      "vigil-apex/worker-fabric-bridge",
+      "vigil-apex/worker-federation-agent",
+      "vigil-apex/worker-federation-receiver",
+      "vigil-apex/worker-governance",
+      "vigil-apex/worker-image-forensics",
+      "vigil-apex/worker-minfi-api",
+      "vigil-apex/worker-pattern",
+      "vigil-apex/worker-satellite",
+      "vigil-apex/worker-score",
+      "vigil-apex/worker-tip-triage",
+      "vigil-apex/worker-adapter-repair",
+      "vigil-apex/audit-bridge",
+      "vigil-apex/audit-verifier",
+      "vigil-apex/adapter-runner"
+    )
+
+- macro: vigil_db_containers
+  condition: >
+    container.image.repository in (
+      "postgres",
+      "redis",
+      "neo4j",
+      "ipfs/kubo",
+      "hashicorp/vault"
+    )
+
+# === Vault binary execution outside its container ===
+# Vault binary should ONLY ever run inside the vault container.
+- rule: vault_binary_executed_outside_container
+  desc: A vault binary started outside the vigil-vault container — possible
+    secret-extraction attempt.
+  condition: >
+    spawned_process and proc.name = "vault"
+    and not container.image.repository = "hashicorp/vault"
+  output: >
+    Vault binary executed outside its container
+    (user=%user.name proc=%proc.cmdline container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [vigil, secrets, vault]
+
+# === YubiKey-related socket access by non-trusted process ===
+- rule: polygon_signer_socket_unauthorised_access
+  desc: A non-anchor process opened the polygon-signer Unix socket. The
+    signer is the only path to the YubiKey-bound key; only worker-anchor
+    and audit-verifier should ever connect.
+  condition: >
+    open_read and fd.name = "/run/vigil/polygon-signer.sock"
+    and not (container.image.repository in ("vigil-apex/worker-anchor",
+                                            "vigil-apex/audit-verifier"))
+  output: >
+    Unauthorised process opened polygon-signer socket
+    (proc=%proc.cmdline container=%container.name)
+  priority: CRITICAL
+  tags: [vigil, signer, yubikey]
+
+# === Direct write to audit.actions ===
+# audit.actions is append-only via HashChain.append(). Any direct write
+# bypasses the chain integrity contract.
+- rule: postgres_audit_actions_direct_modification
+  desc: A SQL UPDATE or DELETE was issued against audit.actions. The chain
+    is append-only; direct mutation is a tamper attempt.
+  condition: >
+    spawned_process and proc.cmdline contains "audit.actions"
+    and (proc.cmdline contains "UPDATE" or proc.cmdline contains "DELETE"
+         or proc.cmdline contains "TRUNCATE" or proc.cmdline contains "ALTER")
+  output: >
+    Direct UPDATE/DELETE/TRUNCATE/ALTER on audit.actions
+    (user=%user.name proc=%proc.cmdline)
+  priority: CRITICAL
+  tags: [vigil, audit-chain, integrity]
+
+# === Postgres direct access from a non-app container ===
+- rule: postgres_connect_from_non_app
+  desc: Something outside the VIGIL APEX app container set opened a
+    connection to the Postgres TCP port.
+  condition: >
+    inbound and fd.sport = 5432
+    and not container.id = host
+    and not (container.image.repository in (
+      "vigil-apex/dashboard",
+      "vigil-apex/api",
+      "vigil-apex/worker-anchor",
+      "vigil-apex/worker-audit-watch",
+      "vigil-apex/worker-counter-evidence",
+      "vigil-apex/worker-document",
+      "vigil-apex/worker-dossier",
+      "vigil-apex/worker-entity",
+      "vigil-apex/worker-governance",
+      "vigil-apex/worker-image-forensics",
+      "vigil-apex/worker-pattern",
+      "vigil-apex/worker-satellite",
+      "vigil-apex/worker-score",
+      "vigil-apex/worker-tip-triage",
+      "vigil-apex/worker-adapter-repair",
+      "vigil-apex/audit-bridge",
+      "vigil-apex/adapter-runner",
+      "vigil-apex/worker-conac-sftp",
+      "vigil-apex/worker-minfi-api",
+      "vigil-apex/worker-fabric-bridge"
+    ))
+  output: >
+    Postgres TCP connection from non-app container
+    (src=%fd.cip dst=%fd.sip:%fd.sport container=%container.name image=%container.image.repository)
+  priority: HIGH
+  tags: [vigil, db, network]
+
+# === Shell into a running app container ===
+- rule: shell_in_vigil_container
+  desc: Interactive shell launched inside a VIGIL APEX app container.
+    Production containers should run with no-shell; any shell is a
+    manual operator action that must trip an audit-of-audit row.
+  condition: >
+    spawned_process and shell_procs and vigil_app_containers
+    and proc.tty != 0
+  output: >
+    Shell opened inside VIGIL APEX container
+    (user=%user.name shell=%proc.name container=%container.name image=%container.image.repository)
+  priority: WARNING
+  tags: [vigil, shell, ops]
+
+# === Filesystem write to /run/vigil/secrets ===
+- rule: secret_materialisation_path_modified
+  desc: A file under /run/vigil/secrets/ was written by a process that
+    is not 05-secret-materialisation.sh. The path is read-only at
+    runtime; writes indicate an exfiltration or substitution.
+  condition: >
+    open_write and fd.name startswith "/run/vigil/secrets/"
+    and not proc.name in ("05-secret-materialisat", "vault")
+  output: >
+    Unexpected write under /run/vigil/secrets/
+    (proc=%proc.cmdline container=%container.name)
+  priority: CRITICAL
+  tags: [vigil, secrets]
+
+# === Outbound connection to a known data-broker ===
+# The platform must NEVER egress to commercial data-broker APIs (no
+# OpenCorporates Pro, no Sayari, etc.) without an explicit decision-log
+# entry. This rule catches accidental config drift.
+- rule: egress_to_unauthorised_data_broker
+  desc: Outbound connection to a known commercial data-broker host that is
+    not in the doctrine-approved adapter list.
+  condition: >
+    outbound and fd.sport = 443
+    and (fd.sip.name endswith ".sayari.com"
+         or fd.sip.name endswith ".clearbit.com"
+         or fd.sip.name endswith ".dnb.com"
+         or fd.sip.name endswith ".lexisnexis.com")
+  output: >
+    Outbound connection to non-doctrine data broker
+    (host=%fd.sip.name container=%container.name image=%container.image.repository)
+  priority: HIGH
+  tags: [vigil, network, doctrine]
+
+# === Sudo / privilege escalation inside any vigil container ===
+- rule: privilege_escalation_in_container
+  desc: A process inside a VIGIL APEX container called sudo or setuid.
+    Containers run as non-root by spec; any escalation is a defect.
+  condition: >
+    spawned_process and (proc.name in ("sudo", "su", "doas"))
+    and (vigil_app_containers or vigil_db_containers)
+  output: >
+    Privilege escalation attempted inside VIGIL container
+    (user=%user.name proc=%proc.cmdline container=%container.name)
+  priority: HIGH
+  tags: [vigil, privilege]

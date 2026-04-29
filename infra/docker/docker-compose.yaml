@@ -103,11 +103,10 @@ x-logging: &logging
   logging:
     driver: json-file
     options:
-      max-size: "100m"
-      max-file: "5"
+      max-size: '100m'
+      max-file: '5'
 
 services:
-
   # ==========================================================================
   # N00 — vigil-secret-init  (runs first; rest of the stack depends on it)
   # ==========================================================================
@@ -134,8 +133,8 @@ services:
       VAULT_BIN: /bin/vault
       SECRET_ROOT: /run/vigil/secrets
       VAULT_TOKEN_FILE: /run/vigil/vault-init-token
-    user: "0:0"
-    entrypoint: ["/bin/sh", "-c"]
+    user: '0:0'
+    entrypoint: ['/bin/sh', '-c']
     command:
       - |
         set -e
@@ -148,8 +147,8 @@ services:
         bash /bootstrap.sh
     depends_on:
       vigil-vault: { condition: service_healthy }
-    restart: "no"
-    security_opt: [ "no-new-privileges:true" ]
+    restart: 'no'
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N03 — vigil-postgres
@@ -174,7 +173,7 @@ services:
       POSTGRES_DB: vigil
       POSTGRES_USER: vigil
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8 --auth=scram-sha-256"
+      POSTGRES_INITDB_ARGS: '--encoding=UTF-8 --locale=en_US.UTF-8 --auth=scram-sha-256'
     depends_on:
       vigil-secret-init: { condition: service_completed_successfully }
     secrets: [pg_password]
@@ -184,14 +183,14 @@ services:
       - config_file=/etc/postgresql/postgresql.conf
     deploy:
       resources:
-        limits: { memory: 16g, cpus: "4.0" }
+        limits: { memory: 16g, cpus: '4.0' }
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vigil -d vigil"]
+      test: ['CMD-SHELL', 'pg_isready -U vigil -d vigil']
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N04 — vigil-neo4j
@@ -217,20 +216,20 @@ services:
       NEO4J_server_memory_heap_initial__size: 16G
       NEO4J_server_memory_heap_max__size: 16G
       NEO4J_server_memory_pagecache_size: 14G
-      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_dbms_security_procedures_unrestricted: 'apoc.*'
     depends_on:
       vigil-secret-init: { condition: service_completed_successfully }
     secrets: [neo4j_password]
     deploy:
       resources:
-        limits: { memory: 32g, cpus: "4.0" }
+        limits: { memory: 32g, cpus: '4.0' }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7474 || exit 1']
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 90s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N05 — vigil-redis
@@ -248,21 +247,21 @@ services:
       - ./redis/users.acl.template:/etc/redis/users.acl.template:ro
       - ./redis/redis-entrypoint.sh:/usr/local/bin/redis-entrypoint.sh:ro
       - /etc/localtime:/etc/localtime:ro
-    entrypoint: ["/usr/local/bin/redis-entrypoint.sh"]
-    command: ["/etc/redis/redis.conf"]
+    entrypoint: ['/usr/local/bin/redis-entrypoint.sh']
+    command: ['/etc/redis/redis.conf']
     depends_on:
       vigil-secret-init: { condition: service_completed_successfully }
     secrets: [redis_password]
     environment: *common-env
     deploy:
       resources:
-        limits: { memory: 8g, cpus: "2.0" }
+        limits: { memory: 8g, cpus: '2.0' }
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $$(cat /run/secrets/redis_password) ping || exit 1"]
+      test: ['CMD-SHELL', 'redis-cli -a $$(cat /run/secrets/redis_password) ping || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N06 — vigil-ipfs (Kubo)
@@ -284,13 +283,13 @@ services:
       IPFS_PROFILE: server
     deploy:
       resources:
-        limits: { memory: 8g, cpus: "2.0" }
+        limits: { memory: 8g, cpus: '2.0' }
     healthcheck:
-      test: ["CMD-SHELL", "ipfs --api=/ip4/127.0.0.1/tcp/5001 id || exit 1"]
+      test: ['CMD-SHELL', 'ipfs --api=/ip4/127.0.0.1/tcp/5001 id || exit 1']
       interval: 30s
       timeout: 10s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # vigil-ipfs-2 — second Kubo node for replication (Phase D8)
@@ -316,13 +315,13 @@ services:
       IPFS_PROFILE: server
     deploy:
       resources:
-        limits: { memory: 8g, cpus: "2.0" }
+        limits: { memory: 8g, cpus: '2.0' }
     healthcheck:
-      test: ["CMD-SHELL", "ipfs --api=/ip4/127.0.0.1/tcp/5001 id || exit 1"]
+      test: ['CMD-SHELL', 'ipfs --api=/ip4/127.0.0.1/tcp/5001 id || exit 1']
       interval: 30s
       timeout: 10s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ipfs-cluster — coordinates pinning between vigil-ipfs + vigil-ipfs-2
   # so CIDs added by either node are pinned by both. Cluster secret comes
@@ -338,20 +337,20 @@ services:
       - /srv/vigil/ipfs-cluster/data:/data/ipfs-cluster
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      vigil-ipfs:    { condition: service_healthy }
-      vigil-ipfs-2:  { condition: service_healthy }
+      vigil-ipfs: { condition: service_healthy }
+      vigil-ipfs-2: { condition: service_healthy }
       vigil-secret-init: { condition: service_completed_successfully }
     environment:
       <<: *common-env
       CLUSTER_PEERNAME: vigil-cluster-1
       CLUSTER_SECRET_FILE: /run/secrets/ipfs_cluster_secret
       CLUSTER_IPFSHTTP_NODEMULTIADDRESS: /dns4/vigil-ipfs/tcp/5001
-      CLUSTER_REPLICATION_FACTOR_MIN: "2"
-      CLUSTER_REPLICATION_FACTOR_MAX: "2"
+      CLUSTER_REPLICATION_FACTOR_MIN: '2'
+      CLUSTER_REPLICATION_FACTOR_MAX: '2'
     deploy:
       resources:
-        limits: { memory: 1g, cpus: "0.5" }
-    security_opt: [ "no-new-privileges:true" ]
+        limits: { memory: 1g, cpus: '0.5' }
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N08 — vigil-vault
@@ -372,16 +371,16 @@ services:
     environment:
       <<: *common-env
       VAULT_ADDR: http://0.0.0.0:8200
-    command: ["vault", "server", "-config=/vault/config/config.hcl"]
+    command: ['vault', 'server', '-config=/vault/config/config.hcl']
     deploy:
       resources:
-        limits: { memory: 2g, cpus: "1.0" }
+        limits: { memory: 2g, cpus: '1.0' }
     healthcheck:
-      test: ["CMD-SHELL", "vault status -tls-skip-verify >/dev/null || [ $$? -eq 2 ] || exit 1"]
+      test: ['CMD-SHELL', 'vault status -tls-skip-verify >/dev/null || [ $$? -eq 2 ] || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N09 — vigil-keycloak (FIDO2-only realm; SRD §17.9)
@@ -402,26 +401,26 @@ services:
       KC_DB_USERNAME: vigil
       KC_DB_PASSWORD_FILE: /run/secrets/pg_password
       KC_HOSTNAME: kc.vigilapex.cm
-      KC_HOSTNAME_STRICT_HTTPS: "false"
-      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT_HTTPS: 'false'
+      KC_HTTP_ENABLED: 'true'
       KC_PROXY: edge
-      KC_HEALTH_ENABLED: "true"
+      KC_HEALTH_ENABLED: 'true'
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_admin
     volumes:
       - ./keycloak/realm-vigil.json:/opt/keycloak/data/import/realm-vigil.json:ro
     secrets: [pg_password, keycloak_admin]
-    command: ["start", "--import-realm", "--optimized"]
+    command: ['start', '--import-realm', '--optimized']
     deploy:
       resources:
-        limits: { memory: 4g, cpus: "1.0" }
+        limits: { memory: 4g, cpus: '1.0' }
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health/ready || exit 1"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9000/health/ready || exit 1']
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 180s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # N10 — vigil-dashboard (Next.js)
@@ -440,8 +439,8 @@ services:
     networks: [vigil-internal, vigil-edge]
     depends_on:
       vigil-postgres: { condition: service_healthy }
-      vigil-redis:    { condition: service_healthy }
-      vigil-vault:    { condition: service_healthy }
+      vigil-redis: { condition: service_healthy }
+      vigil-vault: { condition: service_healthy }
       vigil-keycloak: { condition: service_healthy }
     secrets: [pg_password, redis_password, vault_token_worker]
     environment:
@@ -454,25 +453,25 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
       KEYCLOAK_URL: http://vigil-keycloak:8080
       OTEL_SERVICE_NAME: vigil-dashboard
-      PROMETHEUS_PORT: "9100"
+      PROMETHEUS_PORT: '9100'
       # Session store in Redis so requests can hit any replica.
       SESSION_STORE: redis
     deploy:
       replicas: 3
       resources:
-        limits: { memory: 4g, cpus: "2.0" }
+        limits: { memory: 4g, cpus: '2.0' }
       update_config:
         parallelism: 1
         order: start-first
         failure_action: rollback
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health || exit 1"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:3000/api/health || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
-    user: "1000:1000"
-    security_opt: [ "no-new-privileges:true" ]
+    user: '1000:1000'
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # vigil-tor — Tor v3 hidden service for the tip portal (B7 / W-12)
@@ -492,14 +491,14 @@ services:
       vigil-caddy: { condition: service_healthy }
     deploy:
       resources:
-        limits: { memory: 512m, cpus: "1.0" }
+        limits: { memory: 512m, cpus: '1.0' }
     healthcheck:
-      test: ["CMD-SHELL", "test -s /var/lib/tor/vigil-tip/hostname"]
+      test: ['CMD-SHELL', 'test -s /var/lib/tor/vigil-tip/hostname']
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 60s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # Caddy reverse proxy — terminates TLS + serves /verify, /tip, etc.
@@ -513,8 +512,8 @@ services:
     hostname: vigil-caddy
     <<: [*restart, *logging]
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     networks:
       vigil-edge: { ipv4_address: 172.21.0.5 }
     volumes:
@@ -522,11 +521,11 @@ services:
       - /srv/vigil/caddy/data:/data
       - /srv/vigil/caddy/config:/config
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/healthz || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:80/healthz || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # Workers (entity, pattern, score, dossier, anchor, governance, document, tip-triage,
@@ -546,9 +545,9 @@ services:
       vigil-internal: { ipv4_address: 172.20.0.20 }
     depends_on:
       vigil-postgres: { condition: service_healthy }
-      vigil-redis:    { condition: service_healthy }
-      vigil-neo4j:    { condition: service_healthy }
-      vigil-vault:    { condition: service_healthy }
+      vigil-redis: { condition: service_healthy }
+      vigil-neo4j: { condition: service_healthy }
+      vigil-vault: { condition: service_healthy }
     secrets: [pg_password, redis_password, neo4j_password, vault_token_worker, anthropic_api_key]
     environment: &worker-env
       <<: *common-env
@@ -563,17 +562,17 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
       OTEL_SERVICE_NAME: worker-entity
-      PROMETHEUS_PORT: "9100"
+      PROMETHEUS_PORT: '9100'
     deploy:
       resources:
-        limits: { memory: 6g, cpus: "2.0" }
+        limits: { memory: 6g, cpus: '2.0' }
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9100/healthz || exit 1"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9100/healthz || exit 1']
       interval: 15s
       timeout: 3s
       retries: 3
-    user: "1000:1000"
-    security_opt: [ "no-new-privileges:true" ]
+    user: '1000:1000'
+    security_opt: ['no-new-privileges:true']
 
   worker-pattern:
     <<: *worker-base
@@ -685,10 +684,10 @@ services:
     hostname: worker-fabric-bridge
     networks: { vigil-internal: { ipv4_address: 172.20.0.26 } }
     depends_on:
-      vigil-postgres:               { condition: service_healthy }
-      vigil-redis:                  { condition: service_healthy }
-      vigil-fabric-peer0-org1:      { condition: service_healthy }
-      vigil-secret-init:            { condition: service_completed_successfully }
+      vigil-postgres: { condition: service_healthy }
+      vigil-redis: { condition: service_healthy }
+      vigil-fabric-peer0-org1: { condition: service_healthy }
+      vigil-secret-init: { condition: service_completed_successfully }
     secrets:
       - pg_password
       - redis_password
@@ -728,10 +727,17 @@ services:
       vigil-internal: { ipv4_address: 172.20.0.40 }
     depends_on:
       vigil-postgres: { condition: service_healthy }
-      vigil-redis:    { condition: service_healthy }
-      vigil-vault:    { condition: service_healthy }
-      vigil-ipfs:     { condition: service_healthy }
-    secrets: [pg_password, redis_password, vault_token_worker, sentinelhub_client_id, sentinelhub_client_secret]
+      vigil-redis: { condition: service_healthy }
+      vigil-vault: { condition: service_healthy }
+      vigil-ipfs: { condition: service_healthy }
+    secrets:
+      [
+        pg_password,
+        redis_password,
+        vault_token_worker,
+        sentinelhub_client_id,
+        sentinelhub_client_secret,
+      ]
     environment:
       <<: *common-env
       WORKER_NAME: worker-satellite
@@ -746,18 +752,18 @@ services:
       SENTINELHUB_CLIENT_ID_FILE: /run/secrets/sentinelhub_client_id
       SENTINELHUB_CLIENT_SECRET_FILE: /run/secrets/sentinelhub_client_secret
       STAC_CATALOG_URL: https://planetarycomputer.microsoft.com/api/stac/v1
-      PROMETHEUS_PORT: "9100"
+      PROMETHEUS_PORT: '9100'
     deploy:
       resources:
-        limits: { memory: 6g, cpus: "3.0" }
+        limits: { memory: 6g, cpus: '3.0' }
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9100/healthz || exit 1"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9100/healthz || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
-    user: "1000:1000"
-    security_opt: [ "no-new-privileges:true" ]
+    user: '1000:1000'
+    security_opt: ['no-new-privileges:true']
 
   worker-image-forensics:
     build:
@@ -766,7 +772,7 @@ services:
       args:
         APP_NAME: worker-image-forensics
         APP_MODULE: vigil_forensics.main
-        EXTRA_APT: "tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng"
+        EXTRA_APT: 'tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng'
     image: vigil-apex/worker-image-forensics:0.1.0
     container_name: worker-image-forensics
     hostname: worker-image-forensics
@@ -775,9 +781,9 @@ services:
       vigil-internal: { ipv4_address: 172.20.0.41 }
     depends_on:
       vigil-postgres: { condition: service_healthy }
-      vigil-redis:    { condition: service_healthy }
-      vigil-vault:    { condition: service_healthy }
-      vigil-ipfs:     { condition: service_healthy }
+      vigil-redis: { condition: service_healthy }
+      vigil-vault: { condition: service_healthy }
+      vigil-ipfs: { condition: service_healthy }
     secrets: [pg_password, redis_password, vault_token_worker]
     environment:
       <<: *common-env
@@ -791,18 +797,18 @@ services:
       VAULT_TOKEN_FILE: /run/secrets/vault_token_worker
       IPFS_API_URL: http://vigil-ipfs:5001
       TESSERACT_DATA_PATH: /usr/share/tesseract-ocr/5/tessdata
-      PROMETHEUS_PORT: "9100"
+      PROMETHEUS_PORT: '9100'
     deploy:
       resources:
-        limits: { memory: 4g, cpus: "2.0" }
+        limits: { memory: 4g, cpus: '2.0' }
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9100/healthz || exit 1"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9100/healthz || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
-    user: "1000:1000"
-    security_opt: [ "no-new-privileges:true" ]
+    user: '1000:1000'
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # Observability
@@ -826,13 +832,13 @@ services:
       - --web.external-url=https://alerts.vigilapex.cm
     deploy:
       resources:
-        limits: { memory: 256m, cpus: "0.25" }
+        limits: { memory: 256m, cpus: '0.25' }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9093/-/healthy || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9093/-/healthy || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # vigil-logstash — Vault audit JSON → Postgres audit.vault_log (Phase E7)
@@ -849,7 +855,7 @@ services:
     secrets: [pg_password]
     environment:
       <<: *common-env
-      LS_JAVA_OPTS: "-Xms256m -Xmx512m"
+      LS_JAVA_OPTS: '-Xms256m -Xmx512m'
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
     command: >
       /bin/sh -c "
@@ -860,14 +866,14 @@ services:
       vigil-secret-init: { condition: service_completed_successfully }
     deploy:
       resources:
-        limits: { memory: 1g, cpus: "0.5" }
+        limits: { memory: 1g, cpus: '0.5' }
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9600/_node/stats || exit 1"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9600/_node/stats || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 60s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   # vigil-filebeat — tails Vault's audit.log and ships to vigil-logstash.
   vigil-filebeat:
@@ -880,13 +886,13 @@ services:
       - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - /srv/vigil/vault/logs:/vault/logs:ro
       - /srv/vigil/filebeat/data:/usr/share/filebeat/data
-    user: "0:0"
+    user: '0:0'
     depends_on:
       vigil-logstash: { condition: service_healthy }
     deploy:
       resources:
-        limits: { memory: 256m, cpus: "0.25" }
-    security_opt: [ "no-new-privileges:true" ]
+        limits: { memory: 256m, cpus: '0.25' }
+    security_opt: ['no-new-privileges:true']
 
   # ==========================================================================
   # Hyperledger Fabric scaffold (Phase G)
@@ -909,7 +915,7 @@ services:
       - /srv/vigil/fabric:/var/hyperledger/fabric
       - ./fabric/configtx.yaml:/etc/hyperledger/fabric/configtx.yaml:ro
       - ./fabric/crypto-config.yaml:/etc/hyperledger/fabric/crypto-config.yaml:ro
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: ['/bin/sh', '-c']
     command:
       - |
         set -e
@@ -932,8 +938,8 @@ services:
           -configPath /etc/hyperledger/fabric
         touch /var/hyperledger/fabric/.bootstrap.done
         echo "[ok] fabric crypto + genesis generated"
-    restart: "no"
-    security_opt: [ "no-new-privileges:true" ]
+    restart: 'no'
+    security_opt: ['no-new-privileges:true']
 
   vigil-fabric-orderer:
     image: hyperledger/fabric-orderer:2.5.10
@@ -952,12 +958,12 @@ services:
       <<: *common-env
       FABRIC_LOGGING_SPEC: INFO
       ORDERER_GENERAL_LISTENADDRESS: 0.0.0.0
-      ORDERER_GENERAL_LISTENPORT: "7050"
+      ORDERER_GENERAL_LISTENPORT: '7050'
       ORDERER_GENERAL_BOOTSTRAPMETHOD: file
       ORDERER_GENERAL_BOOTSTRAPFILE: /var/hyperledger/orderer/orderer.genesis.block
       ORDERER_GENERAL_LOCALMSPID: OrdererMSP
       ORDERER_GENERAL_LOCALMSPDIR: /var/hyperledger/orderer/msp
-      ORDERER_GENERAL_TLS_ENABLED: "true"
+      ORDERER_GENERAL_TLS_ENABLED: 'true'
       ORDERER_GENERAL_TLS_PRIVATEKEY: /var/hyperledger/orderer/tls/server.key
       ORDERER_GENERAL_TLS_CERTIFICATE: /var/hyperledger/orderer/tls/server.crt
       ORDERER_GENERAL_TLS_ROOTCAS: '[/var/hyperledger/orderer/tls/ca.crt]'
@@ -966,17 +972,17 @@ services:
       ORDERER_GENERAL_CLUSTER_ROOTCAS: '[/var/hyperledger/orderer/tls/ca.crt]'
       ORDERER_OPERATIONS_LISTENADDRESS: 0.0.0.0:9443
       ORDERER_METRICS_PROVIDER: prometheus
-    command: ["orderer"]
+    command: ['orderer']
     deploy:
       resources:
-        limits: { memory: 1g, cpus: "0.5" }
+        limits: { memory: 1g, cpus: '0.5' }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9443/healthz || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9443/healthz || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   vigil-fabric-peer0-org1:
     image: hyperledger/fabric-peer:2.5.10
@@ -1006,23 +1012,23 @@ services:
       CORE_PEER_GOSSIP_EXTERNALENDPOINT: vigil-fabric-peer0-org1:7051
       CORE_PEER_LOCALMSPID: Org1MSP
       CORE_PEER_MSPCONFIGPATH: /var/hyperledger/fabric/msp
-      CORE_PEER_TLS_ENABLED: "true"
+      CORE_PEER_TLS_ENABLED: 'true'
       CORE_PEER_TLS_CERT_FILE: /var/hyperledger/fabric/tls/server.crt
       CORE_PEER_TLS_KEY_FILE: /var/hyperledger/fabric/tls/server.key
       CORE_PEER_TLS_ROOTCERT_FILE: /var/hyperledger/fabric/tls/ca.crt
       CORE_OPERATIONS_LISTENADDRESS: 0.0.0.0:9443
       CORE_METRICS_PROVIDER: prometheus
-    command: ["peer", "node", "start"]
+    command: ['peer', 'node', 'start']
     deploy:
       resources:
-        limits: { memory: 2g, cpus: "1.0" }
+        limits: { memory: 2g, cpus: '1.0' }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9443/healthz || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9443/healthz || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 60s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   vigil-fabric-ca-org1:
     image: hyperledger/fabric-ca:1.5.13
@@ -1038,19 +1044,20 @@ services:
       <<: *common-env
       FABRIC_CA_HOME: /etc/hyperledger/fabric-ca-server
       FABRIC_CA_SERVER_CA_NAME: ca-org1
-      FABRIC_CA_SERVER_TLS_ENABLED: "true"
-      FABRIC_CA_SERVER_PORT: "7054"
-    command: ["fabric-ca-server", "start", "-b", "admin:adminpw"]
+      FABRIC_CA_SERVER_TLS_ENABLED: 'true'
+      FABRIC_CA_SERVER_PORT: '7054'
+    command: ['fabric-ca-server', 'start', '-b', 'admin:adminpw']
     deploy:
       resources:
-        limits: { memory: 512m, cpus: "0.25" }
+        limits: { memory: 512m, cpus: '0.25' }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://localhost:7054/cainfo || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget -qO- --no-check-certificate https://localhost:7054/cainfo || exit 1']
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   vigil-prometheus:
     image: prom/prometheus:v2.55.0
@@ -1069,13 +1076,13 @@ services:
       - --web.enable-lifecycle
     deploy:
       resources:
-        limits: { memory: 2g, cpus: "1.0" }
+        limits: { memory: 2g, cpus: '1.0' }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9090/-/healthy || exit 1']
       interval: 30s
       timeout: 5s
       retries: 3
-    security_opt: [ "no-new-privileges:true" ]
+    security_opt: ['no-new-privileges:true']
 
   vigil-grafana:
     image: grafana/grafana:11.2.2
@@ -1089,11 +1096,42 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       <<: *common-env
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/keycloak_admin
     secrets: [keycloak_admin]
     deploy:
       resources:
-        limits: { memory: 1g, cpus: "1.0" }
-    security_opt: [ "no-new-privileges:true" ]
+        limits: { memory: 1g, cpus: '1.0' }
+    security_opt: ['no-new-privileges:true']
+
+  # ============================================================================
+  # vigil-falco — runtime intrusion detection (SRD §03.5).
+  # Custom rules ship at infra/observability/falco/vigil-rules.yaml. The
+  # privileged mode + host /proc + host kernel module are required by Falco
+  # itself; we keep the service segregated on vigil-internal so it has zero
+  # ingress + zero egress beyond the alertmanager push.
+  # ============================================================================
+  vigil-falco:
+    image: falcosecurity/falco-no-driver:0.39.0
+    container_name: vigil-falco
+    hostname: vigil-falco
+    <<: [*restart, *logging]
+    networks: { vigil-internal: { ipv4_address: 172.20.0.32 } }
+    privileged: true
+    pid: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /etc:/host/etc:ro
+      - /usr:/host/usr:ro
+      - ../observability/falco/vigil-rules.yaml:/etc/falco/rules.d/vigil-rules.yaml:ro
+    environment:
+      <<: *common-env
+      # Push CRITICAL+HIGH severity to alertmanager via the program output.
+      FALCO_GRPC_ENABLED: 'false'
+      FALCO_HTTP_OUTPUT_ENABLED: 'true'
+      FALCO_HTTP_OUTPUT_URL: 'http://vigil-alertmanager:9093/api/v2/alerts'
+    deploy:
+      resources:
+        limits: { memory: 512m, cpus: '0.5' }

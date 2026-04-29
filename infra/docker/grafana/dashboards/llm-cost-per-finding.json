@@ -1,0 +1,105 @@
+{
+  "uid": "vigil-llm-cost",
+  "title": "LLM cost per finding",
+  "description": "Per-finding LLM dollar cost + canary/schema failure rate.",
+  "tags": [
+    "vigil",
+    "llm",
+    "cost"
+  ],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "Africa/Douala",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "LLM cost (24h, USD)",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vigil_llm_cost_usd_total[24h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Calls (24h)",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vigil_llm_calls_total[24h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Cost rate by model (5m)",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (model_id) (rate(vigil_llm_cost_usd_total[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    }
+  ],
+  "editable": true
+}

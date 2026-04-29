@@ -1,0 +1,86 @@
+# Threat-model code-coverage matrix
+
+> Maps every threat in [`THREAT-MODEL-CMR.md`](../../THREAT-MODEL-CMR.md)
+>
+> - the SRD §05 generic Tier 1/2/3 model to the **specific code or
+>   infrastructure mitigation** that addresses it. Every row resolves to
+>   one of:
+>
+> * 🟩 **mitigated in code** — file path + commit
+> * 🟦 **mitigated by infrastructure / architect process** — operational, no code
+> * ⬛ **out of scope** — explicit non-goal in the threat model
+> * 🟥 **uncovered** — gap; must produce a fix decision-log entry
+>
+> Re-reviewed quarterly per
+> [`THREAT-MODEL-CMR.md`](../../THREAT-MODEL-CMR.md#5-review-cadence).
+
+Last reconciled: **2026-04-29**.
+
+---
+
+## Tier-1 (TTP-CMR-NN) Cameroon-specific TTPs
+
+| #          | TTP                                            | Status | Mitigation                                                                                                                                                                                                                                     |
+| ---------- | ---------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TTP-CMR-01 | SIM-card cloning intercepts SMS MFA            | 🟩     | No SMS MFA path exists. WebAuthn + YubiKey only ([SRD §17.9](../source/SRD-v3.md), [`apps/dashboard/src/app/api/council/vote/challenge/route.ts`](../../apps/dashboard/src/app/api/council/vote/challenge/route.ts)).                          |
+| TTP-CMR-02 | Customs delay as soft-pressure                 | 🟦     | 26 → 30-week timeline rebaseline (W-18, TRUTH §J); pre-orders via EU forwarder.                                                                                                                                                                |
+| TTP-CMR-03 | ENEO load-shedding                             | 🟦     | Production runs Hetzner DE; local workstation has UPS + EcoFlow + generator (TRUTH §B; THREAT-MODEL §1).                                                                                                                                       |
+| TTP-CMR-04 | Family/social pressure on architect            | 🟦     | Operational silence default ([EXEC §17.1](../source/EXEC-v1.md)); 5-pillar council means no single architect compulsion suffices.                                                                                                              |
+| TTP-CMR-05 | Forced-handover of YubiKey under duress        | 🟩     | Vault Shamir 3-of-5 ([packages/security/src/shamir.ts](../../packages/security/src/shamir.ts)); duress PIN on YubiKey wipes PIV slot (HSK-v1 §4.4).                                                                                            |
+| TTP-CMR-06 | Subpoena targeting architect's personal device | 🟦     | LUKS2 + YubiKey-PIN dual factor (TRUTH §B); production secrets never on personal device — all in Vault.                                                                                                                                        |
+| TTP-CMR-07 | Tor exit-node fingerprinting (W-13)            | 🟩     | Layered egress in [`packages/adapters/src/proxy.ts`](../../packages/adapters/src/proxy.ts) + rate-limit + robots enforcement ([rate-limit.ts](../../packages/adapters/src/rate-limit.ts), [robots.ts](../../packages/adapters/src/robots.ts)). |
+
+## Actor classes (THREAT-MODEL §1)
+
+| Actor                              | Status | Mitigation                                                                                                                                                                                                                        |
+| ---------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Procurement cartel                 | 🟦     | Diverse council; pre-retained counsel; SAS-channelled engagements (EXEC §17.1).                                                                                                                                                   |
+| DGRE / SED (intelligence services) | 🟦+🟩  | EU-jurisdiction primary hosting (Hetzner Falkenstein); Polygon mainnet anchors ⇒ tampering globally observable; 5-of-5 council ⇒ no single private compulsion.                                                                    |
+| ENEO load-shedding                 | 🟦     | See TTP-CMR-03.                                                                                                                                                                                                                   |
+| MTN/Orange/Camtel ISP pressure     | 🟩     | DNSSEC at Cloudflare (TRUTH §F); `.onion` v3 for tip portal (W-09 — [`infra/docker/tor/torrc`](../../infra/docker/tor/torrc)); WireGuard from architect's residence to EU exit.                                                   |
+| BEAC / banking-system pressure     | 🟦     | 3-location reserves (FCFA + EUR + USDC); quarterly compliance audit (TRUTH §H).                                                                                                                                                   |
+| Foreign-government lawful access   | 🟦     | Hetzner DE primary; minimal US surface (Cloudflare only for DDoS); secrets never in foreign-jurisdiction systems.                                                                                                                 |
+| Petty crime / laptop theft         | 🟩     | LUKS2 + YubiKey-PIN; bolted safe; hot data on EU NAS.                                                                                                                                                                             |
+| Domestic political pressure        | 🟩     | 4-of-5 council vote for public release ([SRD §22.4 / W-15](../weaknesses/W-15.md)); never publishes entity names without quorum ([`apps/dashboard/src/lib/verify.server.ts`](../../apps/dashboard/src/app/lib/verify.server.ts)). |
+
+## SRD §05 generic Tier-1/2/3
+
+| #     | Threat                                                            | Status | Mitigation                                                                                                                                                                                                                                                                                                                                      |
+| ----- | ----------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T-1.1 | Privileged operator action without trace                          | 🟩     | TAL-PA / DECISION-012 — every action emits a hash-chained audit row + Polygon anchor; halt-on-failure stops privileged surfaces if emitter is down. [Doctrine](../source/TAL-PA-DOCTRINE-v1.md).                                                                                                                                                |
+| T-1.2 | Audit-row tampering / suppression                                 | 🟩     | Per-actor CAS chain ([`packages/db-postgres/src/repos/audit-log.ts`](../../packages/db-postgres/src/repos/audit-log.ts)) + hourly Polygon Merkle anchor + cross-witness Fabric chaincode + audit-of-audit verifier rows.                                                                                                                        |
+| T-1.3 | Single-architect compromise                                       | 🟦     | 5-pillar council quorum (3-of-5 for escalation; 4-of-5 for public release); backup architect retainer pending (W-17).                                                                                                                                                                                                                           |
+| T-1.4 | LLM hallucination produces fabricated finding                     | 🟩     | 12-layer guards ([`packages/llm/src/guards.ts`](../../packages/llm/src/guards.ts)); 224-row corpus ([`__tests__/synthetic-hallucinations.jsonl`](../../packages/llm/__tests__/synthetic-hallucinations.jsonl)); SafeLlmRouter chokepoint ([`safe-router.ts`](../../packages/llm/src/safe-router.ts)); canary daily-rotated; verbatim grounding. |
+| T-1.5 | Source-adapter compromise (selector hijacking, malicious payload) | 🟩     | Adapter self-healing ([`apps/worker-adapter-repair/`](../../apps/worker-adapter-repair/)); rate-limit + robots enforcement; layered proxy egress; Zod-validated source schemas before persistence.                                                                                                                                              |
+| T-2.1 | Hosted-secret leakage (env, repo, image layer)                    | 🟩     | Vault Shamir 3-of-5; gitleaks pre-commit + CI ([`.gitleaks.toml`](../../.gitleaks.toml), [`.husky/pre-commit`](../../.husky/pre-commit)); `.env` in `.gitignore`; pre-commit blocks `.env` staging.                                                                                                                                             |
+| T-2.2 | Council member coercion (single-vote duress)                      | 🟩     | 3-of-5 quorum + recuse-with-reason; per-vote YubiKey signature + Polygon individual anchor (high-sig fast-lane); operator UI shows `governance.proposal_escalated` audit-of-audit.                                                                                                                                                              |
+| T-2.3 | Public defamation via /verify                                     | 🟩     | W-15 — `/verify` is entity-name-free until 4-of-5 council vote ([`apps/dashboard/src/lib/verify.server.ts`](../../apps/dashboard/src/lib/verify.server.ts)); operator-only `/api/findings/[id]` has belt-and-braces role check.                                                                                                                 |
+| T-2.4 | Tip-portal submitter deanonymisation                              | 🟩     | Tor `.onion` v3 (W-09); client-side libsodium encryption to council pubkey; raw text never leaves Yaoundé NAS; paraphrase before SFTP delivery (EXEC §18.2).                                                                                                                                                                                    |
+| T-3.1 | Polygon contract compromise (mainnet wallet theft)                | 🟦     | Polygon-signer YubiKey 5C only; Shamir 3-of-5 of seed phrase; gas-price ceiling + RPC fallback list (`apps/worker-anchor/src/index.ts`).                                                                                                                                                                                                        |
+| T-3.2 | Cross-border subpoena to GitHub                                   | 🟩     | Forgejo on Hetzner is primary; GitHub mirror is read-only and contains only public-data findings ([OPERATIONS §1](../../OPERATIONS.md)).                                                                                                                                                                                                        |
+| T-3.3 | Supply-chain attack via npm dep                                   | 🟩     | pnpm + lockfile + Snyk Pro CI gate (planned); pinned versions; renovate-bot for security-only updates.                                                                                                                                                                                                                                          |
+| T-3.4 | Drizzle migration with destructive intent                         | 🟩     | Down-migrations required ([`packages/db-postgres/drizzle/*_down.sql`](../../packages/db-postgres/drizzle/)); architect signs prod migrations; phase-gate CI workflow blocks Phase-N migrations in Phase-(N-1) PRs.                                                                                                                              |
+| T-3.5 | Insider analyst rubber-stamps clearings                           | 🟩     | TAL-PA anomaly rule `analyst_clearance_uniform` ([`packages/audit-log/src/anomaly.ts`](../../packages/audit-log/src/anomaly.ts)); council-side outlier review per §B in the AI Safety Doctrine.                                                                                                                                                 |
+
+## Out-of-scope (⬛)
+
+These remain explicit non-goals per ROADMAP / THREAT-MODEL §4:
+
+- Autonomous enforcement (no legal action; only routes evidence).
+- Predictive policing of individuals (flags transactions, not people).
+- Real-time intervention in payment flow (advisory MINFI API; never blocks).
+- Coalition of platform-admin + Polygon re-org + every block explorer simultaneously.
+- ZK-proof admissibility in Cameroonian courts (Phase 4).
+
+## Uncovered (🟥)
+
+> Any row that flips to 🟥 during quarterly review opens a decision-log
+> entry the same day. As of 2026-04-29: **none uncovered**.
+
+---
+
+## How to read this matrix
+
+- Cross-reference: every threat row cites either `THREAT-MODEL-CMR.md` (Cameroon-specific) or SRD §05 (generic). Status icon explains coverage class.
+- Code citations: `[file](../../path/to/file)` links to the in-tree mitigation. If the link is broken, the matrix is out of date — re-run [`scripts/audit-decision-log.ts`](../../scripts/audit-decision-log.ts) to verify.
+- Quarterly review: bump `Last reconciled` and re-walk every row.

@@ -1,0 +1,84 @@
+{
+  "uid": "vigil-calibration",
+  "title": "Calibration reliability bands",
+  "description": "DECISION-011 / W-14 \u2014 predicted vs observed by reliability band.",
+  "tags": [
+    "vigil",
+    "calibration"
+  ],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "Africa/Douala",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Posterior distribution",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vigil_finding_posterior_bucket[1h])))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Findings by band",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (band) (vigil_finding_posterior_count)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    }
+  ],
+  "editable": true
+}

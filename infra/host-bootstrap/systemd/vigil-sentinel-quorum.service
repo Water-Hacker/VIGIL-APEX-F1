@@ -1,0 +1,31 @@
+[Unit]
+Description=VIGIL APEX — 2-of-3 sentinel-quorum outage check (TRUTH §B)
+Documentation=https://github.com/vigilapexsas/core/blob/main/scripts/sentinel-quorum.ts
+After=network-online.target audit-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=vigil
+Group=vigil
+WorkingDirectory=/opt/vigil-apex
+EnvironmentFile=-/etc/vigil/sentinel.env
+# Polls Helsinki / Tokyo / NYC sentinels for the dashboard target. If two
+# of three report "down", emits a system.health_degraded audit row via
+# the audit-bridge UDS and exits 1.
+ExecStart=/usr/bin/env -S npx --yes tsx /opt/vigil-apex/scripts/sentinel-quorum.ts dashboard
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/vigil-apex
+ReadWritePaths=/run/vigil
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

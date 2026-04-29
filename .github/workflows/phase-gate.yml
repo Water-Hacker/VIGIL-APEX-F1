@@ -51,3 +51,13 @@ jobs:
         # lint understands DECISION block structure, the 7-day FINAL window, and
         # phase-reference validity.
         run: npx --yes tsx scripts/check-decisions.ts
+
+      - name: Run scripts/audit-decision-log.ts (cross-link audit)
+        # Verifies every markdown link, backtick file path, and DECISION-NNN
+        # reference in the binding docs resolves to something on disk.
+        run: npx --yes tsx scripts/audit-decision-log.ts
+
+      - name: Run scripts/check-pattern-coverage.ts (1:1 src ↔ fixture)
+        # Every pattern definition under packages/patterns/src/ must have a
+        # paired fixture-test under packages/patterns/test/.
+        run: npx --yes tsx scripts/check-pattern-coverage.ts

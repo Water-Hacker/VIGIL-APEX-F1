@@ -1,0 +1,29 @@
+[Unit]
+Description=VIGIL APEX — Tor onion service health probe (W-09)
+Documentation=https://github.com/vigilapexsas/core/blob/main/scripts/sentinel-tor-check.ts
+After=network-online.target tor.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=vigil
+Group=vigil
+WorkingDirectory=/opt/vigil-apex
+EnvironmentFile=-/etc/vigil/sentinel.env
+# Probe every onion declared in /etc/vigil/sentinel.env via the local Tor SOCKS5
+# proxy and push results to the Prometheus pushgateway.
+ExecStart=/usr/bin/env -S npx --yes tsx /opt/vigil-apex/scripts/sentinel-tor-check.ts
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/vigil-apex
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -11,14 +11,7 @@ import {
   shutdownTracing,
   startMetricsServer,
 } from '@vigil/observability';
-import {
-  QueueClient,
-  STREAMS,
-  WorkerBase,
-  type Envelope,
-  type HandlerOutcome,
-} from '@vigil/queue';
-import { z } from 'zod';
+import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 
 const logger = createLogger({ service: 'worker-fabric-bridge' });
 
@@ -42,12 +35,13 @@ const logger = createLogger({ service: 'worker-fabric-bridge' });
  *   - the local audit.fabric_witness row is INSERT…ON CONFLICT DO NOTHING.
  */
 
-const zPayload = z.object({
-  audit_event_id: z.string().uuid(),
-  seq: z.union([z.string(), z.number()]).transform((v) => String(v)),
-  body_hash: z.string().regex(/^[0-9a-f]{64}$/i),
-});
-type Payload = z.infer<typeof zPayload>;
+import {
+  zFabricBridgePayload as zPayload,
+  type FabricBridgePayload as Payload,
+} from './payload.js';
+
+export { zPayload };
+export type { Payload };
 
 class FabricBridgeWorker extends WorkerBase<Payload> {
   constructor(
@@ -102,9 +96,7 @@ class FabricBridgeWorker extends WorkerBase<Payload> {
          ON CONFLICT (seq) DO NOTHING`,
       [seq, body_hash, outcome.kind === 'recorded' ? outcome.txId : 'duplicate'],
     );
-    eventsEmitted
-      .labels({ worker: 'worker-fabric-bridge', stream: 'audit.fabric_witness' })
-      .inc();
+    eventsEmitted.labels({ worker: 'worker-fabric-bridge', stream: 'audit.fabric_witness' }).inc();
     return { kind: 'ack' };
   }
 }
@@ -127,8 +119,7 @@ async function main(): Promise<void> {
   const bridge = new FabricBridge(
     {
       mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
-      peerEndpoint:
-        process.env.FABRIC_PEER_ENDPOINT ?? 'vigil-fabric-peer0-org1:7051',
+      peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'vigil-fabric-peer0-org1:7051',
       ...(process.env.FABRIC_PEER_HOST_ALIAS && {
         peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS,
       }),
@@ -136,8 +127,7 @@ async function main(): Promise<void> {
       chaincodeName: process.env.FABRIC_CHAINCODE ?? 'audit-witness',
       tlsRootCertPath: process.env.FABRIC_TLS_ROOT ?? '/run/secrets/fabric_tls_root',
       clientCertPath: process.env.FABRIC_CLIENT_CERT ?? '/run/secrets/fabric_client_cert',
-      clientPrivateKeyPath:
-        process.env.FABRIC_CLIENT_KEY ?? '/run/secrets/fabric_client_key',
+      clientPrivateKeyPath: process.env.FABRIC_CLIENT_KEY ?? '/run/secrets/fabric_client_key',
     },
     logger,
   );

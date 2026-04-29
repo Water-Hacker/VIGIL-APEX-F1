@@ -18,7 +18,6 @@ import { globalPromptRegistry } from './prompt-registry.js';
 
 import type { Schemas } from '@vigil/shared';
 
-
 const NEUTRAL_FRAMING_HEADER = `You are a research assistant for an anti-corruption platform. You evaluate evidence; you do NOT decide guilt. The platform's Bayesian engine computes the probability of fraud — your only job is to surface what a careful reviewer should see.`;
 
 interface DevilsAdvocateInput {
@@ -55,9 +54,7 @@ function shuffle<T>(arr: ReadonlyArray<T> | undefined, seed: number): T[] {
   return out;
 }
 
-function componentTable(
-  components: ReadonlyArray<Schemas.CertaintyComponent> | undefined,
-): string {
+function componentTable(components: ReadonlyArray<Schemas.CertaintyComponent> | undefined): string {
   if (!components || components.length === 0) return '(no components)';
   return components
     .map(
@@ -144,6 +141,37 @@ globalPromptRegistry.register({
       user:
         `Finding: ${i.findingId ?? '<unset>'}\nEvidence presentation seed: ${i.seed ?? 0}\n\nEvidence components (shuffled):\n${componentTable(ordered)}\n\n` +
         'Estimate, given ONLY these components, the posterior probability of fraud. Output JSON: {"posterior": <number in [0,1]>, "rationale": <string max 600 chars>}.',
+    };
+  },
+});
+
+// 5) Entity resolution — alias clustering. Distinct from finding-shaping
+//    extraction: there are no source documents to cite; the call disambiguates
+//    person/company/public_body aliases. Registered here so worker-entity
+//    can run through SafeLlmRouter (prompt versioning + call-record audit
+//    trail + low-temperature default + canary). See SRD §15.5.1.
+globalPromptRegistry.register({
+  name: 'entity.resolve-aliases',
+  version: 'v1.0.0',
+  description:
+    'Alias clustering for Cameroonian person / company / public-body names across FR + EN. Output validated by zErResp; no verbatim-grounding requirement (this prompt does not cite source documents).',
+  render: (input) => {
+    const i = input as { aliases?: ReadonlyArray<string> } | undefined;
+    const aliases = i?.aliases ?? [];
+    return {
+      system:
+        NEUTRAL_FRAMING_HEADER +
+        '\n\nYou disambiguate Cameroonian person and company aliases across French and English. ' +
+        'You receive a list of name strings; output their canonical clusters with a confidence score.\n\n' +
+        'Rules:\n' +
+        "- Treat 'Jean-Paul MBARGA', 'J.P. Mbarga', 'Mbarga J.' as the same person if context permits.\n" +
+        '- Companies with identical RCCM numbers are the same company; otherwise treat them as distinct.\n' +
+        '- Confidence < 0.70 → output as separate single-element clusters (let the review queue handle it).\n' +
+        '- If you cannot disambiguate, return {"status":"insufficient_evidence","reason":"..."}.',
+      user:
+        'Aliases:\n' +
+        aliases.map((a, idx) => `${idx + 1}. ${a}`).join('\n') +
+        '\n\nOutput JSON: {"clusters":[{"canonical":"<name>","aliases":["..."],"kind":"person|company|public_body","confidence":<0..1>}]}.',
     };
   },
 });
