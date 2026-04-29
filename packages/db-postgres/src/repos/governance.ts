@@ -63,6 +63,17 @@ export class GovernanceRepo {
     return rows[0] ?? null;
   }
 
+  /** DECISION-010 — used by worker-governance to resolve finding_id from
+   *  the contract's on-chain index when an escalation event arrives. */
+  async getProposalByOnChainIndex(onChainIndex: string) {
+    const rows = await this.db
+      .select()
+      .from(govSchema.proposal)
+      .where(eq(govSchema.proposal.on_chain_index, onChainIndex))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
   async getVote(proposalId: string, voterAddress: string) {
     const rows = await this.db
       .select()

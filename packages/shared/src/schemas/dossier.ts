@@ -13,6 +13,41 @@ import { zIpfsCid, zIsoInstant, zSha256Hex, zUuid } from './common.js';
 export const zDossierLanguage = z.enum(['fr', 'en']);
 export type DossierLanguage = z.infer<typeof zDossierLanguage>;
 
+/* =============================================================================
+ * Recipient body — institutional destination for the dossier.
+ * Per TRUTH §G + DECISION-010: every dossier carries the body it's addressed
+ * to, derived auto from pattern category, optionally overridden by operator
+ * or council 4-of-5. CONAC is default for procurement; Cour des Comptes is
+ * the W-25 fallback; MINFI receives pre-disbursement risk envelopes per
+ * SRD §26; ANIF receives AML / PEP findings per SRD §28; CDC = Caisse de
+ * Dépôts & Consignations (treasury-flagged disbursements); OTHER is the
+ * escape hatch for institutional surprises.
+ * ===========================================================================*/
+
+export const zRecipientBody = z.enum([
+  'CONAC',
+  'COUR_DES_COMPTES',
+  'MINFI',
+  'ANIF',
+  'CDC',
+  'OTHER',
+]);
+export type RecipientBody = z.infer<typeof zRecipientBody>;
+
+export const zRoutingDecisionSource = z.enum(['auto', 'operator', 'council']);
+export type RoutingDecisionSource = z.infer<typeof zRoutingDecisionSource>;
+
+export const zRoutingDecision = z.object({
+  id: zUuid,
+  finding_id: zUuid,
+  recipient_body_name: zRecipientBody,
+  source: zRoutingDecisionSource,
+  decided_by: z.string().min(1).max(255), // user id, 'system:auto-router', or 'council:proposal:<idx>'
+  decided_at: zIsoInstant,
+  rationale: z.string().min(1).max(2000),
+});
+export type RoutingDecision = z.infer<typeof zRoutingDecision>;
+
 export const zDossierStatus = z.enum([
   'rendered',         // PDF built but not yet signed
   'signed',           // GPG signature appended
@@ -36,7 +71,8 @@ export const zDossier = z.object({
   rendered_at: zIsoInstant,
   delivered_at: zIsoInstant.nullable(),
   acknowledged_at: zIsoInstant.nullable(),
-  recipient_case_reference: z.string().nullable(), // CONAC's reference number
+  recipient_body_name: zRecipientBody, // DECISION-010: per-finding routing
+  recipient_case_reference: z.string().nullable(), // body's reference number once acknowledged
   manifest_hash: zSha256Hex.nullable(),
   metadata: z.record(z.unknown()).default({}),
 });

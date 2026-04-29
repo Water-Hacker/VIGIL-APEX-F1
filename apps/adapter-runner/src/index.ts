@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
-import { SourceRepo, getDb } from '@vigil/db-postgres';
+import { SatelliteRequestRepo, SourceRepo, getDb } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -22,12 +22,17 @@ import {
   newCorrelationId,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
+import { SatelliteClient } from '@vigil/satellite-client';
 import { VaultClient, expose } from '@vigil/security';
 import { Constants, Schemas } from '@vigil/shared';
 import { schedule, validate, ScheduledTask } from 'node-cron';
 
 import { registerAllAdapters } from './adapters/_register.js';
 import { runOne } from './run-one.js';
+import {
+  defaultProviderChain,
+  runSatelliteTrigger,
+} from './triggers/satellite-trigger.js';
 
 const logger = createLogger({ service: 'adapter-runner' });
 
@@ -129,6 +134,42 @@ async function main(): Promise<void> {
     );
     tasks.push(task);
     logger.info({ source: src.id, cron: src.cron }, 'adapter-scheduled');
+  }
+
+  // DECISION-010 — satellite-trigger cron. Daily by default. Can be disabled
+  // entirely with SATELLITE_TRIGGER_ENABLED=false.
+  const satelliteTriggerEnabled =
+    (process.env.SATELLITE_TRIGGER_ENABLED ?? 'true').toLowerCase() !== 'false';
+  if (satelliteTriggerEnabled) {
+    const cron = process.env.SATELLITE_TRIGGER_CRON ?? '0 2 * * *'; // 02:00 Africa/Douala
+    if (validate(cron)) {
+      const satelliteClient = new SatelliteClient(queue);
+      const trackingRepo = new SatelliteRequestRepo(db);
+      const bufferMeters = Number(process.env.SATELLITE_AOI_BUFFER_METERS ?? '500');
+      const maxCloudPct = Number(process.env.SATELLITE_MAX_CLOUD_PCT ?? '20');
+      const maxCostUsd = Number(process.env.SATELLITE_MAX_COST_PER_REQUEST_USD ?? '0');
+      const providers = defaultProviderChain();
+      const satelliteTask = schedule(
+        cron,
+        () => {
+          void runSatelliteTrigger({
+            db,
+            satellite: satelliteClient,
+            trackingRepo,
+            logger,
+            bufferMeters,
+            maxCloudPct,
+            maxCostUsd,
+            providers,
+          }).catch((e) => logger.error({ err: e }, 'satellite-trigger-failed'));
+        },
+        { timezone: 'Africa/Douala', scheduled: true },
+      );
+      tasks.push(satelliteTask);
+      logger.info({ cron, providers, bufferMeters }, 'satellite-trigger-scheduled');
+    } else {
+      logger.error({ cron }, 'invalid-satellite-trigger-cron; trigger disabled');
+    }
   }
 
   registerShutdown('cron-tasks', () => {

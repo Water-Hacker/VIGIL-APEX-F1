@@ -117,6 +117,9 @@ function rowToFinding(
     council_recused_addresses: row.council_recused_addresses,
     closed_at: row.closed_at ? row.closed_at.toISOString() : null,
     closure_reason: row.closure_reason,
+    // DECISION-010
+    recommended_recipient_body: row.recommended_recipient_body as Schemas.Finding['recommended_recipient_body'],
+    primary_pattern_id: row.primary_pattern_id as Schemas.Finding['primary_pattern_id'],
   };
 }
 

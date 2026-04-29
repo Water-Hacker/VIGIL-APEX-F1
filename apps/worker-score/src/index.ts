@@ -16,7 +16,7 @@ import {
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
-import { Constants } from '@vigil/shared';
+import { Constants, Routing } from '@vigil/shared';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -84,6 +84,31 @@ class ScoreWorker extends WorkerBase<Payload> {
     }
     if (posterior >= Constants.POSTERIOR_REVIEW_THRESHOLD) {
       await this.findingRepo.setState(finding_id, 'review');
+
+      // DECISION-010 — populate the auto-recommended recipient body so the
+      // operator UI has a default to display before the council vote opens.
+      // Pick the strongest signal's pattern_id as the primary; routing
+      // helper maps category → body.
+      const strongest = signals
+        .filter((s) => s.pattern_id !== null)
+        .sort((a, b) => b.strength * b.weight - a.strength * a.weight)[0];
+      const primaryPatternId = strongest?.pattern_id ?? null;
+      const parsed = primaryPatternId !== null ? Routing.parsePatternId(primaryPatternId) : null;
+      const finding = await this.findingRepo.getById(finding_id);
+      const severity = (finding?.severity ?? 'low') as 'low' | 'medium' | 'high' | 'critical';
+      const recommended = Routing.recommendRecipientBody({
+        patternCategory: parsed?.category ?? 'A',
+        severity,
+      });
+      await this.findingRepo.setRecommendedRecipientBody(
+        finding_id,
+        recommended,
+        primaryPatternId,
+      );
+      logger.info(
+        { finding_id, recommended, primaryPatternId },
+        'recommended-recipient-body-set',
+      );
     }
     return { kind: 'ack' };
   }

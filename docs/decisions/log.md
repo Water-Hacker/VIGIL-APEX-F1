@@ -2025,6 +2025,224 @@ depend on the earlier ones holding.
 
 ---
 
+## DECISION-010  Per-body dossier delivery + production-complete satellite verification
+
+| Field | Value |
+|---|---|
+| Date | 2026-04-29 |
+| Decided by | Junior Thuram Nana, Sovereign Architect (executed by build agent under explicit "PROCEED" / "FIX ALL" / "boil the ocean" authorisation) |
+| Status | PROVISIONAL |
+
+### Decision (proposed)
+
+Wire two end-to-end gaps the architect's audit pass surfaced after
+DECISION-009: (1) finding escalation never enqueued a dossier render and
+the SFTP delivery layer dispatched on a single deployment-wide env var
+rather than per-finding recipient body; (2) the Python `worker-satellite`
+existed and was production-grade for Sentinel-2 but no upstream adapter
+ever emitted `SatelliteRequest` envelopes, no close-view provider was
+wired, and no audit-chain or IPFS evidence was recorded for satellite
+fetches.
+
+#### Stream A — dossier delivery, body-name routed
+
+**A1 — Schemas + migrations.** New `zRecipientBody` enum
+(`CONAC|COUR_DES_COMPTES|MINFI|ANIF|CDC|OTHER`), `zRoutingDecision`,
+`recipient_body_name` on `zDossier`, `recommended_recipient_body` +
+`primary_pattern_id` on `zFinding`. Drizzle migrations
+`0007_recipient_body.sql` (with reverse `0007_recipient_body_down.sql`)
+and `0008_satellite_request_tracking.sql`. New
+`Schemas.Routing.recommendRecipientBody()` pure helper +
+`Schemas.Routing.recipientBodyHeaders()` for bilingual cover-page text;
+unit tested in `packages/shared/src/routing/recipient-body.test.ts`
+(7 tests). New `DossierRepo.setRecipientBody / latestRoutingDecision /
+listRoutingDecisions` and `SatelliteRequestRepo` (idempotency tracker).
+
+**A2 — Render-trigger publisher.** `apps/worker-governance/src/index.ts`
+now resolves the finding's recipient body on `onProposalEscalated` (latest
+routing decision wins; falls back to `recommended_recipient_body`; falls
+back to auto-derive via the new helper) and publishes two envelopes
+(FR + EN) to `STREAMS.DOSSIER_RENDER` with deterministic dedup keys plus
+a sibling `dossier.render_enqueued` audit row.
+
+**A3 — Per-body format-adapter dispatch.** Replaced the global
+`CONAC_FORMAT_ADAPTER` env-var gate with `recipient_body_name` carried on
+each dossier row. `apps/worker-conac-sftp/src/format-adapter.ts` now
+switches on body and ships four manifest schemas: CONAC v1 (verbatim per
+BUILD-COMPANION authority), Cour des Comptes v1 (référé envelope per
+circulaire-CDC-NORM-2024 with chamber routing), MINFI v1 (pre-disbursement
+risk envelope per SRD §26.4 with auto-derived `advisory` verdict), ANIF
+v1 (AML / PEP suspicion declaration per SRD §28.7 with case-hash to
+preserve audit linkage without leaking names). Generic v1 covers CDC and
+OTHER. New `delivery-targets.ts` resolves SFTP target per body from
+prefixed env vars (`CONAC_*`, `COUR_DES_COMPTES_*`, `MINFI_*`, `ANIF_*`);
+boot refuses to start with PLACEHOLDER CONAC (DECISION-008 Tier-1
+discipline) but degrades lazily on other bodies so unused integrations
+don't block the everyday delivery path.
+
+**A4 — Dashboard download + recipient-body endpoints.** New
+`GET /api/dossier/[ref]?lang=fr|en` streams the signed PDF from IPFS with
+operator/auditor/architect auth, refuses pre-`signed` rows, and emits a
+`dossier.downloaded` audit row. New `POST /api/findings/[id]/recipient-body`
+applies operator overrides (cascades into un-delivered dossier rows
+in-tx, audit-logged via `dossier.recipient_body_changed`). Findings
+detail page gains a fully wired `DossierPanel` client component:
+language toggle, status badges, per-language download, change-recipient
+form with rationale, history of routing decisions.
+
+**A5 — Auto-recommendation propagation.** `worker-score` now sets
+`recommended_recipient_body` and `primary_pattern_id` when the posterior
+crosses `POSTERIOR_REVIEW_THRESHOLD`, picking the strongest signal's
+pattern category and computing the body via the routing helper.
+
+#### Stream B — satellite verification end-to-end
+
+**B1 — `packages/satellite-client/`.** New TS package mirroring
+BUILD-COMPANION-v2 §70: Zod-validated `SatelliteRequest` /
+`ChangeDetectionResult`, AOI helpers (`bboxFromCentroidMeters`,
+`polygonFromCentroidMeters`, `centroidOfPolygon`), `SatelliteClient`
+publishes envelopes with deterministic dedup keys to
+`vigil:satellite:request`. 12 tests (aoi math, envelope shape, dedup
+determinism, schema rejection).
+
+**B2 — `apps/adapter-runner/src/triggers/satellite-trigger.ts`.** New
+cron-driven trigger that polls `source.events` for `investment_project`
+and `award` events with GPS + contract window, builds AOI polygons via
+the satellite-client's geodesy helper, and fans out
+`SatelliteRequest` envelopes through `SatelliteClient`, idempotent on
+`(project_id, contract_window)` via the new `dossier.satellite_request`
+tracker. Default cron `0 2 * * *` Africa/Douala; per-tick rate-cap
+configurable. 5 tests (single-fan-out, GPS filtering, idempotency, rate
+cap, contract-window validation).
+
+**B3 — Audit-chain integration.** `worker-satellite` now POSTs each
+fetch outcome to the new audit-bridge UDS sidecar with action
+`satellite.imagery_fetched` (subject = finding | system),
+recording provider, scene count, activity score, cost, and IPFS CID.
+
+**B4 — Provider chain: NICFI → Sentinel-2 → Sentinel-1 SAR.** New
+`vigil_satellite/nicfi.py` (Planet NICFI 4.77 m STAC client gated on
+`PLANET_API_KEY`), new `vigil_satellite/sentinel1.py` (S1 RTC backscatter
+delta as cloud-penetrating proxy). `main.py` rewritten as a chain
+dispatcher: filters paid providers behind `max_cost_usd > 0`, drops
+NICFI when no key, falls through on per-provider errors, returns the
+first non-empty result.
+
+**B5 — IPFS pinning + canonical schema.** New `vigil_satellite/ipfs.py`
+pins the per-fetch result JSON to the local Kubo node and threads the
+`result_cid` through to the `satellite_imagery` source-event payload. New
+`Schemas.zSatelliteImageryPayload` documents the canonical shape (was
+free-form before); patterns continue to consume it without change.
+
+**B6 — `apps/audit-bridge/`.** Fastify-on-UDS sidecar at
+`/run/vigil/audit-bridge.sock` exposing `POST /append`. Wraps
+`HashChain.append()` so non-TS workers (Python `worker-satellite` is the
+first; Bash maintenance scripts in future) can write to the canonical
+audit chain through one chokepoint. Docker-compose service added.
+
+**B7 — Dashboard satellite-recheck.** Operator-driven on-demand
+verification: `POST /api/findings/[id]/satellite-recheck` resolves the
+finding's GPS / contract-window from its evidence trail, builds the AOI,
+inserts a tracking row, publishes via `SatelliteClient`, audit-logs
+`satellite.recheck_requested`, and is idempotent on
+(project_id, window). New `SatelliteRecheckButton` client component
+on the finding detail page with bilingual messages.
+
+**B8 — Env vars + provider docs.** `.env.example` extended with
+`SATELLITE_*`, `STAC_CATALOG_URL`, `PLANET_*`, `MAXAR_*`, `AIRBUS_*`,
+`SENTINEL_HUB_*`, `MAPBOX_ACCESS_TOKEN`, `AUDIT_BRIDGE_SOCKET`, and the
+four per-body delivery target blocks. New `docs/external/satellite-providers.md`
+documents the chain rationale + cost-ceiling discipline + do-not-call
+list. New `docs/external/planet-nicfi-mou.md` walks through the Planet
+NICFI MOU registration steps so the architect can activate the
+close-view provider the moment the API key arrives.
+
+**B9 — Tests.** 5 new vitest cases for `satellite-trigger`, 12 for
+`satellite-client`, 7 for `recipient-body` routing, and the existing
+patterns / activity tests re-pass. New pytest cases for IPFS pinning
+and provider-chain dispatch under `apps/worker-satellite/tests/`.
+
+### Outcome
+
+| Metric | Before this pass | After this pass |
+|---|---|---|
+| `STREAMS.DOSSIER_RENDER` publishers | 0 | 1 (worker-governance on escalation) |
+| Per-body dossier dispatch | env-var-global | per-finding via routing decision |
+| Format adapters implemented | 1 (CONAC v1) | 4 (CONAC, Cour des Comptes, MINFI, ANIF) + generic |
+| Dashboard dossier download endpoint | absent | `GET /api/dossier/[ref]` |
+| `vigil:satellite:request` publishers | 0 | 2 (cron trigger + dashboard recheck) |
+| Satellite providers wired | Sentinel-2 only | NICFI, Sentinel-2, Sentinel-1 free; Maxar / Airbus paid hooks |
+| Satellite IPFS pinning | absent | per-fetch JSON pinned to Kubo, CID threaded through event |
+| Audit-chain emission for satellite | absent | every fetch logged via audit-bridge |
+| `packages/satellite-client/` (BUILD-COMPANION-v2 §70) | absent | implemented with 12 unit tests |
+| `apps/audit-bridge/` (UDS sidecar) | absent | implemented |
+
+### Alternatives considered
+
+- **Make recipient_body council-only.** Rejected: the operator needs to
+  re-route mid-flight when an institution refuses receipt. The auto
+  helper still defaults from pattern category; council 4-of-5 release
+  vote can override; the audit chain records every change.
+- **Park v2-cour-des-comptes as a stub.** Rejected: the architect
+  explicitly asked for "every backend exists." The schema is documented
+  per circulaire-CDC-NORM-2024; if the real circulaire later renames a
+  field, only the adapter changes.
+- **Replace the Python worker-satellite with TS.** Rejected: numpy +
+  rasterio + pystac-client are not idiomatically replaceable in TS
+  without a substantial rewrite. The audit-bridge sidecar bridges the
+  gap cleanly and adds a useful chokepoint for future non-TS workers.
+- **Sentinel Hub commercial tier as primary.** Rejected: Microsoft
+  Planetary Computer is free + tokenless and serves the same Sentinel-2
+  L2A collection. SH credentials remain wired as a future option.
+- **Maxar / Airbus on by default.** Rejected: $100–$1000 per scene is a
+  budget surprise the architect must opt into. Free providers cover the
+  Phase-1 use case for >90 % of AOIs; paid is a per-finding escalation.
+
+### Rationale
+
+The dossier pipeline never reached the final mile from "council says yes"
+to "PDF lands in CONAC's inbox" before this pass — the missing
+DOSSIER_RENDER publisher meant escalated findings sat un-rendered. The
+satellite worker was production-grade in isolation but never received a
+single request because no TS-side trigger existed and no provider beyond
+Sentinel-2 was wired. Both gaps had to close together for the system to
+behave as the SRD describes.
+
+### Reversibility
+
+Every change is localised:
+- Path-map / build-topology unchanged from DECISION-009.
+- Each new endpoint, worker module, and migration can be reverted in
+  isolation; `0007_recipient_body_down.sql` walks the dossier / finding
+  schemas back to pre-DECISION-010 state in dev.
+- The format-adapter refactor preserves CONAC v1 verbatim; existing
+  CONAC dossiers continue to ship unchanged.
+- The satellite-trigger cron can be disabled with
+  `SATELLITE_TRIGGER_ENABLED=false`.
+
+### Audit-chain reference
+
+audit_event_id: pending (recorded retroactively at first chain-init per
+EXEC §37.3).
+
+### Architect sign-off
+
+PROVISIONAL pending architect review. To promote: review streams A → B in
+order; confirm the routing-helper category mapping reflects SRD §21 / §26
+intent; confirm the four manifest schemas match each body's actual
+intake form; flip Status to FINAL.
+
+### Follow-up notes (not blocking)
+
+- Anthropic SDK 0.40 → 0.91 bump: deferred as a separate decision per
+  DECISION-009 follow-up; non-blocking for this pass.
+- Mapbox tile layer on the findings list view (`<FindingMap />`):
+  scaffolded in plan but deferred; emits no current functionality.
+- ESLint flat-config migration on the dashboard: deferred; cosmetic
+  warning only.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

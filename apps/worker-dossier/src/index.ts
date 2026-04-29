@@ -37,6 +37,12 @@ const zPayload = z.object({
   finding_id: z.string().uuid(),
   language: z.enum(['fr', 'en']),
   classification: z.enum(['restreint', 'confidentiel', 'public']).default('restreint'),
+  /** DECISION-010 — required from worker-governance, optional only for legacy
+   *  Phase-0 envelopes. Defaults to CONAC for back-compat. */
+  recipient_body_name: z
+    .enum(['CONAC', 'COUR_DES_COMPTES', 'MINFI', 'ANIF', 'CDC', 'OTHER'])
+    .default('CONAC'),
+  proposal_index: z.string().optional(),
 });
 type Payload = z.infer<typeof zPayload>;
 
@@ -150,6 +156,7 @@ class DossierWorker extends WorkerBase<Payload> {
       },
       verifyUrl: `https://verify.vigilapex.cm/verify/${ref}`,
       publicLedgerCheckpointUrl: `https://verify.vigilapex.cm/ledger`,
+      recipientBody: env.payload.recipient_body_name,
     });
 
     // Convert .docx to .pdf via LibreOffice headless (deterministic with --calc-headless options)
@@ -210,6 +217,7 @@ class DossierWorker extends WorkerBase<Payload> {
       rendered_at: new Date(),
       delivered_at: null,
       acknowledged_at: null,
+      recipient_body_name: env.payload.recipient_body_name,
       recipient_case_reference: null,
       manifest_hash: null,
       metadata: {
@@ -217,6 +225,7 @@ class DossierWorker extends WorkerBase<Payload> {
         content_hash: docxResult.contentHash,
         entity_count: entities.length,
         signal_count: signals.length,
+        proposal_index: env.payload.proposal_index ?? null,
       },
     });
 
@@ -236,6 +245,7 @@ class DossierWorker extends WorkerBase<Payload> {
           pdf_cid: cid,
           pdf_sha256: pdfSha256,
           language: env.payload.language,
+          recipient_body_name: env.payload.recipient_body_name,
         },
         `${ref}|${env.payload.language}|deliver`,
         env.correlation_id,

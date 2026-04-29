@@ -23,7 +23,12 @@ import { create as kuboCreate } from 'kubo-rpc-client';
 import SftpClient from 'ssh2-sftp-client';
 import { z } from 'zod';
 
-import { buildManifest, type FormatAdapterVersion } from './format-adapter.js';
+import {
+  assertCriticalTargetsConfigured,
+  resolveDeliveryTarget,
+  type DeliveryTarget,
+} from './delivery-targets.js';
+import { buildManifest, type RecipientBody } from './format-adapter.js';
 
 const logger = createLogger({ service: 'worker-conac-sftp' });
 
@@ -53,6 +58,11 @@ const zPayload = z.object({
   pdf_cid: z.string(),
   pdf_sha256: z.string().length(64),
   language: z.enum(['fr', 'en']),
+  /** DECISION-010 — set by worker-dossier from the dossier row; tells this
+   *  worker which delivery target + manifest schema to dispatch. */
+  recipient_body_name: z
+    .enum(['CONAC', 'COUR_DES_COMPTES', 'MINFI', 'ANIF', 'CDC', 'OTHER'])
+    .default('CONAC'),
 });
 type Payload = z.infer<typeof zPayload>;
 
@@ -81,12 +91,22 @@ class ConacSftpWorker extends WorkerBase<Payload> {
   }
 
   protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
-    const formatVersion: FormatAdapterVersion =
-      (process.env.CONAC_FORMAT_ADAPTER as FormatAdapterVersion) ?? 'v1';
+    const body: RecipientBody = env.payload.recipient_body_name;
 
-    if (process.env.CONAC_SFTP_HOST?.startsWith('PLACEHOLDER')) {
-      logger.warn('CONAC_SFTP_HOST not provisioned; queueing dossier for later delivery');
-      return { kind: 'retry', reason: 'conac-not-provisioned', delay_ms: 24 * 3_600_000 };
+    let target: DeliveryTarget;
+    try {
+      target = resolveDeliveryTarget(body);
+    } catch (err) {
+      logger.error({ err, body }, 'delivery-target-misconfigured');
+      return { kind: 'retry', reason: 'delivery-target-misconfigured', delay_ms: 60 * 60_000 };
+    }
+
+    if (target.host.startsWith('PLACEHOLDER')) {
+      logger.warn(
+        { body, host: target.host },
+        'delivery-target-not-provisioned; queueing dossier for later delivery',
+      );
+      return { kind: 'retry', reason: 'target-not-provisioned', delay_ms: 24 * 3_600_000 };
     }
 
     // Both language dossiers must be present before delivery (SRD §25 — bilingual
@@ -117,11 +137,11 @@ class ConacSftpWorker extends WorkerBase<Payload> {
 
     const sftp = new SftpClient();
     try {
-      const privKey = await this.vault.read<string>('conac-sftp', 'private_key');
+      const privKey = await this.vault.read<string>(target.vaultKeyMount, 'private_key');
       await sftp.connect({
-        host: process.env.CONAC_SFTP_HOST!,
-        port: Number(process.env.CONAC_SFTP_PORT ?? 22),
-        username: process.env.CONAC_SFTP_USER ?? 'vigilapex',
+        host: target.host,
+        port: target.port,
+        username: target.username,
         privateKey: expose(privKey),
         readyTimeout: 30_000,
         algorithms: {
@@ -131,11 +151,12 @@ class ConacSftpWorker extends WorkerBase<Payload> {
         },
       });
 
-      const inbox = process.env.CONAC_INBOX ?? '/inbox/vigil-apex';
-      const ackDir = process.env.CONAC_ACK_DIR ?? '/ack/vigil-apex';
+      const inbox = target.inboxPath;
+      const ackDir = target.ackPath;
       const ref = env.payload.dossier_ref;
 
-      // Build manifest via format-adapter (W-25) — now with REAL bytes + sha256
+      // Build manifest via format-adapter (W-25 + DECISION-010) — dispatched
+      // by recipient body, not by env-var version.
       const manifest = buildManifest(
         {
           dossier: {
@@ -151,6 +172,7 @@ class ConacSftpWorker extends WorkerBase<Payload> {
             rendered_at: new Date().toISOString(),
             delivered_at: null,
             acknowledged_at: null,
+            recipient_body_name: body,
             recipient_case_reference: null,
             manifest_hash: null,
             metadata: {},
@@ -166,7 +188,7 @@ class ConacSftpWorker extends WorkerBase<Payload> {
           },
           audit_anchor: { audit_event_id: 'pending', polygon_tx_hash: null },
         },
-        formatVersion,
+        body,
       );
 
       // Upload PDFs FIRST, manifest LAST (SRD §25.3 — manifest is the
@@ -246,6 +268,10 @@ async function main(): Promise<void> {
   registerShutdown('metrics', () => metrics.close());
   installShutdownHandler(logger);
   registerShutdown('tracing', shutdownTracing);
+
+  // DECISION-010 — fail-closed: refuse to start if the default recipient
+  // (CONAC) is misconfigured. Other bodies degrade lazily.
+  assertCriticalTargetsConfigured();
 
   const queue = new QueueClient({ logger });
   await queue.ping();

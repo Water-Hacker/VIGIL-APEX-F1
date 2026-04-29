@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation';
 
 import { getLocale, loadMessages, t } from '../../../lib/i18n';
 import { getFindingDetail } from '../../../lib/findings.server';
+import { DossierPanel } from './dossier-panel';
+import { SatelliteRecheckButton } from './satellite-recheck-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -139,23 +141,15 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
         </section>
       )}
 
-      {detail.dossiers.length > 0 && (
-        <section aria-labelledby="finding-dossier">
-          <h2 id="finding-dossier" className="text-xl font-semibold mb-2">
-            {t(messages, 'findings.detail.dossier')}
-          </h2>
-          <ul className="divide-y border rounded">
-            {detail.dossiers.map((d) => (
-              <li key={d.id} className="px-4 py-2 flex items-baseline gap-3">
-                <span className="font-mono">{d.ref}</span>
-                <span className="text-xs uppercase">{d.language}</span>
-                <span className="text-sm">{d.status}</span>
-                {d.pdf_cid && <span className="ml-auto text-xs font-mono break-all">{d.pdf_cid}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <DossierPanel
+        findingId={f.id}
+        dossiers={detail.dossiers}
+        recommendedRecipientBody={detail.recommendedRecipientBody}
+        routingDecisions={detail.routingDecisions}
+        locale={locale}
+      />
+
+      <SatelliteRecheckButton findingId={f.id} locale={locale} />
     </main>
   );
 }

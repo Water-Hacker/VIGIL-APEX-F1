@@ -78,12 +78,18 @@ importers:
       '@vigil/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@vigil/satellite-client':
+        specifier: workspace:*
+        version: link:../../packages/satellite-client
       '@vigil/security':
         specifier: workspace:*
         version: link:../../packages/security
       '@vigil/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      drizzle-orm:
+        specifier: ^0.34.0
+        version: 0.34.1(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@types/react@18.3.28)(pg@8.20.0)(postgres@3.4.9)(react@18.3.1)
       node-cron:
         specifier: ^3.0.3
         version: 3.0.3
@@ -106,6 +112,43 @@ importers:
       '@types/node-cron':
         specifier: ^3.0.11
         version: 3.0.11
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.3
+      tsx:
+        specifier: ^4.19.1
+        version: 4.21.0
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@types/node@20.19.39)(terser@5.46.2)
+
+  apps/audit-bridge:
+    dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
+      '@vigil/db-postgres':
+        specifier: workspace:*
+        version: link:../../packages/db-postgres
+      '@vigil/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@vigil/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      fastify:
+        specifier: ^5.0.0
+        version: 5.8.5
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.5
+        version: 20.19.39
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3
@@ -167,6 +210,9 @@ importers:
       '@simplewebauthn/types':
         specifier: ^10.0.0
         version: 10.0.0
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -179,6 +225,9 @@ importers:
       '@vigil/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@vigil/satellite-client':
+        specifier: workspace:*
+        version: link:../../packages/satellite-client
       '@vigil/security':
         specifier: workspace:*
         version: link:../../packages/security
@@ -191,6 +240,9 @@ importers:
       jose:
         specifier: ^5.9.6
         version: 5.10.0
+      kubo-rpc-client:
+        specifier: ^4.1.2
+        version: 4.1.3(undici@6.25.0)
       libsodium-wrappers-sumo:
         specifier: ^0.7.13
         version: 0.7.16
@@ -1309,6 +1361,31 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^2.1.1
         version: 2.1.9(vitest@2.1.9(@types/node@20.19.39)(terser@5.46.2))
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.3
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@types/node@20.19.39)(terser@5.46.2)
+
+  packages/satellite-client:
+    dependencies:
+      '@vigil/queue':
+        specifier: workspace:*
+        version: link:../queue
+      '@vigil/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.5
+        version: 20.19.39
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3

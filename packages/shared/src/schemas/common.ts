@@ -49,6 +49,7 @@ export const zPatternCategoryLetter = z.enum(
 export const zPillar = z.enum(PILLARS as unknown as [string, ...string[]]);
 
 export const zSeverity = z.enum(['low', 'medium', 'high', 'critical']);
+export type Severity = z.infer<typeof zSeverity>;
 
 export const zXafAmount = z
   .number()

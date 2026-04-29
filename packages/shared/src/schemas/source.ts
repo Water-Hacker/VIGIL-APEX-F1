@@ -75,6 +75,65 @@ export const zSourceEventKind = z.enum([
 ]);
 export type SourceEventKind = z.infer<typeof zSourceEventKind>;
 
+/**
+ * DECISION-010 — canonical satellite_imagery event payload.
+ *
+ * Emitted by `worker-satellite` (Python) after each STAC fetch + activity
+ * computation. Consumed by category-D patterns (P-D-001 ghost-project,
+ * P-D-002 incomplete-construction, P-D-003 site-mismatch,
+ * P-D-005 progress-fabrication). The shape is also written to
+ * `dossier.satellite_request.activity_score` and pinned to IPFS as
+ * `result_cid` for downstream verification.
+ */
+export const zSatelliteSceneFinding = z.object({
+  scene_id: z.string().min(1),
+  sensor: z.string().min(1), // e.g. 'sentinel-2-l2a', 'planet-nicfi-monthly', 'sentinel-1-rtc'
+  captured_at: z.string().datetime({ offset: true }),
+  cloud_pct: z.number().min(0).max(100),
+  ndvi_mean: z.number().min(-1).max(1).optional(),
+  ndbi_mean: z.number().min(-1).max(1).optional(),
+  activity_centroid: z
+    .object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) })
+    .optional(),
+  rationale: z.string().min(1).max(2000),
+});
+export type SatelliteSceneFinding = z.infer<typeof zSatelliteSceneFinding>;
+
+export const zSatelliteImageryPayload = z.object({
+  /** 0..1 — main signal patterns key off. 0 = no detected change. */
+  activity_score: z.number().min(0).max(1),
+  /** Centroid of the highest-activity pixel cluster, when computed. */
+  activity_centroid: z
+    .object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) })
+    .optional(),
+  /** Trend over the contract window (-1..1). */
+  activity_trend: z.number().min(-1).max(1).optional(),
+  ndvi_delta: z.number().min(-2).max(2).optional(),
+  ndbi_delta: z.number().min(-2).max(2).optional(),
+  pixel_change_pct: z.number().min(0).max(100).optional(),
+  /** Per-scene breakdown (typically 2: before + after). */
+  scene_findings: z.array(zSatelliteSceneFinding).max(20).default([]),
+  contract_window: z
+    .object({
+      start: z.string().datetime({ offset: true }),
+      end: z.string().datetime({ offset: true }),
+    })
+    .optional(),
+  /** GeoJSON Polygon describing the AOI requested. */
+  aoi_geojson: z
+    .object({
+      type: z.literal('Polygon'),
+      coordinates: z.array(z.array(z.tuple([z.number(), z.number()]))),
+    })
+    .optional(),
+  /** Provider chain entry that produced the result. */
+  provider: z.enum(['nicfi', 'sentinel-2', 'sentinel-1', 'maxar', 'airbus']),
+  cost_usd: z.number().min(0).default(0),
+  /** IPFS CID of the full result JSON + low-res NDVI delta PNG. */
+  result_cid: z.string().regex(/^b[a-z2-7]{55,}$/).nullable(),
+});
+export type SatelliteImageryPayload = z.infer<typeof zSatelliteImageryPayload>;
+
 export const zSourceEvent = z.object({
   // Synthetic — assigned by adapter base
   id: zUuid,

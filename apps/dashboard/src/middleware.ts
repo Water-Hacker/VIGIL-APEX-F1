@@ -71,6 +71,8 @@ const ROUTE_RULES: ReadonlyArray<RouteRule> = [
   { prefix: '/api/calibration', allow: ['operator', 'architect'] },
   { prefix: '/api/council', allow: ['council_member', 'architect'] },
   { prefix: '/api/triage', allow: ['tip_handler', 'architect'] },
+  // DECISION-010
+  { prefix: '/api/dossier', allow: ['operator', 'auditor', 'architect'] },
 ];
 
 function isPublic(pathname: string): boolean {

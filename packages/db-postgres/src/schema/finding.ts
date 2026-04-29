@@ -39,6 +39,9 @@ export const finding = findingSchema.table(
     council_recused_addresses: text('council_recused_addresses').array().notNull().default(sql`ARRAY[]::text[]`),
     closed_at: timestamp('closed_at', { withTimezone: true }),
     closure_reason: text('closure_reason'),
+    // DECISION-010
+    recommended_recipient_body: text('recommended_recipient_body'),
+    primary_pattern_id: text('primary_pattern_id'),
   },
   (t) => ({
     stateIdx: index('finding_state_idx').on(t.state),

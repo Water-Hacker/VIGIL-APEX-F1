@@ -14,6 +14,7 @@ export * as Time from './time.js';
 export * as Money from './money.js';
 export * as Constants from './constants.js';
 export * as Result from './result.js';
+export * as Routing from './routing/index.js';
 
 export type {
   Brand,

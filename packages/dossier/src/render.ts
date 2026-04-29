@@ -9,6 +9,7 @@ import {
   Paragraph,
   TextRun,
 } from 'docx';
+import { Routing } from '@vigil/shared';
 
 import { generateQrPng } from './qr.js';
 import type { DossierInput, DossierRenderResult } from './types.js';
@@ -28,6 +29,9 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
 
   const qrPng = await generateQrPng(input.publicLedgerCheckpointUrl);
 
+  const headers = Routing.recipientBodyHeaders(input.recipientBody);
+  const recipientHeader = input.language === 'fr' ? headers.fr : headers.en;
+
   const cover = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -44,7 +48,7 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: t.dossier_title, size: 24 })],
+      children: [new TextRun({ text: recipientHeader.title, size: 24 })],
     }),
     new Paragraph({ text: '' }),
     new Paragraph({
@@ -61,6 +65,11 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
           size: 18,
         }),
       ],
+    }),
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      alignment: AlignmentType.LEFT,
+      children: [new TextRun({ text: recipientHeader.addressee, italics: true, size: 20 })],
     }),
     new Paragraph({ text: '' }),
     new Paragraph({

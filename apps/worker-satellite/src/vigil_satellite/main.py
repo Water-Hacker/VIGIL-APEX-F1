@@ -1,14 +1,28 @@
 """worker-satellite entry point.
 
-Consumes from `vigil:satellite:request`, runs the STAC fetch + activity
-computation, and emits a `satellite_imagery` event onto `vigil:adapter:out`
-so the existing pattern pipeline (P-D-001..P-D-005) picks it up.
+Consumes from `vigil:satellite:request`, runs the provider-chain STAC
+fetch + activity computation, pins the result to IPFS, emits an audit
+row via the Node audit-bridge sidecar, and finally publishes a
+`satellite_imagery` event on `vigil:adapter:out` so the existing pattern
+pipeline (P-D-001..P-D-005) picks it up.
+
+Provider chain (default — DECISION-010):
+    NICFI (4.77 m, free, requires PLANET_API_KEY)
+  → Sentinel-2 L2A (10 m, free, MPC)
+  → Sentinel-1 RTC SAR (10 m, free, MPC, cloud-penetrating)
+
+Each provider's output is converted into a uniform `ProviderResult` plus
+per-scene findings; the chain stops at the first provider that produces a
+non-empty pair. Cost is tracked per request and bounded by
+`SATELLITE_MAX_COST_PER_REQUEST_USD` — paid providers (Maxar / Airbus)
+are gated off by default.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
+import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
 
@@ -29,24 +43,46 @@ from vigil_common.redis_consumer import (
 )
 from vigil_common.shutdown import install_shutdown, register_shutdown
 
-from .activity import ActivityResult, compute_activity
+from .activity import compute_activity
+from .audit_bridge import AuditBridgeClient
+from .ipfs import IpfsPinner
+from .nicfi import search_nicfi_scenes
 from .schemas import (
     ActivityFinding,
     GeoBBox,
     GeoPoint,
+    PolygonGeoJson,
+    Provider,
     SatelliteEventPayload,
     SatelliteRequest,
 )
-from .stac import bbox_around, read_band, search_scenes
+from .sentinel1 import (
+    read_s1_vv_backscatter,
+    s1_activity_score,
+    search_s1_scenes,
+)
+from .stac import Scene, read_band, search_scenes
 
 _logger = get_logger("worker-satellite")
+
+
+@dataclass(frozen=True)
+class ProviderResult:
+    provider: Provider
+    activity_score: float
+    activity_centroid: GeoPoint | None
+    findings: list[ActivityFinding]
+    ndvi_delta: float | None
+    ndbi_delta: float | None
+    pixel_change_pct: float | None
+    cost_usd: float
 
 
 class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
     name = "worker-satellite"
     stream = "vigil:satellite:request"
     schema = SatelliteRequest
-    concurrency = 2  # Heavy I/O + numpy → keep small
+    concurrency = 2
     max_retries = 4
 
     def __init__(self, settings: Settings) -> None:
@@ -57,93 +93,127 @@ class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
             redis_db=settings.redis_db,
         )
         self._settings = settings
+        self._audit = AuditBridgeClient(
+            os.environ.get("AUDIT_BRIDGE_SOCKET", "/run/vigil/audit-bridge.sock"),
+        )
+        self._ipfs = IpfsPinner(
+            os.environ.get("IPFS_API_URL", "http://vigil-ipfs:5001"),
+        )
 
     async def handle(self, env: Envelope[SatelliteRequest]) -> HandlerOutcome:
         req = env.payload
         try:
-            aoi = req.bbox or (
-                bbox_around(req.centroid, req.buffer_m) if req.centroid else None
+            aoi = _polygon_to_bbox(req.aoi_geojson)
+            mid = (
+                req.contract_window.start
+                + (req.contract_window.end - req.contract_window.start) * 0.10
             )
-            if aoi is None:
-                return DeadLetter(reason="neither bbox nor centroid supplied")
-
-            mid = req.contract_start + (req.contract_end - req.contract_start) * 0.10
-            late = req.contract_start + (req.contract_end - req.contract_start) * 0.95
-
-            before_scenes = search_scenes(
-                catalog_url=self._settings.stac_catalog_url, aoi=aoi, when=mid,
-                sensors=tuple(req.sensor_priority),
-            )
-            after_scenes = search_scenes(
-                catalog_url=self._settings.stac_catalog_url, aoi=aoi, when=late,
-                sensors=tuple(req.sensor_priority),
+            late = (
+                req.contract_window.start
+                + (req.contract_window.end - req.contract_window.start) * 0.95
             )
 
-            findings: list[ActivityFinding] = []
-            best: ActivityResult | None = None
-            for after in after_scenes[:3]:
-                # Pair with the closest-cloud before-scene of the same sensor
-                same = [s for s in before_scenes if s.sensor == after.sensor]
-                if not same:
+            # Filter providers by cost ceiling — paid providers gated off
+            # unless `max_cost_usd > 0`. NICFI is dropped when no API key.
+            allowed: list[Provider] = []
+            for p in req.providers:
+                if p in ("maxar", "airbus") and req.max_cost_usd <= 0:
                     continue
-                before = same[0]
+                if p == "nicfi" and not os.environ.get("PLANET_API_KEY"):
+                    continue
+                allowed.append(p)
+            if not allowed:
+                return DeadLetter(
+                    reason="no providers permitted under cost ceiling / credentials",
+                )
+
+            outcome: ProviderResult | None = None
+            tried: list[str] = []
+            for provider in allowed:
+                tried.append(provider)
                 try:
-                    b_red = read_band(before.bands["red"], aoi)
-                    b_nir = read_band(before.bands["nir"], aoi)
-                    b_swir = read_band(before.bands["swir"], aoi)
-                    a_red = read_band(after.bands["red"], aoi)
-                    a_nir = read_band(after.bands["nir"], aoi)
-                    a_swir = read_band(after.bands["swir"], aoi)
-                except VigilError as e:
-                    _logger.warning("band-read-failed", scene_id=after.item_id, error=str(e))
+                    result = await asyncio.to_thread(
+                        self._run_provider,
+                        provider,
+                        aoi,
+                        mid,
+                        late,
+                        req.max_cloud_pct,
+                    )
+                    if result is not None and result.findings:
+                        outcome = result
+                        break
+                except VigilError as ve:
+                    _logger.info(
+                        "provider-skipped",
+                        provider=provider,
+                        code=ve.code,
+                        message=ve.message,
+                    )
                     continue
 
-                result = compute_activity(
-                    before_red=b_red, before_nir=b_nir, before_swir=b_swir,
-                    after_red=a_red, after_nir=a_nir, after_swir=a_swir,
-                )
-                centroid = _pixel_to_lonlat(result.centroid_pixel, aoi, b_red.shape)
-                findings.append(
-                    ActivityFinding(
-                        scene_id=after.item_id,
-                        sensor=after.sensor,
-                        captured_at=after.captured_at,
-                        cloud_pct=after.cloud_pct,
-                        activity_score=result.activity_score,
-                        activity_centroid=centroid,
-                        ndvi_mean=result.ndvi_mean_after,
-                        ndbi_mean=result.ndbi_mean_after,
-                        rationale=(
-                            f"trend={result.activity_trend:+.2f}; "
-                            f"NDVI Δ={result.ndvi_mean_after - result.ndvi_mean_before:+.2f}; "
-                            f"NDBI Δ={result.ndbi_mean_after - result.ndbi_mean_before:+.2f}"
-                        ),
-                    )
-                )
-                if best is None or result.activity_score > best.activity_score:
-                    best = result
-                satellite_scenes_processed.labels(source=after.sensor, outcome="ok").inc()
-
-            if not findings or best is None:
+            if outcome is None:
                 satellite_scenes_processed.labels(source="any", outcome="no_pairs").inc()
-                return Retry(reason="no usable before/after pairs", delay_ms=15 * 60_000)
+                return Retry(
+                    reason=f"no usable pairs from providers={tried}",
+                    delay_ms=15 * 60_000,
+                )
 
-            payload = SatelliteEventPayload(
-                project_id=req.project_id,
-                finding_id=req.finding_id,
-                contract_window={
-                    "start": req.contract_start,
-                    "end": req.contract_end,
+            payload_dict = {
+                "request_id": req.request_id,
+                "project_id": req.project_id,
+                "finding_id": req.finding_id,
+                "provider": outcome.provider,
+                "activity_score": outcome.activity_score,
+                "activity_centroid": (
+                    outcome.activity_centroid.model_dump()
+                    if outcome.activity_centroid
+                    else None
+                ),
+                "ndvi_delta": outcome.ndvi_delta,
+                "ndbi_delta": outcome.ndbi_delta,
+                "pixel_change_pct": outcome.pixel_change_pct,
+                "scene_findings": [f.model_dump(mode="json") for f in outcome.findings],
+                "contract_window": {
+                    "start": req.contract_window.start.isoformat(),
+                    "end": req.contract_window.end.isoformat(),
                 },
-                aoi_geojson=_aoi_geojson(aoi),
-                n_scenes=len(findings),
-                activity_score=best.activity_score,
-                activity_trend=best.activity_trend,
-                activity_centroid=findings[0].activity_centroid,
-                findings=findings,
+                "aoi_geojson": req.aoi_geojson.model_dump(),
+                "cost_usd": outcome.cost_usd,
+            }
+            result_cid = await asyncio.to_thread(self._ipfs.pin_json, payload_dict)
+
+            await asyncio.to_thread(
+                self._audit.append,
+                action="satellite.imagery_fetched",
+                actor=f"worker-satellite/{req.requested_by}",
+                subject_kind="finding" if req.finding_id else "system",
+                subject_id=req.finding_id or req.project_id or req.request_id,
+                payload={
+                    "request_id": req.request_id,
+                    "provider_used": outcome.provider,
+                    "scene_count": len(outcome.findings),
+                    "activity_score": outcome.activity_score,
+                    "cost_usd": outcome.cost_usd,
+                    "result_cid": result_cid,
+                },
             )
 
-            # Emit downstream event: kind=satellite_imagery
+            event_payload = SatelliteEventPayload(
+                activity_score=outcome.activity_score,
+                activity_centroid=outcome.activity_centroid,
+                activity_trend=None,
+                ndvi_delta=outcome.ndvi_delta,
+                ndbi_delta=outcome.ndbi_delta,
+                pixel_change_pct=outcome.pixel_change_pct,
+                scene_findings=outcome.findings,
+                contract_window=req.contract_window,
+                aoi_geojson=req.aoi_geojson,
+                provider=outcome.provider,
+                cost_usd=outcome.cost_usd,
+                result_cid=result_cid,
+            )
+
             outbound = self.envelope_dict(
                 producer=self.name,
                 payload={
@@ -152,25 +222,28 @@ class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
                     "subject_kind": "Project",
                     "project_id": req.project_id,
                     "finding_id": req.finding_id,
-                    "data": payload.model_dump(mode="json"),
-                    "activity_score": best.activity_score,
+                    "data": event_payload.model_dump(mode="json"),
+                    "activity_score": outcome.activity_score,
                     "activity_centroid": (
-                        findings[0].activity_centroid.model_dump()
-                        if findings[0].activity_centroid
+                        outcome.activity_centroid.model_dump()
+                        if outcome.activity_centroid
                         else None
                     ),
                 },
-                dedup_key=f"sat:{req.project_id}:{int(req.contract_start.timestamp())}",
+                dedup_key=f"sat:{req.request_id}",
                 correlation_id=env.correlation_id,
             )
             await self.publish("vigil:adapter:out", outbound)
 
             _logger.info(
                 "satellite-assessment-emitted",
-                project_id=req.project_id,
-                activity_score=best.activity_score,
-                n_scenes=len(findings),
+                request_id=req.request_id,
+                provider=outcome.provider,
+                activity_score=outcome.activity_score,
+                n_scenes=len(outcome.findings),
+                result_cid=result_cid,
             )
+            satellite_scenes_processed.labels(source=outcome.provider, outcome="ok").inc()
             return Ack()
         except APIError as e:
             return Retry(reason=f"STAC API error: {e}", delay_ms=10 * 60_000)
@@ -179,18 +252,195 @@ class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
                 return Retry(reason=ve.message, delay_ms=15 * 60_000)
             return DeadLetter(reason=ve.message)
 
+    def _run_provider(
+        self,
+        provider: Provider,
+        aoi: GeoBBox,
+        mid: datetime,
+        late: datetime,
+        max_cloud: float,
+    ) -> ProviderResult | None:
+        if provider == "nicfi":
+            before = search_nicfi_scenes(aoi=aoi, when=mid, max_cloud=max_cloud)
+            after = search_nicfi_scenes(aoi=aoi, when=late, max_cloud=max_cloud)
+            return _ndvi_pipeline(before, after, aoi, provider="nicfi", cost=0.0)
 
-def _aoi_geojson(aoi: GeoBBox) -> dict[str, object]:
-    return {
-        "type": "Polygon",
-        "coordinates": [[
-            [aoi.min_lon, aoi.min_lat],
-            [aoi.max_lon, aoi.min_lat],
-            [aoi.max_lon, aoi.max_lat],
-            [aoi.min_lon, aoi.max_lat],
-            [aoi.min_lon, aoi.min_lat],
-        ]],
-    }
+        if provider == "sentinel-2":
+            before = search_scenes(
+                catalog_url=self._settings.stac_catalog_url,
+                aoi=aoi,
+                when=mid,
+                sensors=("sentinel-2-l2a", "landsat-c2-l2"),
+                max_cloud=max_cloud,
+            )
+            after = search_scenes(
+                catalog_url=self._settings.stac_catalog_url,
+                aoi=aoi,
+                when=late,
+                sensors=("sentinel-2-l2a", "landsat-c2-l2"),
+                max_cloud=max_cloud,
+            )
+            return _ndvi_pipeline(before, after, aoi, provider="sentinel-2", cost=0.0)
+
+        if provider == "sentinel-1":
+            before = search_s1_scenes(
+                catalog_url=self._settings.stac_catalog_url,
+                aoi=aoi,
+                when=mid,
+            )
+            after = search_s1_scenes(
+                catalog_url=self._settings.stac_catalog_url,
+                aoi=aoi,
+                when=late,
+            )
+            return _s1_pipeline(before, after, aoi)
+
+        # Maxar / Airbus paid hooks. Wired in as architecture extension points;
+        # actual invocation is gated on procurement.
+        raise VigilError(
+            code="SATELLITE_PROVIDER_NOT_IMPLEMENTED",
+            message=f"Provider '{provider}' not implemented in this build",
+            severity="info",
+            retryable=False,
+        )
+
+
+def _polygon_to_bbox(polygon: PolygonGeoJson) -> GeoBBox:
+    ring = polygon.coordinates[0]
+    if not ring or len(ring) < 4:
+        raise VigilError(
+            code="SATELLITE_INVALID_AOI",
+            message="AOI polygon outer ring must have >= 4 coordinate pairs",
+            severity="warn",
+            retryable=False,
+        )
+    lons = [pt[0] for pt in ring]
+    lats = [pt[1] for pt in ring]
+    return GeoBBox(
+        min_lon=min(lons),
+        min_lat=min(lats),
+        max_lon=max(lons),
+        max_lat=max(lats),
+    )
+
+
+def _ndvi_pipeline(
+    before: list[Scene],
+    after: list[Scene],
+    aoi: GeoBBox,
+    *,
+    provider: Provider,
+    cost: float,
+) -> ProviderResult | None:
+    findings: list[ActivityFinding] = []
+    best_score = 0.0
+    best_centroid: GeoPoint | None = None
+    best_ndvi_delta: float | None = None
+    best_ndbi_delta: float | None = None
+    best_pixel_change_pct: float | None = None
+    for after_scene in after[:3]:
+        same = [s for s in before if s.sensor == after_scene.sensor]
+        if not same:
+            continue
+        before_scene = same[0]
+        try:
+            b_red = read_band(before_scene.bands["red"], aoi)
+            b_nir = read_band(before_scene.bands["nir"], aoi)
+            b_swir = read_band(before_scene.bands["swir"], aoi)
+            a_red = read_band(after_scene.bands["red"], aoi)
+            a_nir = read_band(after_scene.bands["nir"], aoi)
+            a_swir = read_band(after_scene.bands["swir"], aoi)
+        except VigilError as e:
+            _logger.warning("band-read-failed", scene_id=after_scene.item_id, error=str(e))
+            continue
+
+        result = compute_activity(
+            before_red=b_red,
+            before_nir=b_nir,
+            before_swir=b_swir,
+            after_red=a_red,
+            after_nir=a_nir,
+            after_swir=a_swir,
+        )
+        ndvi_delta = result.ndvi_mean_after - result.ndvi_mean_before
+        ndbi_delta = result.ndbi_mean_after - result.ndbi_mean_before
+        centroid = _pixel_to_lonlat(result.centroid_pixel, aoi, b_red.shape)
+        findings.append(
+            ActivityFinding(
+                scene_id=after_scene.item_id,
+                sensor=after_scene.sensor,
+                captured_at=after_scene.captured_at,
+                cloud_pct=after_scene.cloud_pct,
+                activity_score=result.activity_score,
+                activity_centroid=centroid,
+                ndvi_mean=result.ndvi_mean_after,
+                ndbi_mean=result.ndbi_mean_after,
+                rationale=(
+                    f"trend={result.activity_trend:+.2f}; "
+                    f"NDVI Δ={ndvi_delta:+.2f}; NDBI Δ={ndbi_delta:+.2f}"
+                ),
+            )
+        )
+        if result.activity_score > best_score:
+            best_score = result.activity_score
+            best_centroid = centroid
+            best_ndvi_delta = ndvi_delta
+            best_ndbi_delta = ndbi_delta
+            best_pixel_change_pct = result.pixel_change_pct
+    if not findings:
+        return None
+    return ProviderResult(
+        provider=provider,
+        activity_score=best_score,
+        activity_centroid=best_centroid,
+        findings=findings,
+        ndvi_delta=best_ndvi_delta,
+        ndbi_delta=best_ndbi_delta,
+        pixel_change_pct=best_pixel_change_pct,
+        cost_usd=cost,
+    )
+
+
+def _s1_pipeline(
+    before: list[Scene],
+    after: list[Scene],
+    aoi: GeoBBox,
+) -> ProviderResult | None:
+    if not before or not after:
+        return None
+    before_scene = before[0]
+    after_scene = after[-1]
+    try:
+        b_vv = read_s1_vv_backscatter(before_scene.bands["vv"], aoi)
+        a_vv = read_s1_vv_backscatter(after_scene.bands["vv"], aoi)
+    except VigilError as e:
+        _logger.warning("s1-band-read-failed", error=str(e))
+        return None
+    score = s1_activity_score(b_vv, a_vv)
+    finding = ActivityFinding(
+        scene_id=after_scene.item_id,
+        sensor=after_scene.sensor,
+        captured_at=after_scene.captured_at,
+        cloud_pct=0.0,
+        activity_score=score,
+        activity_centroid=None,
+        ndvi_mean=None,
+        ndbi_mean=None,
+        rationale=(
+            "Sentinel-1 VV backscatter delta proxy — "
+            f"|Δσ°|/σ°(before) ≈ {score:.2f}"
+        ),
+    )
+    return ProviderResult(
+        provider="sentinel-1",
+        activity_score=score,
+        activity_centroid=None,
+        findings=[finding],
+        ndvi_delta=None,
+        ndbi_delta=None,
+        pixel_change_pct=None,
+        cost_usd=0.0,
+    )
 
 
 def _pixel_to_lonlat(

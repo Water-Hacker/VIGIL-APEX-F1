@@ -605,6 +605,24 @@ services:
       WORKER_NAME: worker-score
       OTEL_SERVICE_NAME: worker-score
 
+  audit-bridge:
+    <<: *worker-base
+    build:
+      context: ../..
+      dockerfile: infra/docker/dockerfiles/Worker.Dockerfile
+      args: { WORKER_NAME: audit-bridge }
+    image: vigil-apex/audit-bridge:0.1.0
+    container_name: vigil-audit-bridge
+    hostname: vigil-audit-bridge
+    networks: { vigil-internal: { ipv4_address: 172.20.0.20 } }
+    volumes:
+      - /run/vigil:/run/vigil
+    environment:
+      <<: *worker-env
+      WORKER_NAME: audit-bridge
+      OTEL_SERVICE_NAME: audit-bridge
+      AUDIT_BRIDGE_SOCKET: /run/vigil/audit-bridge.sock
+
   worker-dossier:
     <<: *worker-base
     build:

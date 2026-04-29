@@ -60,6 +60,13 @@ export const zAuditAction = z.enum([
   'dossier.acknowledged',
   'dossier.delivery_failed',
   'dossier.signing_key_rotated',
+  // DECISION-010 — body-name routing + per-finding download
+  'dossier.render_enqueued',
+  'dossier.recipient_body_changed',
+  'dossier.downloaded',
+  'satellite.request_enqueued',
+  'satellite.imagery_fetched',
+  'satellite.recheck_requested',
 
   // Tips
   'tip.received',

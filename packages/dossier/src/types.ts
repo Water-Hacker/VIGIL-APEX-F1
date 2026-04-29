@@ -19,6 +19,10 @@ export interface DossierInput {
   readonly verifyUrl: string; // https://vigilapex.cm/verify/<ref>
   /** Used in the QR code on the cover page. */
   readonly publicLedgerCheckpointUrl: string;
+  /** DECISION-010 — institutional addressee printed on the cover page in the
+   *  formal register. The RecipientBody enum is mirrored from
+   *  `@vigil/shared` to avoid a runtime cycle. */
+  readonly recipientBody: Schemas.RecipientBody;
 }
 
 export interface DossierRenderResult {

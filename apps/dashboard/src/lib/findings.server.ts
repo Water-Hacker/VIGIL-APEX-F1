@@ -96,6 +96,16 @@ export interface FindingDetail {
     readonly rendered_at: string;
     readonly delivered_at: string | null;
     readonly acknowledged_at: string | null;
+    readonly recipient_body_name: string;
+  }>;
+  readonly recommendedRecipientBody: string | null;
+  readonly routingDecisions: ReadonlyArray<{
+    readonly id: string;
+    readonly recipient_body_name: string;
+    readonly source: string;
+    readonly decided_by: string;
+    readonly decided_at: string;
+    readonly rationale: string;
   }>;
 }
 
@@ -108,7 +118,7 @@ export async function getFindingDetail(id: string): Promise<FindingDetail | null
   const finding = await findingRepo.getById(id);
   if (!finding) return null;
 
-  const [signalRows, entityRows, dossierRows] = await Promise.all([
+  const [signalRows, entityRows, dossierRows, routingRows] = await Promise.all([
     findingRepo.getSignals(id),
     finding.primary_entity_id || finding.related_entity_ids.length > 0
       ? entityRepo.getCanonicalMany([
@@ -117,6 +127,7 @@ export async function getFindingDetail(id: string): Promise<FindingDetail | null
         ])
       : Promise.resolve([] as Awaited<ReturnType<EntityRepo['getCanonicalMany']>>),
     dossierRepo.listByFinding(id),
+    dossierRepo.listRoutingDecisions(id),
   ]);
 
   return {
@@ -164,6 +175,16 @@ export async function getFindingDetail(id: string): Promise<FindingDetail | null
       rendered_at: d.rendered_at.toISOString(),
       delivered_at: d.delivered_at ? d.delivered_at.toISOString() : null,
       acknowledged_at: d.acknowledged_at ? d.acknowledged_at.toISOString() : null,
+      recipient_body_name: d.recipient_body_name,
+    })),
+    recommendedRecipientBody: finding.recommended_recipient_body ?? null,
+    routingDecisions: routingRows.map((r) => ({
+      id: r.id,
+      recipient_body_name: r.recipient_body_name,
+      source: r.source,
+      decided_by: r.decided_by,
+      decided_at: r.decided_at.toISOString(),
+      rationale: r.rationale,
     })),
   };
 }

@@ -64,7 +64,9 @@
       "@vigil/patterns": ["packages/patterns/dist"],
       "@vigil/patterns/*": ["packages/patterns/dist/*"],
       "@vigil/adapters": ["packages/adapters/dist"],
-      "@vigil/adapters/*": ["packages/adapters/dist/*"]
+      "@vigil/adapters/*": ["packages/adapters/dist/*"],
+      "@vigil/satellite-client": ["packages/satellite-client/dist"],
+      "@vigil/satellite-client/*": ["packages/satellite-client/dist/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build", ".next", "out", "coverage", ".turbo"]

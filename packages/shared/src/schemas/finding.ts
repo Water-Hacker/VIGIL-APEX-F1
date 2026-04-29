@@ -8,6 +8,7 @@ import {
   zUuid,
   zXafAmount,
 } from './common.js';
+import { zRecipientBody } from './dossier.js';
 
 /* =============================================================================
  * Finding — the core domain object.
@@ -81,6 +82,13 @@ export const zFinding = z.object({
   /** Closure metadata. */
   closed_at: zIsoInstant.nullable(),
   closure_reason: z.string().max(500).nullable(),
+  /** Recommended recipient body (DECISION-010). Computed by recommendRecipientBody()
+   *  from pattern category at proposal-creation time; surfaced in the council UI;
+   *  may be overridden by an operator or council decision before delivery. */
+  recommended_recipient_body: zRecipientBody.nullable(),
+  /** DECISION-010 — denormalised pattern_id of the strongest signal seen so far.
+   *  Drives auto-routing. Worker-score keeps it current as signals arrive. */
+  primary_pattern_id: zPatternId.nullable(),
 });
 export type Finding = z.infer<typeof zFinding>;
 

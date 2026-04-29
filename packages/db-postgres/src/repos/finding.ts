@@ -75,6 +75,22 @@ export class FindingRepo {
       .where(eq(findingSchema.finding.id, id));
   }
 
+  /** DECISION-010 — set / refresh the auto-recommended recipient body and
+   *  the denormalised primary pattern_id used to derive it. */
+  async setRecommendedRecipientBody(
+    id: string,
+    recommended: string,
+    primaryPatternId: string | null,
+  ): Promise<void> {
+    await this.db
+      .update(findingSchema.finding)
+      .set({
+        recommended_recipient_body: recommended,
+        ...(primaryPatternId !== null && { primary_pattern_id: primaryPatternId }),
+      })
+      .where(eq(findingSchema.finding.id, id));
+  }
+
   /**
    * Prior findings for a given canonical entity — used by worker-pattern's
    * subject loader (Phase A3). A finding is considered "prior" when the

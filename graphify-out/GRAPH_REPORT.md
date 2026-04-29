@@ -1,12 +1,12 @@
 # Graph Report - /home/kali/vigil-apex  (2026-04-29)
 
 ## Corpus Check
-- 431 files · ~409,938 words
+- 458 files · ~435,703 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1351 nodes · 2409 edges · 114 communities detected
-- Extraction: 68% EXTRACTED · 32% INFERRED · 0% AMBIGUOUS · INFERRED: 765 edges (avg confidence: 0.75)
+- 1467 nodes · 2741 edges · 124 communities detected
+- Extraction: 65% EXTRACTED · 35% INFERRED · 0% AMBIGUOUS · INFERRED: 957 edges (avg confidence: 0.74)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -124,28 +124,38 @@
 - [[_COMMUNITY_Community 111|Community 111]]
 - [[_COMMUNITY_Community 112|Community 112]]
 - [[_COMMUNITY_Community 113|Community 113]]
+- [[_COMMUNITY_Community 114|Community 114]]
+- [[_COMMUNITY_Community 115|Community 115]]
+- [[_COMMUNITY_Community 116|Community 116]]
+- [[_COMMUNITY_Community 117|Community 117]]
+- [[_COMMUNITY_Community 118|Community 118]]
+- [[_COMMUNITY_Community 119|Community 119]]
+- [[_COMMUNITY_Community 120|Community 120]]
+- [[_COMMUNITY_Community 121|Community 121]]
+- [[_COMMUNITY_Community 122|Community 122]]
+- [[_COMMUNITY_Community 123|Community 123]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `VigilError` - 65 edges
-2. `map()` - 54 edges
-3. `main()` - 49 edges
-4. `GET()` - 45 edges
-5. `POST()` - 33 edges
+1. `VigilError` - 81 edges
+2. `GET()` - 59 edges
+3. `map()` - 56 edges
+4. `main()` - 53 edges
+5. `POST()` - 48 edges
 6. `now()` - 30 edges
-7. `getDb()` - 26 edges
-8. `createLogger()` - 26 edges
-9. `VaultClient` - 18 edges
-10. `GeoPoint` - 18 edges
+7. `GeoBBox` - 30 edges
+8. `getDb()` - 26 edges
+9. `createLogger()` - 26 edges
+10. `SatelliteWorker` - 25 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `healthz()` --calls--> `GET()`  [INFERRED]
+  /home/kali/vigil-apex/load-tests/locust-minfi-api.py → /home/kali/vigil-apex/apps/dashboard/src/app/api/tip/status/route.ts
+- `submitTip()` --calls--> `POST()`  [INFERRED]
+  /home/kali/vigil-apex/load-tests/k6-tip-portal.js → /home/kali/vigil-apex/apps/dashboard/src/app/api/tip/submit/route.ts
 - `now()` --calls--> `envelopeFixture()`  [INFERRED]
   /home/kali/vigil-apex/packages/shared/src/time.ts → /home/kali/vigil-apex/packages/federation-stream/src/sign.test.ts
 - `now()` --calls--> `envelopeWith()`  [INFERRED]
   /home/kali/vigil-apex/packages/shared/src/time.ts → /home/kali/vigil-apex/apps/worker-federation-receiver/test/handlers.test.ts
-- `withCorrelation()` --calls--> `runOne()`  [INFERRED]
-  /home/kali/vigil-apex/packages/observability/src/correlation.js → /home/kali/vigil-apex/apps/adapter-runner/src/run-one.ts
-- `verifyAuthentication()` --calls--> `POST()`  [INFERRED]
-  /home/kali/vigil-apex/packages/security/src/fido.ts → /home/kali/vigil-apex/apps/dashboard/src/app/api/tip/submit/route.ts
 - `KV-v2 reader + auto-renewing AppRole / file-token client.` --uses--> `VigilError`  [INFERRED]
   /home/kali/vigil-apex/packages/py-common/src/vigil_common/vault.py → /home/kali/vigil-apex/packages/py-common/src/vigil_common/errors.py
 
@@ -153,146 +163,146 @@
 
 ### Community 0 - "Community 0"
 Cohesion: 0.03
-Nodes (129): ABC, ActivityResult, BandStack, compute_activity(), _ndbi(), _ndvi(), Activity-score computation.  Strategy (deliberately simple, well-bounded):    1., A 3-D ndarray (T, H, W) for one band, plus pixel size in metres. (+121 more)
+Nodes (132): ABC, ActivityResult, BandStack, compute_activity(), _ndbi(), _ndvi(), Activity-score computation.  Strategy (deliberately simple, well-bounded):    1., A 3-D ndarray (T, H, W) for one band, plus pixel size in metres. (+124 more)
 
 ### Community 1 - "Community 1"
+Cohesion: 0.03
+Nodes (56): AfdbAdapter, AnifAmlScreenAdapter, tryRead(), AnifAdapter, makeEvent(), BeacPaymentsAdapter, readSecretFile(), extractField() (+48 more)
+
+### Community 2 - "Community 2"
 Cohesion: 0.04
 Nodes (3): evt(), empty(), satWithObserved()
 
-### Community 2 - "Community 2"
-Cohesion: 0.03
-Nodes (55): AfdbAdapter, AnifAmlScreenAdapter, tryRead(), AnifAdapter, ArmpMainAdapter, makeEvent(), BeacPaymentsAdapter, readSecretFile() (+47 more)
-
 ### Community 3 - "Community 3"
 Cohesion: 0.03
-Nodes (48): decideProposal(), listPendingProposals(), dedupKey(), getCalibrationView(), listAuditLogPage(), listClosedProposals(), listCouncilComposition(), getDb() (+40 more)
+Nodes (49): decideProposal(), listPendingProposals(), ArmpMainAdapter, dedupKey(), getCalibrationView(), listAuditLogPage(), listClosedProposals(), listCouncilComposition() (+41 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.03
-Nodes (34): Neo4jClient, FastHttpUser, GovernanceRepo, CapturingHandlers, pollStatus(), submitTip(), getVerify(), healthz() (+26 more)
+Nodes (28): bayesianPosterior(), clamp(), logOdds(), sigmoid(), FindingRepo, CapturingHandlers, pollStatus(), submitTip() (+20 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.03
-Nodes (25): bodyHash(), canonicalise(), rowHash(), sortKeys(), FabricBridge, AuditWitnessContract, KEY(), main() (+17 more)
+Cohesion: 0.05
+Nodes (17): AnthropicProvider, computeCostUsd(), constructor(), run(), BedrockProvider, CircuitBreaker, CostTracker, dumpFirstContactHtml() (+9 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.04
-Nodes (18): AnthropicProvider, computeCostUsd(), constructor(), run(), BedrockProvider, CircuitBreaker, CostTracker, dumpFirstContactHtml() (+10 more)
+Nodes (15): FederationReceiverHandlers, envelopeWith(), fixtureFor(), detectLanguage(), DocumentWorker, DirectoryKeyResolver, VaultPkiKeyResolver, OcrPool (+7 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.05
-Nodes (11): AuditRepo, CalibrationRepo, closePool(), createPool(), getPool(), DossierRepo, buildManifest(), ConacSftpWorker (+3 more)
+Cohesion: 0.04
+Nodes (27): FederationStreamClient, loadServiceCtor(), Exception, make_health_app(), Lightweight FastAPI app exposing /healthz and /metrics.  The Prometheus expositi, Start the health/metrics server as a background task. Returns the task., serve_health(), _handle() (+19 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.05
-Nodes (14): main(), MtlsManager, getServiceTracer(), initTracing(), shutdownTracing(), withSpan(), KV-v2 reader + auto-renewing AppRole / file-token client., Background thread: renew the auth token every `interval_s` seconds. (+6 more)
+Nodes (18): bodyHash(), canonicalise(), rowHash(), sortKeys(), AuditWitnessContract, KEY(), main(), HashChain (+10 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.1
-Nodes (22): loadRedisPassword(), QueueClient, getCorrelationId(), getWorkerName(), newCorrelationId(), withCorrelation(), newEventId(), correlationMixin() (+14 more)
+Cohesion: 0.04
+Nodes (18): main(), verifyCrossWitness(), GovernanceReadClient, computeMerkleRootForRange(), CounterWorker, EntityWorker, loadMinfiMtls(), main() (+10 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.05
-Nodes (20): AdapterError, AuditChainError, AuthError, CaptchaBudgetExceededError, CouncilMemberConflictError, FidoVerificationError, GovernanceError, HashChainBrokenError (+12 more)
+Nodes (12): EntityRepo, asPatternId(), formatDossierRef(), newAuditEventId(), newEntityId(), newFindingId(), newSignalId(), DossierWorker (+4 more)
 
 ### Community 11 - "Community 11"
+Cohesion: 0.05
+Nodes (20): AdapterError, AuditChainError, AuthError, CaptchaBudgetExceededError, CouncilMemberConflictError, FidoVerificationError, GovernanceError, HashChainBrokenError (+12 more)
+
+### Community 12 - "Community 12"
+Cohesion: 0.09
+Nodes (23): loadRedisPassword(), QueueClient, getCorrelationId(), getWorkerName(), newCorrelationId(), withCorrelation(), newEventId(), correlationMixin() (+15 more)
+
+### Community 13 - "Community 13"
 Cohesion: 0.08
 Nodes (18): TipTriageWorker, toBase64(), gfDiv(), gfMul(), shamirCombine(), shamirCombineFromBase64(), gfMul(), shamirSplit() (+10 more)
 
-### Community 12 - "Community 12"
-Cohesion: 0.07
-Nodes (20): FederationStreamClient, loadServiceCtor(), Exception, make_health_app(), Lightweight FastAPI app exposing /healthz and /metrics.  The Prometheus expositi, Start the health/metrics server as a background task. Returns the task., serve_health(), _handle() (+12 more)
-
-### Community 13 - "Community 13"
-Cohesion: 0.07
-Nodes (9): FederationReceiverHandlers, envelopeWith(), DirectoryKeyResolver, VaultPkiKeyResolver, registerAdapter(), registerPattern(), Registry, makeSectoralAdapter() (+1 more)
-
 ### Community 14 - "Community 14"
-Cohesion: 0.06
-Nodes (8): asPatternId(), formatDossierRef(), newAuditEventId(), newEntityId(), newFindingId(), newSignalId(), EntityWorker, PID()
+Cohesion: 0.07
+Nodes (6): AuditRepo, CalibrationRepo, closePool(), createPool(), getPool(), main()
 
 ### Community 15 - "Community 15"
 Cohesion: 0.11
-Nodes (4): detectLanguage(), DocumentWorker, OcrPool, SourceRepo
+Nodes (27): EXIF / metadata strip.  Per SRD §28.4: every uploaded image has its EXIF + autho, Return (sanitised_bytes, report)., strip_exif(), _binarise(), detect_font_anomaly(), _glyph_metrics(), Font / typography anomaly detection.  We extract per-character glyph features fr, Return (mean_stroke, std_stroke, mean_height, std_spacing). (+19 more)
 
 ### Community 16 - "Community 16"
+Cohesion: 0.12
+Nodes (13): assertCriticalTargetsConfigured(), DeliveryTargetMisconfiguredError, resolveDeliveryTarget(), DossierRepo, buildManifest(), COMMON_FILE_LIST(), minfiAdvisoryFromPosterior(), minfiRationaleEn() (+5 more)
+
+### Community 17 - "Community 17"
+Cohesion: 0.1
+Nodes (6): generateQrPng(), parsePatternId(), recipientBodyHeaders(), recommendRecipientBody(), classificationColour(), renderDossierDocx()
+
+### Community 18 - "Community 18"
+Cohesion: 0.1
+Nodes (7): FabricBridge, getLocale(), loadMessages(), FabricBridgeWorker, PrivacyPage(), submit(), TermsPage()
+
+### Community 19 - "Community 19"
 Cohesion: 0.2
 Nodes (16): assertGuardsPass(), l10EntityFormPreservation(), l11TemperatureBound(), l12NegativeExamples(), l1SchemaCompliance(), l2CitationRequired(), l3CidInContext(), l4InsufficientPath() (+8 more)
 
-### Community 17 - "Community 17"
-Cohesion: 0.17
-Nodes (0): 
+### Community 20 - "Community 20"
+Cohesion: 0.29
+Nodes (8): IpfsPinner, IPFS pinning — pins satellite-fetch results so dossiers can cite them.  Talks to, Synchronous Kubo client. Used inside the async worker via to_thread., Tests for the IPFS pinner client., test_pin_json_returns_cid_on_success(), test_pin_json_returns_none_on_http_error(), test_pin_json_returns_none_on_malformed_response(), test_pin_json_returns_none_on_non_200()
 
-### Community 18 - "Community 18"
+### Community 21 - "Community 21"
 Cohesion: 0.27
-Nodes (4): err(), mapErr(), ok(), tryCatch()
+Nodes (3): bboxFromCentroidMeters(), polygonFromCentroidMeters(), satelliteRequestKey()
 
-### Community 19 - "Community 19"
+### Community 22 - "Community 22"
+Cohesion: 0.42
+Nodes (1): Neo4jClient
+
+### Community 23 - "Community 23"
 Cohesion: 0.22
 Nodes (0): 
 
-### Community 20 - "Community 20"
+### Community 24 - "Community 24"
 Cohesion: 0.29
 Nodes (2): isSuperArgs(), VIGILGovernance__factory
 
-### Community 21 - "Community 21"
-Cohesion: 0.39
-Nodes (4): bayesianPosterior(), clamp(), logOdds(), sigmoid()
-
-### Community 22 - "Community 22"
+### Community 25 - "Community 25"
 Cohesion: 0.32
-Nodes (4): getLocale(), loadMessages(), PrivacyPage(), TermsPage()
+Nodes (7): FastHttpUser, healthz(), make_request_payload(), MinfiScoringUser, Locust load test — MINFI /score API.  Phase F7. SLA target: p95 < 100ms @ 100 rp, score_request(), sign_body()
 
-### Community 23 - "Community 23"
-Cohesion: 0.25
-Nodes (1): GovernanceReadClient
-
-### Community 24 - "Community 24"
+### Community 26 - "Community 26"
 Cohesion: 0.29
 Nodes (0): 
 
-### Community 25 - "Community 25"
+### Community 27 - "Community 27"
 Cohesion: 0.5
 Nodes (1): Ownable__factory
 
-### Community 26 - "Community 26"
+### Community 28 - "Community 28"
 Cohesion: 0.5
 Nodes (1): Ownable2Step__factory
 
-### Community 27 - "Community 27"
+### Community 29 - "Community 29"
 Cohesion: 0.5
 Nodes (1): IAccessControl__factory
 
-### Community 28 - "Community 28"
+### Community 30 - "Community 30"
 Cohesion: 0.5
 Nodes (1): AccessControl__factory
 
-### Community 29 - "Community 29"
+### Community 31 - "Community 31"
 Cohesion: 0.5
 Nodes (1): ReentrancyGuard__factory
 
-### Community 30 - "Community 30"
+### Community 32 - "Community 32"
 Cohesion: 0.5
 Nodes (1): IERC165__factory
 
-### Community 31 - "Community 31"
+### Community 33 - "Community 33"
 Cohesion: 0.5
 Nodes (1): ERC165__factory
 
-### Community 32 - "Community 32"
+### Community 34 - "Community 34"
 Cohesion: 0.5
 Nodes (0): 
 
-### Community 33 - "Community 33"
-Cohesion: 0.67
-Nodes (0): 
-
-### Community 34 - "Community 34"
-Cohesion: 1.0
-Nodes (0): 
-
 ### Community 35 - "Community 35"
-Cohesion: 1.0
+Cohesion: 0.67
 Nodes (0): 
 
 ### Community 36 - "Community 36"
@@ -607,76 +617,112 @@ Nodes (0):
 Cohesion: 1.0
 Nodes (0): 
 
+### Community 114 - "Community 114"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 115 - "Community 115"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 116 - "Community 116"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 117 - "Community 117"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 118 - "Community 118"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 119 - "Community 119"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 120 - "Community 120"
+Cohesion: 1.0
+Nodes (0): 
+
+### Community 121 - "Community 121"
+Cohesion: 1.0
+Nodes (1): Worker input: a project to assess.      Either `bbox` or `centroid + buffer_m` m
+
+### Community 122 - "Community 122"
+Cohesion: 1.0
+Nodes (1): Per-scene activity assessment, attached to the source event payload.
+
+### Community 123 - "Community 123"
+Cohesion: 1.0
+Nodes (1): Aggregated outbound payload — one event per project per run.
+
 ## Knowledge Gaps
-- **27 isolated node(s):** `Read the public key from PIV slot 9c and derive the address.`, `Build an EIP-1559 transaction, sign via YubiKey, broadcast.`, `Locust load test — MINFI /score API.  Phase F7. SLA target: p95 < 100ms @ 100 rp`, `AdapterError`, `LlmError` (+22 more)
+- **35 isolated node(s):** `Read the public key from PIV slot 9c and derive the address.`, `Build an EIP-1559 transaction, sign via YubiKey, broadcast.`, `Locust load test — MINFI /score API.  Phase F7. SLA target: p95 < 100ms @ 100 rp`, `AdapterError`, `LlmError` (+30 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **Thin community `Community 34`** (2 nodes): `sentry.client.config.ts`, `beforeSend()`
+- **Thin community `Community 36`** (2 nodes): `sentry.client.config.ts`, `beforeSend()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 35`** (2 nodes): `layout.tsx`, `RootLayout()`
+- **Thin community `Community 37`** (2 nodes): `layout.tsx`, `RootLayout()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 36`** (2 nodes): `loading.tsx`, `Loading()`
+- **Thin community `Community 38`** (2 nodes): `loading.tsx`, `Loading()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 37`** (2 nodes): `not-found.tsx`, `NotFound()`
+- **Thin community `Community 39`** (2 nodes): `not-found.tsx`, `NotFound()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 38`** (2 nodes): `GlobalError()`, `error.tsx`
+- **Thin community `Community 40`** (2 nodes): `GlobalError()`, `error.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 39`** (2 nodes): `run-now.tsx`, `RunNowButton()`
+- **Thin community `Community 41`** (2 nodes): `run-now.tsx`, `RunNowButton()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 40`** (2 nodes): `page.tsx`, `eceTone()`
+- **Thin community `Community 42`** (2 nodes): `page.tsx`, `eceTone()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 41`** (2 nodes): `decrypt()`, `decrypt-form.tsx`
+- **Thin community `Community 43`** (2 nodes): `satellite-recheck-button.tsx`, `SatelliteRecheckButton()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 42`** (2 nodes): `decide()`, `decision-form.tsx`
+- **Thin community `Community 44`** (2 nodes): `decrypt()`, `decrypt-form.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 43`** (2 nodes): `vote-ceremony.tsx`, `submit()`
+- **Thin community `Community 45`** (2 nodes): `decide()`, `decision-form.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 44`** (2 nodes): `page.tsx`, `VerifyPage()`
+- **Thin community `Community 46`** (2 nodes): `vote-ceremony.tsx`, `submit()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 45`** (2 nodes): `lookup.tsx`, `lookup()`
+- **Thin community `Community 47`** (2 nodes): `page.tsx`, `VerifyPage()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 46`** (1 nodes): `hardhat.config.ts`
+- **Thin community `Community 48`** (2 nodes): `lookup.tsx`, `lookup()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 47`** (1 nodes): `hardhat.d.ts`
+- **Thin community `Community 49`** (1 nodes): `hardhat.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 48`** (1 nodes): `index.ts`
+- **Thin community `Community 50`** (1 nodes): `hardhat.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 49`** (1 nodes): `common.ts`
+- **Thin community `Community 51`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 50`** (1 nodes): `index.ts`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 51`** (1 nodes): `VIGILGovernance.ts`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 52`** (1 nodes): `VIGILAnchor.ts`
+- **Thin community `Community 52`** (1 nodes): `common.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 53`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 54`** (1 nodes): `index.ts`
+- **Thin community `Community 54`** (1 nodes): `VIGILGovernance.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 55`** (1 nodes): `Ownable2Step.ts`
+- **Thin community `Community 55`** (1 nodes): `VIGILAnchor.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 56`** (1 nodes): `Ownable.ts`
+- **Thin community `Community 56`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 57`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 58`** (1 nodes): `AccessControl.ts`
+- **Thin community `Community 58`** (1 nodes): `Ownable2Step.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 59`** (1 nodes): `IAccessControl.ts`
+- **Thin community `Community 59`** (1 nodes): `Ownable.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 60`** (1 nodes): `ReentrancyGuard.ts`
+- **Thin community `Community 60`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 61`** (1 nodes): `index.ts`
+- **Thin community `Community 61`** (1 nodes): `AccessControl.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 62`** (1 nodes): `index.ts`
+- **Thin community `Community 62`** (1 nodes): `IAccessControl.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 63`** (1 nodes): `IERC165.ts`
+- **Thin community `Community 63`** (1 nodes): `ReentrancyGuard.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 64`** (1 nodes): `ERC165.ts`
+- **Thin community `Community 64`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 65`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 66`** (1 nodes): `index.ts`
+- **Thin community `Community 66`** (1 nodes): `IERC165.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 67`** (1 nodes): `index.ts`
+- **Thin community `Community 67`** (1 nodes): `ERC165.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 68`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -692,71 +738,71 @@ Nodes (0):
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 74`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 75`** (1 nodes): `index.ts`
+- **Thin community `Community 75`** (1 nodes): `vitest.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 76`** (1 nodes): `queries.ts`
+- **Thin community `Community 76`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 77`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 78`** (1 nodes): `drizzle.config.ts`
+- **Thin community `Community 78`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 79`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 80`** (1 nodes): `vitest.config.ts`
+- **Thin community `Community 80`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 81`** (1 nodes): `index.ts`
+- **Thin community `Community 81`** (1 nodes): `queries.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 82`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 83`** (1 nodes): `index.ts`
+- **Thin community `Community 83`** (1 nodes): `drizzle.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 84`** (1 nodes): `vitest.config.ts`
+- **Thin community `Community 84`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 85`** (1 nodes): `index.ts`
+- **Thin community `Community 85`** (1 nodes): `vitest.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 86`** (1 nodes): `index.js`
+- **Thin community `Community 86`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 87`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 88`** (1 nodes): `index.d.ts`
+- **Thin community `Community 88`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 89`** (1 nodes): `metrics.d.ts`
+- **Thin community `Community 89`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 90`** (1 nodes): `logger.d.ts`
+- **Thin community `Community 90`** (1 nodes): `vitest.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 91`** (1 nodes): `tracing.d.ts`
+- **Thin community `Community 91`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 92`** (1 nodes): `correlation.d.ts`
+- **Thin community `Community 92`** (1 nodes): `index.js`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 93`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 94`** (1 nodes): `index.ts`
+- **Thin community `Community 94`** (1 nodes): `index.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 95`** (1 nodes): `index.ts`
+- **Thin community `Community 95`** (1 nodes): `metrics.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 96`** (1 nodes): `__init__.py`
+- **Thin community `Community 96`** (1 nodes): `logger.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 97`** (1 nodes): `sentry.server.config.ts`
+- **Thin community `Community 97`** (1 nodes): `tracing.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 98`** (1 nodes): `next.config.mjs`
+- **Thin community `Community 98`** (1 nodes): `correlation.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 99`** (1 nodes): `playwright.config.ts`
+- **Thin community `Community 99`** (1 nodes): `vitest.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 100`** (1 nodes): `next-env.d.ts`
+- **Thin community `Community 100`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 101`** (1 nodes): `page.tsx`
+- **Thin community `Community 101`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 102`** (1 nodes): `page.tsx`
+- **Thin community `Community 102`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 103`** (1 nodes): `page.tsx`
+- **Thin community `Community 103`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 104`** (1 nodes): `page.tsx`
+- **Thin community `Community 104`** (1 nodes): `sentry.server.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 105`** (1 nodes): `page.tsx`
+- **Thin community `Community 105`** (1 nodes): `next.config.mjs`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 106`** (1 nodes): `page.tsx`
+- **Thin community `Community 106`** (1 nodes): `playwright.config.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 107`** (1 nodes): `page.tsx`
+- **Thin community `Community 107`** (1 nodes): `next-env.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 108`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -766,25 +812,45 @@ Nodes (0):
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 111`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 112`** (1 nodes): `public-surfaces.spec.ts`
+- **Thin community `Community 112`** (1 nodes): `page.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 113`** (1 nodes): `__init__.py`
+- **Thin community `Community 113`** (1 nodes): `page.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 114`** (1 nodes): `page.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 115`** (1 nodes): `page.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 116`** (1 nodes): `page.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 117`** (1 nodes): `page.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 118`** (1 nodes): `page.tsx`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 119`** (1 nodes): `public-surfaces.spec.ts`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 120`** (1 nodes): `__init__.py`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 121`** (1 nodes): `Worker input: a project to assess.      Either `bbox` or `centroid + buffer_m` m`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 122`** (1 nodes): `Per-scene activity assessment, attached to the source event payload.`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 123`** (1 nodes): `Aggregated outbound payload — one event per project per run.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `map()` connect `Community 3` to `Community 2`, `Community 4`, `Community 5`, `Community 6`, `Community 11`, `Community 14`, `Community 16`, `Community 18`, `Community 21`?**
-  _High betweenness centrality (0.155) - this node is a cross-community bridge._
-- **Why does `main()` connect `Community 5` to `Community 2`, `Community 3`, `Community 4`, `Community 7`, `Community 8`, `Community 9`, `Community 11`, `Community 13`, `Community 14`, `Community 15`, `Community 23`?**
-  _High betweenness centrality (0.107) - this node is a cross-community bridge._
-- **Why does `GET()` connect `Community 4` to `Community 0`, `Community 3`, `Community 5`, `Community 6`, `Community 7`, `Community 11`, `Community 12`, `Community 16`, `Community 22`?**
-  _High betweenness centrality (0.102) - this node is a cross-community bridge._
-- **Are the 54 inferred relationships involving `VigilError` (e.g. with `VaultClient` and `Thin wrapper over hvac for Vault KV-v2 reads + auto-token-renewal.  Mirrors `@vi`) actually correct?**
-  _`VigilError` has 54 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 52 inferred relationships involving `map()` (e.g. with `renderDossierDocx()` and `.run()`) actually correct?**
-  _`map()` has 52 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 29 inferred relationships involving `main()` (e.g. with `initTracing()` and `startMetricsServer()`) actually correct?**
-  _`main()` has 29 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 37 inferred relationships involving `GET()` (e.g. with `_handle()` and `healthz()`) actually correct?**
-  _`GET()` has 37 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `GET()` connect `Community 4` to `Community 0`, `Community 1`, `Community 3`, `Community 6`, `Community 7`, `Community 9`, `Community 13`, `Community 14`, `Community 16`, `Community 18`, `Community 19`, `Community 20`, `Community 25`?**
+  _High betweenness centrality (0.125) - this node is a cross-community bridge._
+- **Why does `POST()` connect `Community 3` to `Community 0`, `Community 1`, `Community 4`, `Community 9`, `Community 12`, `Community 13`, `Community 14`, `Community 20`, `Community 21`, `Community 25`?**
+  _High betweenness centrality (0.120) - this node is a cross-community bridge._
+- **Why does `map()` connect `Community 3` to `Community 0`, `Community 1`, `Community 4`, `Community 5`, `Community 8`, `Community 9`, `Community 10`, `Community 13`, `Community 17`, `Community 19`, `Community 22`?**
+  _High betweenness centrality (0.108) - this node is a cross-community bridge._
+- **Are the 70 inferred relationships involving `VigilError` (e.g. with `VaultClient` and `Thin wrapper over hvac for Vault KV-v2 reads + auto-token-renewal.  Mirrors `@vi`) actually correct?**
+  _`VigilError` has 70 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 50 inferred relationships involving `GET()` (e.g. with `_handle()` and `healthz()`) actually correct?**
+  _`GET()` has 50 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 54 inferred relationships involving `map()` (e.g. with `renderDossierDocx()` and `.run()`) actually correct?**
+  _`map()` has 54 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 32 inferred relationships involving `main()` (e.g. with `initTracing()` and `startMetricsServer()`) actually correct?**
+  _`main()` has 32 INFERRED edges - model-reasoned connections that need verification._
