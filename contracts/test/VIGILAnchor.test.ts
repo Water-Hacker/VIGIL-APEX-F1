@@ -1,3 +1,7 @@
+/* eslint-disable unicorn/filename-case -- Hardhat test files mirror the
+   contract name (PascalCase) by convention; renaming breaks the
+   convention without functional benefit. */
+/* global describe, it */
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 
@@ -32,10 +36,9 @@ describe('VIGILAnchor', () => {
 
   it('rejects empty roothash', async () => {
     const { anchor, committer } = await deploy();
-    await expect(anchor.connect(committer).commit(1, 1, ethers.ZeroHash)).to.be.revertedWithCustomError(
-      anchor,
-      'EmptyRoot',
-    );
+    await expect(
+      anchor.connect(committer).commit(1, 1, ethers.ZeroHash),
+    ).to.be.revertedWithCustomError(anchor, 'EmptyRoot');
   });
 
   it('rejects non-contiguous range', async () => {
@@ -58,10 +61,9 @@ describe('VIGILAnchor', () => {
 
   it('rotates committer (owner only)', async () => {
     const { anchor, owner, committer, attacker } = await deploy();
-    await expect(anchor.connect(attacker).rotateCommitter(attacker.address)).to.be.revertedWithCustomError(
-      anchor,
-      'OwnableUnauthorizedAccount',
-    );
+    await expect(
+      anchor.connect(attacker).rotateCommitter(attacker.address),
+    ).to.be.revertedWithCustomError(anchor, 'OwnableUnauthorizedAccount');
     await expect(anchor.connect(owner).rotateCommitter(attacker.address))
       .to.emit(anchor, 'CommitterRotated')
       .withArgs(committer.address, attacker.address);
@@ -70,6 +72,9 @@ describe('VIGILAnchor', () => {
 
   it('rejects out-of-range commitment lookup', async () => {
     const { anchor } = await deploy();
-    await expect(anchor.getCommitment(0)).to.be.revertedWithCustomError(anchor, 'CommitmentNotFound');
+    await expect(anchor.getCommitment(0)).to.be.revertedWithCustomError(
+      anchor,
+      'CommitmentNotFound',
+    );
   });
 });
