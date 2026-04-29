@@ -1,15 +1,18 @@
-# Graph Report - /home/kali/vigil-apex  (2026-04-29)
+# Graph Report - /home/kali/vigil-apex (2026-04-29)
 
 ## Corpus Check
+
 - 504 files · ~483,066 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
+
 - 1679 nodes · 3114 edges · 129 communities detected
 - Extraction: 64% EXTRACTED · 36% INFERRED · 0% AMBIGUOUS · INFERRED: 1110 edges (avg confidence: 0.75)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
+
 - [[_COMMUNITY_Community 0|Community 0]]
 - [[_COMMUNITY_Community 1|Community 1]]
 - [[_COMMUNITY_Community 2|Community 2]]
@@ -141,6 +144,7 @@
 - [[_COMMUNITY_Community 128|Community 128]]
 
 ## God Nodes (most connected - your core abstractions)
+
 1. `VigilError` - 81 edges
 2. `GET()` - 74 edges
 3. `map()` - 72 edges
@@ -153,536 +157,667 @@
 10. `SatelliteWorker` - 25 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `healthz()` --calls--> `GET()`  [INFERRED]
+
+- `healthz()` --calls--> `GET()` [INFERRED]
   /home/kali/vigil-apex/load-tests/locust-minfi-api.py → /home/kali/vigil-apex/apps/dashboard/src/app/api/tip/status/route.ts
-- `submitTip()` --calls--> `POST()`  [INFERRED]
+- `submitTip()` --calls--> `POST()` [INFERRED]
   /home/kali/vigil-apex/load-tests/k6-tip-portal.js → /home/kali/vigil-apex/apps/dashboard/src/app/api/tip/submit/route.ts
-- `map()` --calls--> `componentTable()`  [INFERRED]
+- `map()` --calls--> `componentTable()` [INFERRED]
   /home/kali/vigil-apex/packages/shared/src/result.ts → /home/kali/vigil-apex/packages/llm/src/safety/prompts.ts
-- `map()` --calls--> `reliabilityChart()`  [INFERRED]
+- `map()` --calls--> `reliabilityChart()` [INFERRED]
   /home/kali/vigil-apex/packages/shared/src/result.ts → /home/kali/vigil-apex/apps/dashboard/src/app/calibration/reliability/page.tsx
-- `now()` --calls--> `envelopeFixture()`  [INFERRED]
+- `now()` --calls--> `envelopeFixture()` [INFERRED]
   /home/kali/vigil-apex/packages/shared/src/time.ts → /home/kali/vigil-apex/packages/federation-stream/src/sign.test.ts
 
 ## Communities
 
 ### Community 0 - "Community 0"
+
 Cohesion: 0.03
-Nodes (136): ABC, ActivityResult, BandStack, compute_activity(), _ndbi(), _ndvi(), Activity-score computation.  Strategy (deliberately simple, well-bounded):    1., A 3-D ndarray (T, H, W) for one band, plus pixel size in metres. (+128 more)
+Nodes (136): ABC, ActivityResult, BandStack, compute_activity(), \_ndbi(), \_ndvi(), Activity-score computation. Strategy (deliberately simple, well-bounded): 1., A 3-D ndarray (T, H, W) for one band, plus pixel size in metres. (+128 more)
 
 ### Community 1 - "Community 1"
+
 Cohesion: 0.02
 Nodes (60): decideProposal(), listPendingProposals(), getCalibrationView(), CertaintyRepo, listAuditLogPage(), listClosedProposals(), listCouncilComposition(), getDb() (+52 more)
 
 ### Community 2 - "Community 2"
+
 Cohesion: 0.03
 Nodes (58): AfdbAdapter, AnifAmlScreenAdapter, tryRead(), AnifAdapter, ArmpMainAdapter, constructor(), dedupKey(), makeEvent() (+50 more)
 
 ### Community 3 - "Community 3"
+
 Cohesion: 0.02
 Nodes (30): bboxFromCentroidMeters(), polygonFromCentroidMeters(), AuditRepo, AnomalyAlertRepo, PublicAnchorRepo, PublicExportRepo, RedactionRepo, SessionRepo (+22 more)
 
 ### Community 4 - "Community 4"
+
 Cohesion: 0.04
 Nodes (2): evt(), satWithObserved()
 
 ### Community 5 - "Community 5"
+
 Cohesion: 0.03
 Nodes (29): AnthropicProvider, computeCostUsd(), run(), BedrockProvider, canaryFor(), canaryTriggered(), CircuitBreaker, normalise() (+21 more)
 
 ### Community 6 - "Community 6"
+
 Cohesion: 0.03
 Nodes (25): evaluateAnomalies(), main(), verifyCrossWitness(), GovernanceReadClient, envelopeWith(), computeMerkleRootForRange(), CounterWorker, EntityWorker (+17 more)
 
 ### Community 7 - "Community 7"
+
 Cohesion: 0.03
 Nodes (28): actorFromRequest(), audit(), deps(), mapRole(), AuditEmitterUnavailableError, withHaltOnFailure(), getLocale(), loadMessages() (+20 more)
 
 ### Community 8 - "Community 8"
+
 Cohesion: 0.04
-Nodes (28): FederationStreamClient, loadServiceCtor(), main(), Exception, make_health_app(), Lightweight FastAPI app exposing /healthz and /metrics.  The Prometheus expositi, Start the health/metrics server as a background task. Returns the task., serve_health() (+20 more)
+Nodes (28): FederationStreamClient, loadServiceCtor(), main(), Exception, make_health_app(), Lightweight FastAPI app exposing /healthz and /metrics. The Prometheus expositi, Start the health/metrics server as a background task. Returns the task., serve_health() (+20 more)
 
 ### Community 9 - "Community 9"
+
 Cohesion: 0.03
 Nodes (26): asPatternId(), formatDossierRef(), newEntityId(), newFindingId(), newSignalId(), AdapterError, AuditChainError, AuthError (+18 more)
 
 ### Community 10 - "Community 10"
+
 Cohesion: 0.05
 Nodes (28): categoryOf(), isHighSignificance(), UserActionEventRepo, emitAudit(), ensureSerialIfMissing(), FastHttpUser, computeRecordHash(), sortObject() (+20 more)
 
 ### Community 11 - "Community 11"
+
 Cohesion: 0.07
 Nodes (12): bodyHash(), canonicalise(), rowHash(), sortKeys(), AuditWitnessContract, KEY(), HashChain, newAuditEventId() (+4 more)
 
 ### Community 12 - "Community 12"
+
 Cohesion: 0.08
 Nodes (18): TipTriageWorker, toBase64(), gfDiv(), gfMul(), shamirCombine(), shamirCombineFromBase64(), gfMul(), shamirSplit() (+10 more)
 
 ### Community 13 - "Community 13"
+
 Cohesion: 0.11
 Nodes (21): loadRedisPassword(), QueueClient, getCorrelationId(), getWorkerName(), newCorrelationId(), withCorrelation(), newEventId(), correlationMixin() (+13 more)
 
 ### Community 14 - "Community 14"
+
 Cohesion: 0.09
 Nodes (14): runAdversarial(), assessFinding(), counterfactualProbe(), canonicalHashable(), computePosterior(), dispatchTier(), effectiveWeights(), independentSourceCount() (+6 more)
 
 ### Community 15 - "Community 15"
+
 Cohesion: 0.11
-Nodes (27): EXIF / metadata strip.  Per SRD §28.4: every uploaded image has its EXIF + autho, Return (sanitised_bytes, report)., strip_exif(), _binarise(), detect_font_anomaly(), _glyph_metrics(), Font / typography anomaly detection.  We extract per-character glyph features fr, Return (mean_stroke, std_stroke, mean_height, std_spacing). (+19 more)
+Nodes (27): EXIF / metadata strip. Per SRD §28.4: every uploaded image has its EXIF + autho, Return (sanitised_bytes, report)., strip_exif(), \_binarise(), detect_font_anomaly(), \_glyph_metrics(), Font / typography anomaly detection. We extract per-character glyph features fr, Return (mean_stroke, std_stroke, mean_height, std_spacing). (+19 more)
 
 ### Community 16 - "Community 16"
+
 Cohesion: 0.11
 Nodes (13): assertCriticalTargetsConfigured(), DeliveryTargetMisconfiguredError, resolveDeliveryTarget(), DossierRepo, buildManifest(), COMMON_FILE_LIST(), minfiAdvisoryFromPosterior(), minfiRationaleEn() (+5 more)
 
 ### Community 17 - "Community 17"
+
 Cohesion: 0.1
 Nodes (6): generateQrPng(), parsePatternId(), recipientBodyHeaders(), recommendRecipientBody(), classificationColour(), renderDossierDocx()
 
 ### Community 18 - "Community 18"
+
 Cohesion: 0.12
 Nodes (4): FabricBridge, Neo4jClient, FabricBridgeWorker, submit()
 
 ### Community 19 - "Community 19"
+
 Cohesion: 0.13
 Nodes (6): FederationReceiverHandlers, FederationStreamServer, envelopeFixture(), isKnownRegion(), regionMatchesKeyId(), verifyEnvelopeWithPolicy()
 
 ### Community 20 - "Community 20"
+
 Cohesion: 0.2
 Nodes (16): assertGuardsPass(), l10EntityFormPreservation(), l11TemperatureBound(), l12NegativeExamples(), l1SchemaCompliance(), l2CitationRequired(), l3CidInContext(), l4InsufficientPath() (+8 more)
 
 ### Community 21 - "Community 21"
+
 Cohesion: 0.24
 Nodes (2): DailyRateLimiter, FakeRedis
 
 ### Community 22 - "Community 22"
+
 Cohesion: 0.29
-Nodes (8): IpfsPinner, IPFS pinning — pins satellite-fetch results so dossiers can cite them.  Talks to, Synchronous Kubo client. Used inside the async worker via to_thread., Tests for the IPFS pinner client., test_pin_json_returns_cid_on_success(), test_pin_json_returns_none_on_http_error(), test_pin_json_returns_none_on_malformed_response(), test_pin_json_returns_none_on_non_200()
+Nodes (8): IpfsPinner, IPFS pinning — pins satellite-fetch results so dossiers can cite them. Talks to, Synchronous Kubo client. Used inside the async worker via to_thread., Tests for the IPFS pinner client., test_pin_json_returns_cid_on_success(), test_pin_json_returns_none_on_http_error(), test_pin_json_returns_none_on_malformed_response(), test_pin_json_returns_none_on_non_200()
 
 ### Community 23 - "Community 23"
+
 Cohesion: 0.22
-Nodes (0): 
+Nodes (0):
 
 ### Community 24 - "Community 24"
+
 Cohesion: 0.29
-Nodes (2): isSuperArgs(), VIGILGovernance__factory
+Nodes (2): isSuperArgs(), VIGILGovernance\_\_factory
 
 ### Community 25 - "Community 25"
+
 Cohesion: 0.29
 Nodes (1): CalibrationRepo
 
 ### Community 26 - "Community 26"
+
 Cohesion: 0.39
 Nodes (4): bayesianPosterior(), clamp(), logOdds(), sigmoid()
 
 ### Community 27 - "Community 27"
+
 Cohesion: 0.29
-Nodes (0): 
+Nodes (0):
 
 ### Community 28 - "Community 28"
+
 Cohesion: 0.29
 Nodes (2): pct(), reliabilityChart()
 
 ### Community 29 - "Community 29"
+
 Cohesion: 0.5
-Nodes (1): Ownable__factory
+Nodes (1): Ownable\_\_factory
 
 ### Community 30 - "Community 30"
+
 Cohesion: 0.5
-Nodes (1): Ownable2Step__factory
+Nodes (1): Ownable2Step\_\_factory
 
 ### Community 31 - "Community 31"
+
 Cohesion: 0.5
-Nodes (1): IAccessControl__factory
+Nodes (1): IAccessControl\_\_factory
 
 ### Community 32 - "Community 32"
+
 Cohesion: 0.5
-Nodes (1): AccessControl__factory
+Nodes (1): AccessControl\_\_factory
 
 ### Community 33 - "Community 33"
+
 Cohesion: 0.5
-Nodes (1): ReentrancyGuard__factory
+Nodes (1): ReentrancyGuard\_\_factory
 
 ### Community 34 - "Community 34"
+
 Cohesion: 0.5
-Nodes (1): IERC165__factory
+Nodes (1): IERC165\_\_factory
 
 ### Community 35 - "Community 35"
+
 Cohesion: 0.5
-Nodes (1): ERC165__factory
+Nodes (1): ERC165\_\_factory
 
 ### Community 36 - "Community 36"
+
 Cohesion: 0.5
-Nodes (0): 
+Nodes (0):
 
 ### Community 37 - "Community 37"
+
 Cohesion: 0.67
-Nodes (0): 
+Nodes (0):
 
 ### Community 38 - "Community 38"
+
 Cohesion: 0.67
-Nodes (0): 
+Nodes (0):
 
 ### Community 39 - "Community 39"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 40 - "Community 40"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 41 - "Community 41"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 42 - "Community 42"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 43 - "Community 43"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 44 - "Community 44"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 45 - "Community 45"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 46 - "Community 46"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 47 - "Community 47"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 48 - "Community 48"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 49 - "Community 49"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 50 - "Community 50"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 51 - "Community 51"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 52 - "Community 52"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 53 - "Community 53"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 54 - "Community 54"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 55 - "Community 55"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 56 - "Community 56"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 57 - "Community 57"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 58 - "Community 58"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 59 - "Community 59"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 60 - "Community 60"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 61 - "Community 61"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 62 - "Community 62"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 63 - "Community 63"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 64 - "Community 64"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 65 - "Community 65"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 66 - "Community 66"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 67 - "Community 67"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 68 - "Community 68"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 69 - "Community 69"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 70 - "Community 70"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 71 - "Community 71"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 72 - "Community 72"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 73 - "Community 73"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 74 - "Community 74"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 75 - "Community 75"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 76 - "Community 76"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 77 - "Community 77"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 78 - "Community 78"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 79 - "Community 79"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 80 - "Community 80"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 81 - "Community 81"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 82 - "Community 82"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 83 - "Community 83"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 84 - "Community 84"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 85 - "Community 85"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 86 - "Community 86"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 87 - "Community 87"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 88 - "Community 88"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 89 - "Community 89"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 90 - "Community 90"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 91 - "Community 91"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 92 - "Community 92"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 93 - "Community 93"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 94 - "Community 94"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 95 - "Community 95"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 96 - "Community 96"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 97 - "Community 97"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 98 - "Community 98"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 99 - "Community 99"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 100 - "Community 100"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 101 - "Community 101"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 102 - "Community 102"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 103 - "Community 103"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 104 - "Community 104"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 105 - "Community 105"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 106 - "Community 106"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 107 - "Community 107"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 108 - "Community 108"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 109 - "Community 109"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 110 - "Community 110"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 111 - "Community 111"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 112 - "Community 112"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 113 - "Community 113"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 114 - "Community 114"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 115 - "Community 115"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 116 - "Community 116"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 117 - "Community 117"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 118 - "Community 118"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 119 - "Community 119"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 120 - "Community 120"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 121 - "Community 121"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 122 - "Community 122"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 123 - "Community 123"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 124 - "Community 124"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 125 - "Community 125"
+
 Cohesion: 1.0
-Nodes (0): 
+Nodes (0):
 
 ### Community 126 - "Community 126"
+
 Cohesion: 1.0
-Nodes (1): Worker input: a project to assess.      Either `bbox` or `centroid + buffer_m` m
+Nodes (1): Worker input: a project to assess. Either `bbox` or `centroid + buffer_m` m
 
 ### Community 127 - "Community 127"
+
 Cohesion: 1.0
 Nodes (1): Per-scene activity assessment, attached to the source event payload.
 
 ### Community 128 - "Community 128"
+
 Cohesion: 1.0
 Nodes (1): Aggregated outbound payload — one event per project per run.
 
 ## Knowledge Gaps
+
 - **35 isolated node(s):** `Read the public key from PIV slot 9c and derive the address.`, `Build an EIP-1559 transaction, sign via YubiKey, broadcast.`, `Locust load test — MINFI /score API.  Phase F7. SLA target: p95 < 100ms @ 100 rp`, `AdapterError`, `LlmError` (+30 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **Thin community `Community 39`** (2 nodes): `sentry.client.config.ts`, `beforeSend()`
@@ -859,7 +994,7 @@ Nodes (1): Aggregated outbound payload — one event per project per run.
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 125`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 126`** (1 nodes): `Worker input: a project to assess.      Either `bbox` or `centroid + buffer_m` m`
+- **Thin community `Community 126`** (1 nodes): `Worker input: a project to assess.      Either `bbox`or`centroid + buffer_m` m`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 127`** (1 nodes): `Per-scene activity assessment, attached to the source event payload.`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -867,14 +1002,15 @@ Nodes (1): Aggregated outbound payload — one event per project per run.
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
+
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `GET()` connect `Community 7` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 8`, `Community 10`, `Community 11`, `Community 16`, `Community 18`, `Community 20`, `Community 21`, `Community 22`?**
-  _High betweenness centrality (0.182) - this node is a cross-community bridge._
+  _High betweenness centrality (0.174) - this node is a cross-community bridge._
 - **Why does `main()` connect `Community 6` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 5`, `Community 7`, `Community 8`, `Community 10`, `Community 11`, `Community 12`, `Community 13`, `Community 14`, `Community 16`, `Community 18`, `Community 21`?**
   _High betweenness centrality (0.168) - this node is a cross-community bridge._
 - **Why does `map()` connect `Community 1` to `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 7`, `Community 10`, `Community 11`, `Community 12`, `Community 14`, `Community 17`, `Community 18`, `Community 20`, `Community 26`, `Community 28`?**
-  _High betweenness centrality (0.154) - this node is a cross-community bridge._
+  _High betweenness centrality (0.140) - this node is a cross-community bridge._
 - **Are the 70 inferred relationships involving `VigilError` (e.g. with `VaultClient` and `Thin wrapper over hvac for Vault KV-v2 reads + auto-token-renewal.  Mirrors `@vi`) actually correct?**
   _`VigilError` has 70 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 62 inferred relationships involving `GET()` (e.g. with `_handle()` and `healthz()`) actually correct?**
