@@ -1,6 +1,7 @@
-import type { Schemas } from '@vigil/shared';
+import { z } from 'zod';
 
 import type { LlmEvaluator } from './adversarial.js';
+import type { Schemas } from '@vigil/shared';
 
 /**
  * Production `LlmEvaluator` backed by `@vigil/llm/SafeLlmRouter`.
@@ -23,8 +24,6 @@ export interface SafeRouterShape {
     temperature?: number;
   }): Promise<{ value: T }>;
 }
-
-import { z } from 'zod';
 
 const zEvaluateOrderResponse = z.object({
   posterior: z.number().min(0).max(1),

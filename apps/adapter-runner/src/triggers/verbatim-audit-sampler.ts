@@ -5,8 +5,8 @@ import {
   VerbatimAuditRepo,
   type Db,
 } from '@vigil/db-postgres';
-import { type Logger } from '@vigil/observability';
 import { Safety } from '@vigil/llm';
+import { type Logger } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
 
 /**

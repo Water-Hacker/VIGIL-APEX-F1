@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 
 import * as cs from '../schema/certainty.js';
+
 import type { Db } from '../client.js';
 
 /**

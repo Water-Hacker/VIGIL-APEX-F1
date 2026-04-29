@@ -16,8 +16,9 @@ import {
 import { Errors, Ids } from '@vigil/shared';
 import { z } from 'zod';
 
-import type { QueueClient } from './client.js';
 import { STREAMS, consumerName, groupName, type StreamName } from './streams.js';
+
+import type { QueueClient } from './client.js';
 import type { Envelope, HandlerOutcome, WorkerHandler } from './types.js';
 
 /**

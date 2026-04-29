@@ -1,8 +1,8 @@
-import { CallRecordRepo, CertaintyRepo, FindingRepo, getDb } from '@vigil/db-postgres';
 import {
   createClaudeLlmEvaluator,
   runAdversarial,
 } from '@vigil/certainty-engine';
+import { CallRecordRepo, CertaintyRepo, FindingRepo, getDb } from '@vigil/db-postgres';
 import {
   LlmRouter,
   SafeLlmRouter,
@@ -25,8 +25,9 @@ import {
   type HandlerOutcome,
 } from '@vigil/queue';
 import { VaultClient } from '@vigil/security';
-import type { Schemas } from '@vigil/shared';
 import { z } from 'zod';
+
+import type { Schemas } from '@vigil/shared';
 
 const logger = createLogger({ service: 'worker-counter-evidence' });
 

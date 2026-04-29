@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
 import { StaticKeyResolver, type KeyResolver } from '@vigil/federation-stream';
+
 import type { Logger } from '@vigil/observability';
 
 /**

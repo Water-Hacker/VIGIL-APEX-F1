@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { Adapter, ProxyManager } from '@vigil/adapters';
 import { DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
-import type { SourceRepo } from '@vigil/db-postgres';
 import {
   adapterRunsTotal,
   withCorrelation,
@@ -10,6 +8,9 @@ import {
 } from '@vigil/observability';
 import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
+
+import type { Adapter, ProxyManager } from '@vigil/adapters';
+import type { SourceRepo } from '@vigil/db-postgres';
 
 /**
  * Payload fields adapters use to advertise a downstream document URL.

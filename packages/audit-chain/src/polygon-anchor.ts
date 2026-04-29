@@ -1,3 +1,5 @@
+import { Socket } from 'node:net';
+
 import {
   createLogger,
   polygonAnchorSuccess,
@@ -142,9 +144,6 @@ export class PolygonAnchor {
  * Unix socket per SRD §17.7. The signer holds the YubiKey-bound secp256k1
  * key; this adapter never sees it.
  */
-
-import { Socket } from 'node:net';
-
 export class UnixSocketSignerAdapter implements SignerAdapter {
   constructor(
     private readonly socketPath: string = process.env.POLYGON_SIGNER_SOCKET ??

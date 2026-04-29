@@ -1,9 +1,9 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
+import { Errors } from '@vigil/shared';
 import { z } from 'zod';
 
-import { Errors } from '@vigil/shared';
 
 /**
  * Prompt registry — loads versioned prompt templates from disk.

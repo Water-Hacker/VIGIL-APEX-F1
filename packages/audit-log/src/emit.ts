@@ -7,10 +7,12 @@ import {
 } from '@vigil/db-postgres';
 import { type Logger } from '@vigil/observability';
 import { Schemas } from '@vigil/shared';
-import type { Pool } from 'pg';
+
 
 import { computeRecordHash } from './hash.js';
 import { type AuditSigner, NoopSigner } from './signer.js';
+
+import type { Pool } from 'pg';
 
 /**
  * TAL-PA emitter — single chokepoint every TAL-PA event goes through.

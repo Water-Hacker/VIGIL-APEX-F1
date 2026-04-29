@@ -1,8 +1,8 @@
+import { getDb } from '@vigil/db-postgres';
+import { createLogger, type Logger } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
 import { request } from 'undici';
 
-import { getDb } from '@vigil/db-postgres';
-import { createLogger, type Logger } from '@vigil/observability';
 
 import type { CandidateSelector } from './types.js';
 

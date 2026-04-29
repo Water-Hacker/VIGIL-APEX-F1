@@ -3,9 +3,11 @@ import {
   registerAdapter,
   type AdapterRunContext,
 } from '@vigil/adapters';
-import type { Schemas } from '@vigil/shared';
 
 import { pdfLinkScrape, provenance } from './_helpers.js';
+
+import type { Schemas } from '@vigil/shared';
+
 
 const SOURCE_ID = 'dgb-budget';
 const URL = 'https://www.dgb.gov.cm/publications';

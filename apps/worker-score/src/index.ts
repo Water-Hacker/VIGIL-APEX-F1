@@ -1,11 +1,6 @@
 import path from 'node:path';
 
 import {
-  CertaintyRepo,
-  FindingRepo,
-  getDb,
-} from '@vigil/db-postgres';
-import {
   ENGINE_VERSION,
   IndependenceLookup,
   LikelihoodRatioLookup,
@@ -13,6 +8,11 @@ import {
   loadRegistries,
   type RawSignal,
 } from '@vigil/certainty-engine';
+import {
+  CertaintyRepo,
+  FindingRepo,
+  getDb,
+} from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,

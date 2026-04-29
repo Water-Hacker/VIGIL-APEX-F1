@@ -7,7 +7,7 @@ import {
   type AdapterRunContext,
 } from '@vigil/adapters';
 import { Errors, Ids, type Schemas } from '@vigil/shared';
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { chromium, type BrowserContext } from 'playwright';
 
 /**
  * armp-main — Agence de Régulation des Marchés Publics, the procurement regulator.

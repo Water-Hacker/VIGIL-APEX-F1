@@ -1,6 +1,7 @@
 import { Ids } from '@vigil/shared';
 
 import { registerPattern } from '../registry.js';
+
 import type { PatternDef } from '../types.js';
 
 /**

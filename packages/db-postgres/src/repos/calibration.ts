@@ -1,6 +1,7 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 
 import * as calSchema from '../schema/calibration.js';
+
 import type { Db } from '../client.js';
 
 export class CalibrationRepo {

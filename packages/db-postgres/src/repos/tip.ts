@@ -1,6 +1,7 @@
 import { desc, eq, sql } from 'drizzle-orm';
 
 import * as tipSchema from '../schema/tip.js';
+
 import type { Db } from '../client.js';
 
 export class TipRepo {

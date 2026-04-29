@@ -2,6 +2,7 @@ import { type Schemas } from '@vigil/shared';
 
 import { matched, notMatched, PID } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
+
 import type { PatternDef } from '../types.js';
 
 /**

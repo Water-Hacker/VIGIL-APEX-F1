@@ -1,9 +1,7 @@
-import { sql } from 'drizzle-orm';
 import {
   bigint,
   customType,
   index,
-  integer,
   jsonb,
   pgSchema,
   text,

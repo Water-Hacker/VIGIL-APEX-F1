@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { HashChain } from '@vigil/audit-chain';
+import { ENGINE_VERSION } from '@vigil/certainty-engine';
 import {
   CalibrationAuditRepo,
   type Db,
 } from '@vigil/db-postgres';
 import { type Logger } from '@vigil/observability';
-import { ENGINE_VERSION } from '@vigil/certainty-engine';
 import { sql } from 'drizzle-orm';
+
 import type { Pool } from 'pg';
 
 /**

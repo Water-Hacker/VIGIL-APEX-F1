@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
+import { eventsConsumed, eventsEmitted, type Logger } from '@vigil/observability';
+import { QueueClient, STREAMS, type Envelope } from '@vigil/queue';
+import { Schemas } from '@vigil/shared';
+
 import type {
   EventEnvelope,
   HealthBeaconReply,
   HealthBeaconRequest,
   ReceiverHandlers,
 } from '@vigil/federation-stream';
-import { eventsConsumed, eventsEmitted, type Logger } from '@vigil/observability';
-import { QueueClient, STREAMS, type Envelope } from '@vigil/queue';
-import { Schemas } from '@vigil/shared';
 import type Redis from 'ioredis';
 
 const LAG_HASH = 'vigil:federation:lag';

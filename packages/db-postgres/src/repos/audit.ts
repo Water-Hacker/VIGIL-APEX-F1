@@ -1,8 +1,9 @@
-import type { Schemas } from '@vigil/shared';
 import { eq, sql } from 'drizzle-orm';
 
 import * as auditSchema from '../schema/audit.js';
+
 import type { Db } from '../client.js';
+import type { Schemas } from '@vigil/shared';
 
 /**
  * AuditRepo — read-only views over the hash chain. WRITES go through

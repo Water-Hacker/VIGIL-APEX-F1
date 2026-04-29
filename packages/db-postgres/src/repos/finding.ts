@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, ne, or, sql } from 'drizzle-orm';
 
 import * as findingSchema from '../schema/finding.js';
+
 import type { Db } from '../client.js';
 
 export class FindingRepo {

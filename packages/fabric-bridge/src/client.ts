@@ -1,9 +1,9 @@
+import * as crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import * as grpc from '@grpc/grpc-js';
 import { connect, signers, type Gateway, type Network, type Contract } from '@hyperledger/fabric-gateway';
 import { createLogger, type Logger } from '@vigil/observability';
-import * as crypto from 'node:crypto';
 
 import type { FabricBridgeOptions, FabricCommitment, SubmitOutcome } from './types.js';
 

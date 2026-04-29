@@ -39,14 +39,14 @@ import { schedule, validate, ScheduledTask } from 'node-cron';
 import { registerAllAdapters } from './adapters/_register.js';
 import { runOne } from './run-one.js';
 import {
-  defaultProviderChain,
-  runSatelliteTrigger,
-} from './triggers/satellite-trigger.js';
-import {
   currentQuarterWindow,
   runCalibrationAudit,
 } from './triggers/calibration-audit-runner.js';
 import { runQuarterlyAuditExport } from './triggers/quarterly-audit-export.js';
+import {
+  defaultProviderChain,
+  runSatelliteTrigger,
+} from './triggers/satellite-trigger.js';
 import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 
 const logger = createLogger({ service: 'adapter-runner' });

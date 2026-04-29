@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { Logger } from '@vigil/observability';
 import { z } from 'zod';
 
 import { LlmRouter } from './router.js';
@@ -14,6 +13,8 @@ import {
   type CitedExtraction,
   type SourceRecordIndex,
 } from './safety/index.js';
+
+import type { Logger } from '@vigil/observability';
 
 /**
  * AI-SAFETY-DOCTRINE-v1 — the single chokepoint every Claude call goes

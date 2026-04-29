@@ -14,9 +14,10 @@
  * spot exonerating context, and surface inconsistencies.
  */
 
+import { globalPromptRegistry } from './prompt-registry.js';
+
 import type { Schemas } from '@vigil/shared';
 
-import { globalPromptRegistry } from './prompt-registry.js';
 
 const NEUTRAL_FRAMING_HEADER = `You are a research assistant for an anti-corruption platform. You evaluate evidence; you do NOT decide guilt. The platform's Bayesian engine computes the probability of fraud — your only job is to surface what a careful reviewer should see.`;
 

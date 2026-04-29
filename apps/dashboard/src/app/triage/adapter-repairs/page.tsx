@@ -1,5 +1,5 @@
-import { getLocale, loadMessages, t } from '../../../lib/i18n';
 import { listPendingProposals } from '../../../lib/adapter-repair.server';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
 
 import { DecisionForm } from './decision-form';
 

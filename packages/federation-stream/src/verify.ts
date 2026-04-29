@@ -1,3 +1,4 @@
+import { verifyEnvelope } from './sign.js';
 import {
   ALL_REGION_CODES,
   DEFAULT_BACKWARD_WINDOW_MS,
@@ -7,7 +8,6 @@ import {
   type RegionCode,
   type RejectionCode,
 } from './types.js';
-import { verifyEnvelope } from './sign.js';
 
 export interface KeyResolver {
   /**

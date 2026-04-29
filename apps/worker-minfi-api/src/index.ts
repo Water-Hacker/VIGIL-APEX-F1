@@ -1,8 +1,8 @@
 import { createSign, createVerify } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
-import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import { getDb } from '@vigil/db-postgres';
 import {
   createLogger,
@@ -14,9 +14,9 @@ import {
 } from '@vigil/observability';
 import { VaultClient, expose } from '@vigil/security';
 import { Schemas } from '@vigil/shared';
+import { sql } from 'drizzle-orm';
 import Fastify from 'fastify';
 import IORedis from 'ioredis';
-import { sql } from 'drizzle-orm';
 
 const logger = createLogger({ service: 'worker-minfi-api' });
 

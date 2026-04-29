@@ -4,12 +4,13 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
+import { Errors } from '@vigil/shared';
+
 import type {
   AuthenticationResponseJSON,
   RegistrationResponseJSON,
 } from '@simplewebauthn/types';
 
-import { Errors } from '@vigil/shared';
 
 /**
  * FIDO2 / WebAuthn server helpers.

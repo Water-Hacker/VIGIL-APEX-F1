@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { Routing } from '@vigil/shared';
 import {
   AlignmentType,
   Document,
@@ -9,9 +10,9 @@ import {
   Paragraph,
   TextRun,
 } from 'docx';
-import { Routing } from '@vigil/shared';
 
 import { generateQrPng } from './qr.js';
+
 import type { DossierInput, DossierRenderResult } from './types.js';
 
 /**

@@ -1,5 +1,5 @@
-import { getLocale, loadMessages, t } from '../../lib/i18n';
 import { listDeadLetter } from '../../lib/dead-letter.server';
+import { getLocale, loadMessages, t } from '../../lib/i18n';
 
 import { DeadLetterTable } from './table';
 

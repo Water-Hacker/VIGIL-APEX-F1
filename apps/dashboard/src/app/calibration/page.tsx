@@ -1,5 +1,5 @@
-import { getLocale, loadMessages, t } from '../../lib/i18n';
 import { getCalibrationView } from '../../lib/calibration.server';
+import { getLocale, loadMessages, t } from '../../lib/i18n';
 
 import { RunNowButton } from './run-now';
 

@@ -1,6 +1,6 @@
+import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
 
 export const dynamic = 'force-dynamic';
 

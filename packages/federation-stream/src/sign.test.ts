@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
+
+import { describe, expect, it } from 'vitest';
 
 import {
   canonicalSigningBytes,
@@ -10,6 +11,7 @@ import {
   StaticKeyResolver,
   verifyEnvelopeWithPolicy,
 } from './verify.js';
+
 import type { EventEnvelope, EventEnvelopeUnsigned } from './types.js';
 
 function ed25519PemPair(): { privatePem: string; publicPem: string } {

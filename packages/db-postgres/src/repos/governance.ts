@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 
 import * as govSchema from '../schema/governance.js';
+
 import type { Db } from '../client.js';
 
 export class GovernanceRepo {

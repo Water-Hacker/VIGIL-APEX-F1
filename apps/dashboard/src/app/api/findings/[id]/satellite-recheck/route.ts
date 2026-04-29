@@ -7,12 +7,12 @@ import {
   getDb,
   getPool,
 } from '@vigil/db-postgres';
+import { QueueClient } from '@vigil/queue';
 import {
   SatelliteClient,
   polygonFromCentroidMeters,
   type Provider,
 } from '@vigil/satellite-client';
-import { QueueClient } from '@vigil/queue';
 import { sql } from 'drizzle-orm';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';

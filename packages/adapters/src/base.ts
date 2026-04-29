@@ -7,11 +7,12 @@ import {
   errorsTotal,
   type Logger,
 } from '@vigil/observability';
-import type { Schemas } from '@vigil/shared';
 import { Errors, Ids } from '@vigil/shared';
 
 import { dumpFirstContactHtml } from './first-contact.js';
+
 import type { ProxyEndpoint } from './proxy.js';
+import type { Schemas } from '@vigil/shared';
 
 /**
  * Adapter — every of the 26 source adapters subclasses this.

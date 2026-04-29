@@ -1,10 +1,5 @@
 import { randomUUID } from 'node:crypto';
 
-import { sql } from 'drizzle-orm';
-import cron from 'node-cron';
-import { request } from 'undici';
-import { z } from 'zod';
-
 import { getDb } from '@vigil/db-postgres';
 import { LlmRouter } from '@vigil/llm';
 import {
@@ -16,6 +11,11 @@ import {
   startMetricsServer,
 } from '@vigil/observability';
 import { VaultClient } from '@vigil/security';
+import { sql } from 'drizzle-orm';
+import cron from 'node-cron';
+import { request } from 'undici';
+import { z } from 'zod';
+
 
 import {
   SELECTOR_REDERIVE_SYSTEM_PROMPT,
@@ -52,10 +52,6 @@ interface CandidateProposal {
   candidateSelector: unknown;
   pageUrl: string;
 }
-
-const FIRST_CONTACT_FAILURE_THRESHOLD = Number(
-  process.env.ADAPTER_REPAIR_THRESHOLD ?? 0.5,
-);
 
 async function findBrokenSources(): Promise<Array<{ id: string; pageUrl: string }>> {
   const db = await getDb();

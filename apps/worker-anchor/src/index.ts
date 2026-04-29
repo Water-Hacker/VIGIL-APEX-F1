@@ -20,7 +20,6 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
-import { sql } from 'drizzle-orm';
 
 import { runHighSigAnchorLoop } from './high-sig-loop.js';
 

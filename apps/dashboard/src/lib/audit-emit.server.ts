@@ -11,6 +11,7 @@ import {
 } from '@vigil/audit-log';
 import { UserActionEventRepo, getDb, getPool } from '@vigil/db-postgres';
 import { Schemas } from '@vigil/shared';
+
 import type { NextRequest } from 'next/server';
 
 let cachedRepo: UserActionEventRepo | null = null;
@@ -82,7 +83,6 @@ export async function audit<T>(
 }
 
 export function actorFromRequest(req: NextRequest): Schemas.ActorContext {
-  const username = req.headers.get('x-vigil-username') ?? 'public:anonymous';
   const userId = req.headers.get('x-vigil-user') ?? 'public:anonymous';
   const roles = (req.headers.get('x-vigil-roles') ?? 'public').split(',');
   const role = mapRole(roles);

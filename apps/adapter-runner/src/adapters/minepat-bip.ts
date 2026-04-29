@@ -3,9 +3,11 @@ import {
   registerAdapter,
   type AdapterRunContext,
 } from '@vigil/adapters';
-import type { Schemas } from '@vigil/shared';
 
 import { pdfLinkScrape, provenance } from './_helpers.js';
+
+import type { Schemas } from '@vigil/shared';
+
 
 /**
  * minepat-bip — Public Investment Budget (Budget d'Investissement Public).

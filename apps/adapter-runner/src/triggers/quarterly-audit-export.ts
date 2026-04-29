@@ -7,10 +7,12 @@ import {
   UserActionEventRepo,
   type Db,
 } from '@vigil/db-postgres';
+
+import { currentQuarterWindow } from './quarter-window.js';
+
 import type { Logger } from '@vigil/observability';
 import type { Pool } from 'pg';
 
-import { currentQuarterWindow } from './quarter-window.js';
 
 /**
  * DECISION-012 — TAL-PA quarterly anonymised export.

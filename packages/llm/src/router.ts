@@ -1,5 +1,4 @@
 import { createLogger, llmCallsTotal, type Logger } from '@vigil/observability';
-import type { Secret } from '@vigil/security';
 import { Errors } from '@vigil/shared';
 import { z } from 'zod';
 
@@ -15,9 +14,10 @@ import {
   type LlmCallOptions,
   type LlmCallResult,
   type LlmModelClass,
-  type LlmTaskClass,
   type ProviderClient,
 } from './types.js';
+
+import type { Secret } from '@vigil/security';
 
 /**
  * LlmRouter — single entry point for every LLM call in VIGIL APEX.

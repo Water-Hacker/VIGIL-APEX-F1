@@ -1,6 +1,7 @@
-import { eq, inArray, or, sql } from 'drizzle-orm';
+import { eq, inArray, or } from 'drizzle-orm';
 
 import * as entitySchema from '../schema/entity.js';
+
 import type { Db } from '../client.js';
 
 /**

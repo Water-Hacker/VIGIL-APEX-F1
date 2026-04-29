@@ -18,9 +18,9 @@ import {
   type HandlerOutcome,
 } from '@vigil/queue';
 import { Ids, Schemas } from '@vigil/shared';
-import { create as kuboCreate } from 'kubo-rpc-client';
 import { fileTypeFromBuffer } from 'file-type';
 import { franc } from 'franc';
+import { create as kuboCreate } from 'kubo-rpc-client';
 import { request } from 'undici';
 import { z } from 'zod';
 

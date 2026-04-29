@@ -1,8 +1,8 @@
+import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 
 /**
  * OpenTelemetry tracing — initialised once per process, before any HTTP /

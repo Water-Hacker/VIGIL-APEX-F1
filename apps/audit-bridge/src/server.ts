@@ -1,5 +1,5 @@
-import { unlink } from 'node:fs/promises';
 import { existsSync, mkdirSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import { HashChain } from '@vigil/audit-chain';

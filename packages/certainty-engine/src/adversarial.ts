@@ -1,7 +1,8 @@
+import { counterfactualProbe } from './assess.js';
+import { ENGINE_VERSION, computePosterior } from './bayes.js';
+
 import type { Schemas } from '@vigil/shared';
 
-import { ENGINE_VERSION, computePosterior } from './bayes.js';
-import { counterfactualProbe } from './assess.js';
 
 /**
  * Adversarial pipeline — AI-SAFETY-DOCTRINE-v1 Part B (failure modes 2, 3, 8, 9).

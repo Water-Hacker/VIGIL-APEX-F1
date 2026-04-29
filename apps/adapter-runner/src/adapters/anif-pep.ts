@@ -3,9 +3,11 @@ import {
   registerAdapter,
   type AdapterRunContext,
 } from '@vigil/adapters';
-import type { Schemas } from '@vigil/shared';
 
 import { pdfLinkScrape, provenance } from './_helpers.js';
+
+import type { Schemas } from '@vigil/shared';
+
 
 /**
  * anif-pep — National Financial Investigation Agency (ANIF). Publishes annual

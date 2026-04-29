@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { customType, index, jsonb, pgSchema, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { customType, index, pgSchema, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 export const tipSchema = pgSchema('tip');
 

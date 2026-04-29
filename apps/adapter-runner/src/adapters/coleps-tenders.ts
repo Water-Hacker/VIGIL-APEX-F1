@@ -3,9 +3,11 @@ import {
   registerAdapter,
   type AdapterRunContext,
 } from '@vigil/adapters';
-import type { Schemas } from '@vigil/shared';
 
 import { playwrightTableScrape, provenance } from './_helpers.js';
+
+import type { Schemas } from '@vigil/shared';
+
 
 /**
  * coleps-tenders — e-Procurement platform (subject to Cloudflare challenges

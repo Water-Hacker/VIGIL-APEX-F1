@@ -1,5 +1,6 @@
-import { createLogger, type Logger } from '@vigil/observability';
 import { FabricBridge, type FabricCommitment } from '@vigil/fabric-bridge';
+import { createLogger, type Logger } from '@vigil/observability';
+
 import type { Pool } from 'pg';
 
 /**

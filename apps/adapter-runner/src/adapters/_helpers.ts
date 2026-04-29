@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { pickFingerprint, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 import { chromium, type Browser } from 'playwright';
+import { request } from 'undici';
 import { z } from 'zod';
 
 /**
@@ -148,7 +148,7 @@ export async function apiJsonFetch<T>(
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (e) {
+  } catch {
     throw new Errors.SourceParseError(sourceId, { url, html: text.slice(0, 100_000) });
   }
   const result = schema.safeParse(parsed);

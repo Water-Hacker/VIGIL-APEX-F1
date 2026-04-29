@@ -10,7 +10,6 @@ import {
 } from '@vigil/audit-log';
 import {
   AnomalyAlertRepo,
-  UserActionEventRepo,
   getDb,
   getPool,
 } from '@vigil/db-postgres';
@@ -45,7 +44,6 @@ async function main(): Promise<void> {
   registerShutdown('tracing', shutdownTracing);
 
   const db = await getDb();
-  const userActionRepo = new UserActionEventRepo(db);
   const anomalyRepo = new AnomalyAlertRepo(db);
   const pool = await getPool();
   const chain = new HashChain(pool, logger);

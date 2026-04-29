@@ -1,11 +1,12 @@
-import { resolve as resolvePath } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { createLogger, type Logger } from '@vigil/observability';
 
 import { signEnvelope } from './sign.js';
+
 import type {
   EventEnvelope,
   EventEnvelopeUnsigned,

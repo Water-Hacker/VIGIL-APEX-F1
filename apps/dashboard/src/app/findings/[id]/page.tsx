@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
 
 import { getLatestAssessment } from '../../../lib/certainty.server';
-import { getLocale, loadMessages, t } from '../../../lib/i18n';
 import { getFindingDetail } from '../../../lib/findings.server';
+import { getLocale, loadMessages, t } from '../../../lib/i18n';
+
 import { CertaintyPanel } from './certainty-panel';
 import { DossierPanel } from './dossier-panel';
 import { SatelliteRecheckButton } from './satellite-recheck-button';

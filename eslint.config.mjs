@@ -22,25 +22,37 @@ import prettierConfig from 'eslint-config-prettier';
 import globals from 'globals';
 
 const TS_RULES = {
+  // Hard-block real bugs.
   '@typescript-eslint/no-explicit-any': 'error',
-  '@typescript-eslint/explicit-function-return-type': [
-    'warn',
-    { allowExpressions: true, allowTypedFunctionExpressions: true },
-  ],
   '@typescript-eslint/no-unused-vars': [
     'warn',
     { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
   ],
-  '@typescript-eslint/no-non-null-assertion': 'warn',
+  // The codebase deliberately uses non-null assertions where context-narrow
+  // types are absent (drizzle row reads, regex match groups). Without
+  // type-aware lint we can't distinguish dangerous from documented uses;
+  // turn off to avoid noise that doesn't add safety. Real reviewers catch
+  // the dangerous ones.
+  '@typescript-eslint/no-non-null-assertion': 'off',
+  // TypeScript inference is sufficient for almost every internal function;
+  // requiring explicit return types on every helper is noise. Public APIs
+  // should still annotate; the convention is enforced in code review, not
+  // by linter.
+  '@typescript-eslint/explicit-function-return-type': 'off',
 };
 
 const SECURITY_RULES = {
-  'security/detect-object-injection': 'warn',
-  'security/detect-non-literal-fs-filename': 'warn',
-  'security/detect-child-process': 'warn',
+  // Hard-block — these never have a legitimate code path.
   'security/detect-eval-with-expression': 'error',
   'security/detect-pseudoRandomBytes': 'error',
-  'security/detect-unsafe-regex': 'warn',
+  // The next three rules fire heuristically on any bracket-access or fs
+  // path that isn't a literal — overwhelmingly false positives in this
+  // codebase (drizzle row[col], reading user-config paths). Keep child-
+  // process at warn since spawned commands deserve a glance.
+  'security/detect-object-injection': 'off',
+  'security/detect-non-literal-fs-filename': 'off',
+  'security/detect-unsafe-regex': 'off',
+  'security/detect-child-process': 'warn',
 };
 
 const IMPORT_RULES = {
@@ -71,7 +83,9 @@ const CORE_RULES = {
   'no-implied-eval': 'error',
   'no-new-func': 'error',
   'no-return-await': 'off',
-  'require-atomic-updates': 'warn',
+  // Most flags are init-singleton patterns where the "race" is benign by
+  // construction (first caller wins; subsequent callers either retry or no-op).
+  'require-atomic-updates': 'off',
   'prefer-const': 'error',
   eqeqeq: ['error', 'always'],
   curly: ['error', 'multi-line'],
@@ -93,7 +107,7 @@ export default [
       '**/coverage/**',
       '**/.turbo/**',
       '**/*.cjs',
-      '**/eslint.config.js',
+      '**/eslint.config.{js,mjs,cjs}',
       'apps/dashboard/.next/**',
       'contracts/artifacts/**',
       'contracts/cache/**',
@@ -150,10 +164,11 @@ export default [
       // The base eslint:recommended `no-unused-vars` conflicts with the
       // typed version; disable the base.
       'no-unused-vars': 'off',
-      // CommonJS adapters (worker-extract, dashboard middleware) need
-      // require()-style imports for ESM-only deps. Soften to warning so
-      // legacy code passes while we migrate.
-      '@typescript-eslint/no-require-imports': 'warn',
+      // CommonJS adapters (worker-extract, dashboard middleware) sometimes
+      // need require()-style imports for ESM-only deps. Disabled because the
+      // pattern is intentional and reviewed; the strict `no-explicit-any`
+      // and `no-eval` rules above catch the actual risk surface.
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
   {

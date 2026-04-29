@@ -1,8 +1,10 @@
 import { auditChainSeq, createLogger, type Logger } from '@vigil/observability';
 import { Errors, Schemas, Ids } from '@vigil/shared';
-import type { Pool } from 'pg';
 
 import { bodyHash, rowHash } from './canonical.js';
+
+import type { Pool } from 'pg';
+
 
 /**
  * HashChain — append-only, hash-linked audit log in Postgres.

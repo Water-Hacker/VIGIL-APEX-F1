@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import type { Schemas } from '@vigil/shared';
 
 import {
   ENGINE_VERSION,
@@ -11,6 +10,8 @@ import {
   canonicalHashable,
 } from './bayes.js';
 import { IndependenceLookup, LikelihoodRatioLookup } from './registry.js';
+
+import type { Schemas } from '@vigil/shared';
 
 /**
  * High-level entry point — accepts raw signals plus the registries, returns
