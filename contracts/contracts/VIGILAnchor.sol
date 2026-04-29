@@ -52,6 +52,7 @@ contract VIGILAnchor is Ownable2Step {
     error EmptyRoot();
     error NonContiguous();
     error CommitmentNotFound();
+    error ZeroCommitterAddress();
 
     modifier onlyCommitter() {
         if (msg.sender != committer) revert NotCommitter();
@@ -93,7 +94,7 @@ contract VIGILAnchor is Ownable2Step {
      *         off-chain decision per OPERATIONS.md.
      */
     function rotateCommitter(address newCommitter) external onlyOwner {
-        require(newCommitter != address(0), "Zero committer");
+        if (newCommitter == address(0)) revert ZeroCommitterAddress();
         emit CommitterRotated(committer, newCommitter);
         committer = newCommitter;
     }

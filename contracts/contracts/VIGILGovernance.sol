@@ -109,9 +109,12 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     error ZeroAddress();
     error UnknownProposal();
     error InvalidChoice();
+    error EmptyCommitment();
+    error EmptyFinding();
+    error NotYetExpired();
 
     constructor(address admin) {
-        require(admin != address(0), "Zero admin");
+        if (admin == address(0)) revert ZeroAddress();
         _grantRole(ADMIN_ROLE, admin);
     }
 
@@ -176,12 +179,11 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
 
     error CommitmentNotFound();
     error CommitmentTooEarly();
-    error CommitmentMismatch();
 
     function commitProposal(bytes32 commitment) external {
         Member storage m = memberByAccount[msg.sender];
         if (!m.active) revert NotPillarMember();
-        require(commitment != bytes32(0), "Empty commitment");
+        if (commitment == bytes32(0)) revert EmptyCommitment();
         commitments[msg.sender][commitment] = uint64(block.timestamp);
         emit ProposalCommitted(msg.sender, commitment, uint64(block.timestamp));
     }
@@ -193,7 +195,7 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     ) external returns (uint256 idx) {
         Member storage m = memberByAccount[msg.sender];
         if (!m.active) revert NotPillarMember();
-        require(findingHash != bytes32(0), "Empty finding");
+        if (findingHash == bytes32(0)) revert EmptyFinding();
 
         bytes32 commitment = keccak256(abi.encode(findingHash, uri, salt, msg.sender));
         uint64 committedAt = commitments[msg.sender][commitment];
@@ -266,7 +268,7 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
         if (proposalIndex >= _proposals.length) revert UnknownProposal();
         Proposal storage p = _proposals[proposalIndex];
         if (p.state != State.Open) revert ProposalNotOpen();
-        require(block.timestamp > p.closesAt, "Not yet expired");
+        if (block.timestamp <= p.closesAt) revert NotYetExpired();
         p.state = State.Expired;
         emit ProposalExpired(proposalIndex);
     }
