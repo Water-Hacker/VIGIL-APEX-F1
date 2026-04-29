@@ -102,7 +102,9 @@ contract VIGILAnchor is Ownable2Step {
         return _commitments.length;
     }
 
-    function getCommitment(uint256 commitmentId)
+    function getCommitment(
+        uint256 commitmentId
+    )
         external
         view
         returns (

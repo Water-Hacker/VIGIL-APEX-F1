@@ -82,7 +82,12 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     mapping(uint256 => mapping(address => uint8)) public votedChoice;
     mapping(uint256 => mapping(address => bytes32)) public recuseReason;
 
-    event ProposalOpened(uint256 indexed proposalIndex, bytes32 findingHash, address indexed proposer, string uri);
+    event ProposalOpened(
+        uint256 indexed proposalIndex,
+        bytes32 findingHash,
+        address indexed proposer,
+        string uri
+    );
     event VoteCast(
         uint256 indexed proposalIndex,
         address indexed voter,
@@ -163,7 +168,11 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     uint256 public constant REVEAL_DELAY = 2 minutes;
     mapping(address => mapping(bytes32 => uint64)) public commitments;
 
-    event ProposalCommitted(address indexed proposer, bytes32 commitment, uint64 commitBlockTimestamp);
+    event ProposalCommitted(
+        address indexed proposer,
+        bytes32 commitment,
+        uint64 commitBlockTimestamp
+    );
 
     error CommitmentNotFound();
     error CommitmentTooEarly();
@@ -266,7 +275,9 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
         return _proposals.length;
     }
 
-    function getProposal(uint256 proposalIndex)
+    function getProposal(
+        uint256 proposalIndex
+    )
         external
         view
         returns (
@@ -283,6 +294,16 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     {
         if (proposalIndex >= _proposals.length) revert UnknownProposal();
         Proposal storage p = _proposals[proposalIndex];
-        return (p.findingHash, p.uri, uint8(p.state), p.openedAt, p.closesAt, p.yes, p.no, p.abstain, p.recuse);
+        return (
+            p.findingHash,
+            p.uri,
+            uint8(p.state),
+            p.openedAt,
+            p.closesAt,
+            p.yes,
+            p.no,
+            p.abstain,
+            p.recuse
+        );
     }
 }
