@@ -18,3 +18,4 @@ export {
   globalPromptRegistry,
   type PromptTemplateEntry,
 } from './prompt-registry.js';
+export { ADVERSARIAL_PROMPT_NAMES, adversarialPromptsRegistered } from './prompts.js';

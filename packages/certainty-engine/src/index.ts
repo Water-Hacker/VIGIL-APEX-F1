@@ -32,3 +32,9 @@ export {
   type LlmEvaluator,
   type RunAdversarialInput,
 } from './adversarial.js';
+
+export {
+  createClaudeLlmEvaluator,
+  type SafeRouterShape,
+  type ClaudeLlmEvaluatorOptions,
+} from './claude-evaluator.js';

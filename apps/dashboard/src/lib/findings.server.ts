@@ -25,18 +25,28 @@ export interface FindingListRow {
   readonly posterior: number | null;
   readonly state: string;
   readonly detected_at: string;
+  /** DECISION-011 — latest certainty-engine dispatch tier when available. */
+  readonly tier: string | null;
 }
 
 export async function listFindings(opts: { limit?: number; threshold?: number }): Promise<FindingListRow[]> {
   const r = await repo();
-  // Bypass the typed repo for a quick cross-cut listing
   const db = await getDb();
   const result = await db.execute(sql`
-    SELECT id, title_fr, title_en, severity, posterior, state, detected_at::text
-      FROM finding.finding
-     WHERE posterior >= ${opts.threshold ?? 0.5}
-       AND state IN ('detected','review','council_review','escalated')
-     ORDER BY detected_at DESC
+    SELECT f.id, f.title_fr, f.title_en, f.severity, f.posterior, f.state,
+           f.detected_at::text AS detected_at,
+           latest.tier AS tier
+      FROM finding.finding f
+      LEFT JOIN LATERAL (
+        SELECT tier
+          FROM certainty.assessment a
+         WHERE a.finding_id = f.id
+         ORDER BY a.computed_at DESC
+         LIMIT 1
+      ) latest ON true
+     WHERE f.posterior >= ${opts.threshold ?? 0.5}
+       AND f.state IN ('detected','review','council_review','escalated')
+     ORDER BY f.detected_at DESC
      LIMIT ${opts.limit ?? 50}
   `);
   void r;
@@ -48,6 +58,7 @@ export async function listFindings(opts: { limit?: number; threshold?: number })
     posterior: row['posterior'] !== null ? Number(row['posterior']) : null,
     state: String(row['state']),
     detected_at: String(row['detected_at']),
+    tier: row['tier'] !== null && row['tier'] !== undefined ? String(row['tier']) : null,
   }));
 }
 

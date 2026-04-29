@@ -11,7 +11,15 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
-import { SatelliteRequestRepo, SourceRepo, getDb } from '@vigil/db-postgres';
+import {
+  CalibrationAuditRepo,
+  CallRecordRepo,
+  SatelliteRequestRepo,
+  SourceRepo,
+  VerbatimAuditRepo,
+  getDb,
+  getPool,
+} from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -33,6 +41,11 @@ import {
   defaultProviderChain,
   runSatelliteTrigger,
 } from './triggers/satellite-trigger.js';
+import {
+  currentQuarterWindow,
+  runCalibrationAudit,
+} from './triggers/calibration-audit-runner.js';
+import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 
 const logger = createLogger({ service: 'adapter-runner' });
 
@@ -167,6 +180,70 @@ async function main(): Promise<void> {
       );
       tasks.push(satelliteTask);
       logger.info({ cron, providers, bufferMeters }, 'satellite-trigger-scheduled');
+
+  // DECISION-011 — verbatim audit sampler. Daily 5% sampler.
+  const sampleEnabled = (process.env.VERBATIM_SAMPLER_ENABLED ?? 'true').toLowerCase() !== 'false';
+  if (sampleEnabled) {
+    const cron = process.env.VERBATIM_SAMPLER_CRON ?? '15 3 * * *'; // 03:15 daily
+    if (validate(cron)) {
+      const callRecords = new CallRecordRepo(db);
+      const verbatim = new VerbatimAuditRepo(db);
+      const fraction = Number(process.env.VERBATIM_SAMPLER_FRACTION ?? '0.05');
+      const samplerTask = schedule(
+        cron,
+        () => {
+          void runVerbatimAuditSampler({
+            db,
+            callRecords,
+            verbatim,
+            logger,
+            fraction,
+            windowHours: 24,
+          }).catch((e) => logger.error({ err: e }, 'verbatim-sampler-failed'));
+        },
+        { timezone: 'Africa/Douala', scheduled: true },
+      );
+      tasks.push(samplerTask);
+      logger.info({ cron, fraction }, 'verbatim-audit-sampler-scheduled');
+    }
+  }
+
+  // DECISION-011 — calibration audit runner. Quarterly (1st of next month after quarter end).
+  const calEnabled = (process.env.CALIBRATION_AUDIT_ENABLED ?? 'true').toLowerCase() !== 'false';
+  if (calEnabled) {
+    const cron = process.env.CALIBRATION_AUDIT_CRON ?? '0 4 1 1,4,7,10 *'; // 04:00 first day of each quarter
+    if (validate(cron)) {
+      const auditRepo = new CalibrationAuditRepo(db);
+      const calTask = schedule(
+        cron,
+        () => {
+          void (async () => {
+            // Audit the just-completed quarter.
+            const now = new Date();
+            const lastQuarterRef = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
+            const window = currentQuarterWindow(lastQuarterRef);
+            try {
+              const pool = await getPool();
+              await runCalibrationAudit({
+                db,
+                pool,
+                audit: auditRepo,
+                logger,
+                periodLabel: window.periodLabel,
+                periodStart: window.periodStart,
+                periodEnd: window.periodEnd,
+              });
+            } catch (err) {
+              logger.error({ err }, 'calibration-audit-failed');
+            }
+          })();
+        },
+        { timezone: 'Africa/Douala', scheduled: true },
+      );
+      tasks.push(calTask);
+      logger.info({ cron }, 'calibration-audit-runner-scheduled');
+    }
+  }
     } else {
       logger.error({ cron }, 'invalid-satellite-trigger-cron; trigger disabled');
     }
