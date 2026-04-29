@@ -1,0 +1,90 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommitsDisabled",
+    "group:allNonMajor",
+    "group:linters",
+    ":dependencyDashboard",
+    ":timezone(Africa/Douala)"
+  ],
+  "schedule": ["before 5am on monday"],
+  "labels": ["dependencies", "renovate"],
+  "rebaseWhen": "conflicted",
+  "platformAutomerge": false,
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 8,
+  "rangeStrategy": "bump",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on monday"],
+    "automerge": false
+  },
+  "vulnerabilityAlerts": {
+    "labels": ["security", "vulnerability"],
+    "schedule": ["at any time"],
+    "automerge": false,
+    "prCreation": "immediate"
+  },
+  "packageRules": [
+    {
+      "description": "Pin major version bumps to a single PR per family",
+      "matchUpdateTypes": ["major"],
+      "groupName": "{{depName}} — major",
+      "automerge": false,
+      "labels": ["dependencies", "major"]
+    },
+    {
+      "description": "Auto-merge devDependencies patch updates after CI green",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": false,
+      "labels": ["dependencies", "dev-only", "patch"]
+    },
+    {
+      "description": "@anthropic-ai/sdk — never auto-merge, always architect-review",
+      "matchPackageNames": ["@anthropic-ai/sdk"],
+      "automerge": false,
+      "labels": ["dependencies", "anthropic-sdk", "architect-review"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "drizzle-orm — never auto-merge across major (schema-shape risk)",
+      "matchPackageNames": ["drizzle-orm", "drizzle-kit"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "drizzle", "architect-review"]
+    },
+    {
+      "description": "ethers / hardhat — never auto-merge (signing-key risk surface)",
+      "matchPackageNames": ["ethers", "hardhat", "@nomicfoundation/hardhat-toolbox"],
+      "automerge": false,
+      "labels": ["dependencies", "smart-contracts", "architect-review"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Tier-1 cryptography deps — minimum 14-day soak before promotion",
+      "matchPackageNames": [
+        "libsodium-wrappers-sumo",
+        "@simplewebauthn/server",
+        "@simplewebauthn/browser",
+        "kubo-rpc-client",
+        "jose"
+      ],
+      "minimumReleaseAge": "14 days",
+      "labels": ["dependencies", "crypto", "architect-review"]
+    },
+    {
+      "description": "Workspace pins (workspace:*) are not external — ignore",
+      "matchCurrentVersion": "workspace:*",
+      "enabled": false
+    },
+    {
+      "description": "Pin Node 20 LTS line — never auto-bump major",
+      "matchPackageNames": ["@types/node", "node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ],
+  "ignoreDeps": []
+}

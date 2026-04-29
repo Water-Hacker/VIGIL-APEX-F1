@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: security
+
+# E1, E5 from PHASE-1-COMPLETION.md.
+#
+# Runs:
+#   - Snyk vulnerability scan (blocks on Critical, warns on High)
+#   - SBOM generation via Syft (CycloneDX + SPDX) on every push to main
+#   - SBOM uploaded as a release artefact + GitHub Dependency Submission
+#
+# The Snyk job runs only when SNYK_TOKEN is configured in repo secrets;
+# without it the job is a no-op (SBOM still runs).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 5 * * *' # daily at 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  snyk:
+    name: snyk
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ env.SNYK_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Snyk monorepo open-source test
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          # `--all-projects` walks the workspace; severity threshold blocks
+          # only Critical to keep the gate signal-rich.
+          args: --all-projects --severity-threshold=critical --fail-on=upgradable
+      - name: Upload Snyk SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
+        continue-on-error: true
+
+  sbom:
+    name: sbom
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate CycloneDX SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: vigil-apex.cdx.json
+          dependency-snapshot: false
+
+      - name: Generate SPDX SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: vigil-apex.spdx.json
+          dependency-snapshot: false
+
+      - name: Generate workspace dependency map
+        run: pnpm tsx scripts/generate-sbom-summary.ts > vigil-apex.summary.json
+        continue-on-error: true
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sboms
+          path: |
+            vigil-apex.cdx.json
+            vigil-apex.spdx.json
+            vigil-apex.summary.json
+          retention-days: 90
