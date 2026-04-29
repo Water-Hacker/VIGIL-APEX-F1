@@ -28,8 +28,8 @@ const definition: PatternDef = {
   status: 'live',
 
   async detect(subject: SubjectInput, ctx: PatternContext) {
-    const award = subject.events.find((e) => e.kind === 'award');
-    if (!award) {
+    const awards = subject.events.filter((e) => e.kind === 'award');
+    if (awards.length === 0) {
       return {
         pattern_id: this.id,
         matched: false,
@@ -39,40 +39,64 @@ const definition: PatternDef = {
         rationale: 'no award event',
       };
     }
-    const bidderCount =
-      typeof award.payload['bidder_count'] === 'number' ? (award.payload['bidder_count'] as number) : null;
-    const procurementMethod =
-      typeof award.payload['procurement_method'] === 'string'
-        ? (award.payload['procurement_method'] as string).toLowerCase()
-        : '';
-    const isNoBid =
-      procurementMethod.includes('gré à gré') ||
-      procurementMethod.includes('sole-source') ||
-      procurementMethod.includes('marché négocié');
 
     let strength = 0;
     const why: string[] = [];
-    if (bidderCount === 1) {
+    const contributingIds = new Set<string>();
+    const contributingCids = new Set<string>();
+
+    // Aggregate signals across every award in the subject. Each signal
+    // counts at most once so a subject with multiple suspicious awards
+    // doesn't double-add (the test calls this the "multi-signal" case).
+    let sawSingleBidder = false;
+    let sawNoBid = false;
+    let sawSamePriorSupplier = false;
+
+    for (const a of awards) {
+      const bc = typeof a.payload['bidder_count'] === 'number' ? (a.payload['bidder_count'] as number) : null;
+      const pm =
+        typeof a.payload['procurement_method'] === 'string'
+          ? (a.payload['procurement_method'] as string).toLowerCase()
+          : '';
+      const isNoBid =
+        pm.includes('gré à gré') ||
+        pm.includes('sole-source') ||
+        pm.includes('marché négocié');
+      const supplier = (a.payload['supplier_name'] as string | undefined) ?? null;
+
+      const matchedAward = bc === 1 || isNoBid;
+      if (matchedAward) {
+        contributingIds.add(a.id);
+        for (const cid of a.document_cids) contributingCids.add(cid);
+      }
+      if (bc === 1) sawSingleBidder = true;
+      if (isNoBid) sawNoBid = true;
+
+      if (supplier !== null) {
+        const priorWithSameSupplier = awards.find(
+          (other) =>
+            other.id !== a.id &&
+            (other.payload['supplier_name'] as string | undefined) === supplier,
+        );
+        if (priorWithSameSupplier !== undefined) {
+          sawSamePriorSupplier = true;
+          contributingIds.add(a.id);
+          contributingIds.add(priorWithSameSupplier.id);
+        }
+      }
+    }
+
+    if (sawSingleBidder) {
       strength += 0.6;
       why.push('exactly 1 bidder');
     }
-    if (isNoBid) {
+    if (sawNoBid) {
       strength += 0.3;
       why.push('no-bid procurement method');
     }
-    // Bonus if the same supplier won the previous award from the same authority
-    const supplier = (award.payload['supplier_name'] as string | undefined) ?? null;
-    if (supplier !== null) {
-      const prior = subject.events.find(
-        (e) =>
-          e.kind === 'award' &&
-          e.id !== award.id &&
-          (e.payload['supplier_name'] as string | undefined) === supplier,
-      );
-      if (prior !== undefined) {
-        strength += 0.15;
-        why.push('same supplier as prior award');
-      }
+    if (sawSamePriorSupplier) {
+      strength += 0.15;
+      why.push('same supplier as prior award');
     }
 
     ctx.logger.info('p-a-001-evaluated', { strength, why });
@@ -80,8 +104,8 @@ const definition: PatternDef = {
       pattern_id: this.id,
       matched: strength >= 0.5,
       strength: Math.min(1, strength),
-      contributing_event_ids: [award.id],
-      contributing_document_cids: award.document_cids,
+      contributing_event_ids: [...contributingIds],
+      contributing_document_cids: [...contributingCids],
       rationale: why.join('; '),
     };
   },

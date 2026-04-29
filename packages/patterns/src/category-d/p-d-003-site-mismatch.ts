@@ -45,6 +45,7 @@ const definition: PatternDef = {
       contributing_event_ids: [award.id, sat.id],
       contributing_document_cids: [...award.document_cids, ...sat.document_cids],
       rationale: `activity ${distance.toFixed(0)}m from declared coordinates`,
+      matchAt: 0.05,
     });
   },
 };

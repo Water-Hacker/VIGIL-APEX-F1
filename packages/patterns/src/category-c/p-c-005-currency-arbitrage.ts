@@ -41,6 +41,7 @@ const definition: PatternDef = {
       strength,
       contributing_event_ids: [payment.id],
       rationale: `invoiced=${invoiced} vs BEAC=${beacFixing}; gap=${(gap * 100).toFixed(2)}%`,
+      matchAt: 0.05,
     });
   },
 };

@@ -41,7 +41,7 @@ export function assertCannotDoubleVote(existingChoices: readonly string[]): void
   if (existingChoices.length > 1) {
     throw new Errors.GovernanceError({
       code: 'GOVERNANCE_DOUBLE_VOTE',
-      message: `voter cast ${existingChoices.length} votes`,
+      message: `double-vote rejected: voter cast ${existingChoices.length} votes`,
       severity: 'error',
     });
   }

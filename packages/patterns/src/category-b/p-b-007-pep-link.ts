@@ -34,7 +34,7 @@ const definition: PatternDef = {
     const peps = subject.related.filter((r) => r.is_pep);
     if (peps.length === 0) return notMatched(ID, 'no PEP linkage');
     const namesUnderRedaction = peps.map((p) => p.id.slice(0, 8)); // never log names
-    const strength = Math.min(0.7, 0.4 + 0.1 * peps.length);
+    const strength = Math.min(0.85, 0.5 + 0.1 * peps.length);
     return matched({
       pattern_id: ID,
       strength,

@@ -45,6 +45,7 @@ const definition: PatternDef = {
       contributing_event_ids: [completion.id, sat.id],
       contributing_document_cids: [...completion.document_cids, ...sat.document_cids],
       rationale: `completion certified but satellite activity=${activity.toFixed(2)}`,
+      matchAt: 0.005,
     });
   },
 };

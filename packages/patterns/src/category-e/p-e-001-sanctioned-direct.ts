@@ -31,7 +31,7 @@ const definition: PatternDef = {
     const shareholderHit = subject.related.some((r) => r.is_sanctioned);
     if (!direct && !shareholderHit) return empty('no sanctions exposure');
     const lists = company.sanctioned_lists.length;
-    const strength = direct ? Math.min(1, 0.7 + 0.1 * lists) : 0.6;
+    const strength = direct ? Math.min(1, 0.8 + 0.1 * lists) : 0.6;
     ctx.logger.info('p-e-001-evaluated', { direct, shareholderHit, strength });
     return {
       pattern_id: PATTERN_ID,

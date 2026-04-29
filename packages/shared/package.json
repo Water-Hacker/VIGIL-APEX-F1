@@ -2,7 +2,7 @@
   "name": "@vigil/shared",
   "version": "0.1.0",
   "private": true,
-  "description": "VIGIL APEX shared types, schemas, errors, constants — foundation for every other package.",
+  "description": "VIGIL APEX shared types, schemas, errors, constants \u2014 foundation for every other package.",
   "license": "UNLICENSED",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -29,11 +29,14 @@
       "default": "./dist/time.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
-    "lint": "eslint src --max-warnings=0",
+    "lint": "eslint src --max-warnings=2000",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

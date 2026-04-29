@@ -43,7 +43,7 @@ const definition: PatternDef = {
       if (spec === undefined || spec <= 0) continue;
       const ratio = li.qty / spec;
       if (ratio > 1.3) {
-        const s = Math.min(1, (ratio - 1.3) * 1.5);
+        const s = Math.min(1, (ratio - 1.3) * 2);
         if (s > strength) strength = s;
         why.push(`${li.description ?? 'line'} +${((ratio - 1) * 100).toFixed(0)}%`);
       }
@@ -55,6 +55,7 @@ const definition: PatternDef = {
           strength,
           contributing_event_ids: [award.id, payment.id],
           rationale: why.slice(0, 5).join('; '),
+          matchAt: 0.4,
         });
   },
 };

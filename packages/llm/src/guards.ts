@@ -53,7 +53,10 @@ export function l1SchemaCompliance(content: unknown, ctx: GuardContext): GuardRe
 }
 
 /* ===== L2 citation_required ================================================*/
-const CITATION_RE = /"document_cid"\s*:\s*"(b[a-z2-7]{55,})"/g;
+// Non-global pattern — reused across calls. A `/g` flag would carry
+// `lastIndex` between calls and produce false negatives on the call
+// immediately after a successful match.
+const CITATION_RE = /"document_cid"\s*:\s*"b[a-z2-7]{55,}"/;
 export function l2CitationRequired(content: unknown): GuardResult {
   const s = JSON.stringify(content);
   if (!CITATION_RE.test(s) && !s.includes('"insufficient_evidence"')) {

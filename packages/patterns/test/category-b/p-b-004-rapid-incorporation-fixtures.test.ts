@@ -10,7 +10,7 @@ const incorpOneDay = evt(
 const incorpTwentyEightDays = evt(
   'company_filing',
   { filing_kind: 'incorporation' },
-  { publishedAt: '2026-03-01T00:00:00Z' },
+  { publishedAt: '2026-03-04T00:00:00Z' },
 );
 const incorpFortyDays = evt(
   'company_filing',

@@ -28,8 +28,6 @@ import { currentQuarterWindow } from './quarter-window.js';
  * the salt is what makes `actor_id_hash` un-rainbow-tableable.
  */
 
-const PAGE_SIZE = 5_000;
-
 const CSV_HEADER = [
   'event_id',
   'event_type',
@@ -253,6 +251,8 @@ export async function runQuarterlyAuditExport(
 async function loadKuboClient(url: string): Promise<{
   add: (data: Uint8Array, opts?: unknown) => Promise<{ cid: { toString(): string } }>;
 }> {
+  // The only way to do a real ES dynamic import from a CJS module.
+  // eslint-disable-next-line no-new-func
   const dynamicImport = new Function('s', 'return import(s)') as (s: string) => Promise<{
     create: (opts: { url: string }) => {
       add: (data: Uint8Array, opts?: unknown) => Promise<{ cid: { toString(): string } }>;

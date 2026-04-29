@@ -40,6 +40,7 @@ const definition: PatternDef = {
       strength,
       contributing_event_ids: [award.id],
       rationale: `escalation=${escalation}% vs CPI=${cpiOverPeriod}%; gap=${gap.toFixed(1)}pp`,
+      matchAt: 0.35,
     });
   },
 };

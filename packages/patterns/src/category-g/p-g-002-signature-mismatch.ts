@@ -49,6 +49,7 @@ const definition: PatternDef = {
           strength: strongest,
           contributing_event_ids: ids,
           rationale: why.slice(0, 5).join('; '),
+          matchAt: 0.1,
         });
   },
 };

@@ -39,6 +39,7 @@ const definition: PatternDef = {
       strength,
       contributing_event_ids: [award.id],
       rationale: `bidder graph density ${density.toFixed(2)}`,
+      matchAt: 0.2,
     });
   },
 };

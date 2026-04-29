@@ -91,6 +91,12 @@ describe('federation-stream end-to-end (in-process, insecure)', () => {
   let signingKeyPath: string;
 
   beforeAll(async () => {
+    // The federation-stream server refuses to start without TLS unless
+    // this opt-in is set (see packages/federation-stream/src/server.ts §207).
+    // In-process tests run plaintext gRPC on localhost; production deploys
+    // never set this.
+    process.env['VIGIL_FEDERATION_INSECURE_OK'] = 'true';
+
     realKeys = ed25519PemPair();
     tmpDir = mkdtempSync(join(tmpdir(), 'federation-stream-test-'));
     signingKeyPath = join(tmpDir, 'signer.key');

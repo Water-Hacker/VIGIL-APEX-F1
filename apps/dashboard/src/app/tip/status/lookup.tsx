@@ -48,7 +48,6 @@ export function StatusLookup({
 
   useEffect(() => {
     if (initialRef) void lookup(initialRef);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialRef]);
 
   return (

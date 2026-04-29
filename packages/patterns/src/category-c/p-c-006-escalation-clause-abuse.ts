@@ -42,6 +42,7 @@ const definition: PatternDef = {
       strength,
       contributing_event_ids: [amendment.id],
       rationale: `clause activated at ${observedRise}% vs trigger ${triggerThreshold}% (premature)`,
+      matchAt: 0.4,
     });
   },
 };
