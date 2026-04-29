@@ -19,3 +19,4 @@ export * from './governance.js';
 export * from './audit.js';
 export * from './tip.js';
 export * from './calibration.js';
+export * from './certainty.js';

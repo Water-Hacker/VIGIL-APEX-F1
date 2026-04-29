@@ -1,0 +1,23 @@
+{
+  "version": "v1.0.0",
+  "default_independence": 1.0,
+  "pairs": [
+    { "source_a": "minfi-portal", "source_b": "minfi-bis",            "independence": 0.4, "rationale": "Both query MINFI back-end; partial dependence." },
+    { "source_a": "minfi-portal", "source_b": "dgb-budget",           "independence": 0.5, "rationale": "DGB is the budget-execution office of MINFI; shared backend feeds." },
+    { "source_a": "minfi-portal", "source_b": "dgtcfm-treasury",      "independence": 0.5, "rationale": "DGTCFM is the treasury arm of MINFI; shared backend feeds." },
+    { "source_a": "dgi-attestations", "source_b": "dgb-budget",       "independence": 0.7, "rationale": "Different MINFI directorates; partially independent." },
+    { "source_a": "rccm-search", "source_b": "opencorporates",        "independence": 0.6, "rationale": "OpenCorporates ingests RCCM filings; downstream derivation." },
+    { "source_a": "armp-main", "source_b": "minmap-portal",           "independence": 0.7, "rationale": "Both report procurement events but from different angles." },
+    { "source_a": "armp-main", "source_b": "coleps-tenders",          "independence": 0.7, "rationale": "Different procurement portals; partially overlapping." },
+    { "source_a": "worldbank-sanctions", "source_b": "afdb-sanctions","independence": 0.8, "rationale": "Cross-debarment treaty; similar lists with overlap." },
+    { "source_a": "worldbank-sanctions", "source_b": "opensanctions", "independence": 0.5, "rationale": "OpenSanctions ingests World Bank lists; downstream." },
+    { "source_a": "afdb-sanctions", "source_b": "opensanctions",      "independence": 0.5, "rationale": "Same downstream-ingestion concern." },
+    { "source_a": "eu-sanctions", "source_b": "opensanctions",        "independence": 0.5, "rationale": "Same downstream-ingestion concern." },
+    { "source_a": "ofac-sdn", "source_b": "opensanctions",            "independence": 0.5, "rationale": "Same downstream-ingestion concern." },
+    { "source_a": "un-sanctions", "source_b": "opensanctions",        "independence": 0.5, "rationale": "Same downstream-ingestion concern." },
+    { "source_a": "anif-pep", "source_b": "anif-amlscreen",           "independence": 0.4, "rationale": "Both ANIF feeds; same agency backend." },
+    { "source_a": "occrp-aleph", "source_b": "opencorporates",        "independence": 0.7, "rationale": "Aleph aggregates many sources including OpenCorporates." },
+    { "source_a": "occrp-aleph", "source_b": "opensanctions",         "independence": 0.7, "rationale": "Aleph and OpenSanctions both aggregate; partial overlap." },
+    { "source_a": "worker-satellite", "source_b": "worker-satellite", "independence": 0.0, "rationale": "Same source — used to assert dependence-on-self." }
+  ]
+}

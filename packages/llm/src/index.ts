@@ -17,3 +17,5 @@ export * from './prompt-registry.js';
 export * from './providers/anthropic.js';
 export * from './providers/bedrock.js';
 export * from './providers/local.js';
+export * as Safety from './safety/index.js';
+export { SafeLlmRouter, type SafeCallInput, type SafeCallOutcome } from './safe-router.js';

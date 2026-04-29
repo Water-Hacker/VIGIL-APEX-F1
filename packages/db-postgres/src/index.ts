@@ -15,3 +15,4 @@ export * from './repos/source.js';
 export * from './repos/governance.js';
 export * from './repos/tip.js';
 export * from './repos/calibration.js';
+export * from './repos/certainty.js';

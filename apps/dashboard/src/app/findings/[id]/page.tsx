@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation';
 
+import { getLatestAssessment } from '../../../lib/certainty.server';
 import { getLocale, loadMessages, t } from '../../../lib/i18n';
 import { getFindingDetail } from '../../../lib/findings.server';
+import { CertaintyPanel } from './certainty-panel';
 import { DossierPanel } from './dossier-panel';
 import { SatelliteRecheckButton } from './satellite-recheck-button';
 
@@ -36,7 +38,10 @@ function PosteriorBar({ value }: { value: number | null }): JSX.Element {
 }
 
 export default async function FindingDetailPage({ params }: PageProps): Promise<JSX.Element> {
-  const detail = await getFindingDetail(params.id);
+  const [detail, assessment] = await Promise.all([
+    getFindingDetail(params.id),
+    getLatestAssessment(params.id),
+  ]);
   if (!detail) notFound();
 
   const locale = getLocale();
@@ -140,6 +145,8 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
           <pre className="whitespace-pre-wrap border rounded p-4 bg-gray-50 text-sm">{f.counter_evidence}</pre>
         </section>
       )}
+
+      <CertaintyPanel locale={locale} assessment={assessment} />
 
       <DossierPanel
         findingId={f.id}

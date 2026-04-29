@@ -21,3 +21,4 @@ export * from './tip.js';
 export * from './calibration.js';
 export * from './minfi.js';
 export * from './conac.js';
+export * from './certainty.js';

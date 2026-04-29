@@ -1,0 +1,56 @@
+{
+  "version": "v1.0.0",
+  "prior_probability": 0.12,
+  "ratios": [
+    { "pattern_id": "P-A-001", "lr": 4.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Single-bidder award. LR derived from Cour des Comptes 2022 report § procurement irregularities; revised quarterly per AI-SAFETY-DOCTRINE-v1 §2.6." },
+    { "pattern_id": "P-A-002", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Split tender below threshold — strong indicator of procurement-rigging per OECD-MAPS guidance." },
+    { "pattern_id": "P-A-003", "lr": 3.5, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "No-bid emergency procurement. Many legitimate emergencies; LR conservative." },
+    { "pattern_id": "P-A-004", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Late amendment changing scope/price." },
+    { "pattern_id": "P-A-005", "lr": 4.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Sole-source justification gap." },
+    { "pattern_id": "P-A-006", "lr": 3.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Uneven bid spread (collusion proxy)." },
+    { "pattern_id": "P-A-007", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Narrow technical specification favouring a single supplier." },
+    { "pattern_id": "P-A-008", "lr": 3.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Bid protest pattern across awards." },
+    { "pattern_id": "P-A-009", "lr": 7.0, "severity": "critical", "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Debarment bypass — World Bank cross-debarment is a strong signal." },
+
+    { "pattern_id": "P-B-001", "lr": 5.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Shell-company indicators (sub-30-day incorporation, no website, generic registered address)." },
+    { "pattern_id": "P-B-002", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Nominee director linkage." },
+    { "pattern_id": "P-B-003", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Jurisdiction shopping (BVI, Seychelles, Mauritius shell)." },
+    { "pattern_id": "P-B-004", "lr": 5.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Sub-30-day pre-tender incorporation." },
+    { "pattern_id": "P-B-005", "lr": 4.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Co-incorporated cluster (cartel ring)." },
+    { "pattern_id": "P-B-006", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "UBO mismatch — declared owner ≠ true beneficial owner." },
+    { "pattern_id": "P-B-007", "lr": 6.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "PEP linkage to bidder, contracting officer, or beneficial owner." },
+
+    { "pattern_id": "P-C-001", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Price > 30% above benchmark (FCFA-tier dependent)." },
+    { "pattern_id": "P-C-002", "lr": 3.5, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Per-unit price anomaly across line items." },
+    { "pattern_id": "P-C-003", "lr": 4.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Quantity invoiced exceeds quantity specified." },
+    { "pattern_id": "P-C-004", "lr": 3.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Escalation diverging materially from official CPI." },
+    { "pattern_id": "P-C-005", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Currency arbitrage — invoice rate above BEAC fixing." },
+    { "pattern_id": "P-C-006", "lr": 3.5, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Premature escalation-clause activation." },
+
+    { "pattern_id": "P-D-001", "lr": 7.0, "severity": "critical", "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Ghost project — no satellite-detected activity during contract window. Highest LR in category D — physical absence of work is a near-deterministic indicator." },
+    { "pattern_id": "P-D-002", "lr": 5.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Project signed off as complete despite visibly incomplete works." },
+    { "pattern_id": "P-D-003", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Site mismatch — work at coordinates >500 m from contracted location." },
+    { "pattern_id": "P-D-004", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Quality deficit detected via satellite or independent inspection." },
+    { "pattern_id": "P-D-005", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Progress fabrication — reported milestones decoupled from satellite-observed activity." },
+
+    { "pattern_id": "P-E-001", "lr": 9.0, "severity": "critical", "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Direct sanctioned-entity exposure (OFAC SDN / EU / UN list hit). Very high LR." },
+    { "pattern_id": "P-E-002", "lr": 7.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Sanctioned-related entity (1-hop graph relation)." },
+    { "pattern_id": "P-E-003", "lr": 6.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Payment routed through sanctioned jurisdiction." },
+    { "pattern_id": "P-E-004", "lr": 7.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Transaction with sanctioned PEP." },
+
+    { "pattern_id": "P-F-001", "lr": 5.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Round-trip payment loop." },
+    { "pattern_id": "P-F-002", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Director ring across multiple shell companies." },
+    { "pattern_id": "P-F-003", "lr": 4.5, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Supplier circular flow." },
+    { "pattern_id": "P-F-004", "lr": 4.5, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Hub-and-spoke supplier topology." },
+    { "pattern_id": "P-F-005", "lr": 5.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Dense bidder network indicating coordination." },
+
+    { "pattern_id": "P-G-001", "lr": 6.0, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Backdated document detected via metadata or filesystem timestamps." },
+    { "pattern_id": "P-G-002", "lr": 5.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Signature image diverges from reference (similarity < 0.85)." },
+    { "pattern_id": "P-G-003", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Document metadata anomaly (unusual producer / template-mismatch)." },
+    { "pattern_id": "P-G-004", "lr": 3.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Font anomaly indicating manual editing." },
+
+    { "pattern_id": "P-H-001", "lr": 6.5, "severity": "high",     "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Award timestamped before tender close — strong temporal anomaly." },
+    { "pattern_id": "P-H-002", "lr": 4.0, "severity": "medium",   "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Amendment out of sequence in the documented chronology." },
+    { "pattern_id": "P-H-003", "lr": 3.0, "severity": "low",      "calibrated_at": "2026-04-29T00:00:00.000Z", "source_note": "Holiday publication burst — weak alone, valuable as a corroborator." }
+  ]
+}

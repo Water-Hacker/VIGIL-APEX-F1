@@ -2243,6 +2243,191 @@ intake form; flip Status to FINAL.
 
 ---
 
+## DECISION-011  AI Safety Doctrine v1.0 — Bayesian certainty engine + 16 LLM-failure-mode defences
+
+| Field | Value |
+|---|---|
+| Date | 2026-04-29 |
+| Decided by | Junior Thuram Nana, Sovereign Architect (executed by build agent under explicit "ENSURE ALL THESE IS FULLY IMPLEMENTED BOTH FRONTEND AND BACKEND AND ALSO PRODUCTION GRADE" authorisation) |
+| Status | PROVISIONAL |
+
+### Decision (proposed)
+
+Codify the AI Safety Doctrine as a binding artefact of the platform.
+Promote the LLM from "unconstrained judge" to "research assistant" and
+introduce a Bayesian certainty engine that converts pattern matches into a
+calibrated, reproducible posterior — the single number that determines
+whether a finding may be acted on. The full Doctrine v1.0 lives at
+[`docs/source/AI-SAFETY-DOCTRINE-v1.md`](../source/AI-SAFETY-DOCTRINE-v1.md);
+this entry records the engineering wired in to enforce it.
+
+#### A — Bayesian certainty engine
+
+- New package [`packages/certainty-engine/`](../../packages/certainty-engine/)
+  implements the deterministic posterior in odds space with min-pairwise
+  independence weighting, three-tier dispatch
+  (action_queue ≥ 0.95 + 5 sources / investigation_queue 0.80–0.94 /
+  log_only < 0.80), and explicit 5-source minimum rule. **31 unit tests
+  covering Bayesian math, independence math, dispatch thresholds, and the
+  shipped registry contents.**
+- Schemas in [`packages/shared/src/schemas/certainty.ts`](../../packages/shared/src/schemas/certainty.ts):
+  `zCertaintyComponent`, `zCertaintyAssessment`, `zAdversarialOutcome`,
+  `zCertaintyTier`, `zHoldReason`, `zLikelihoodRatio[Registry]`,
+  `zIndependenceWeight[Registry]`, `zCalibrationAuditRun`,
+  `zReliabilityBand`, `zPromptTemplate`, `zLlmCallRecord`.
+- Registry config — every one of the 43 patterns in `packages/patterns/`
+  has a documented likelihood ratio + severity at
+  [`infra/certainty/likelihood-ratios.json`](../../infra/certainty/likelihood-ratios.json);
+  pairwise independence between the 27 sources at
+  [`infra/certainty/independence-weights.json`](../../infra/certainty/independence-weights.json).
+  The registry-loader test asserts every shipped pattern has an LR.
+- Adversarial pipeline in
+  [`packages/certainty-engine/src/adversarial.ts`](../../packages/certainty-engine/src/adversarial.ts):
+  3× order randomisation, devil's-advocate Claude pass, counterfactual
+  probe (drop-strongest), independent secondary review. The `LlmEvaluator`
+  interface keeps the engine pure for tests; the production wiring
+  injects a `SafeLlmRouter`-backed evaluator.
+- Drizzle migration `0009_certainty_engine.sql` (with reverse) creates
+  `certainty.assessment`, `certainty.fact_provenance`,
+  `calibration.audit_run`, `calibration.reliability_band`,
+  `llm.prompt_template`, `llm.call_record`, `llm.verbatim_audit_sample`.
+  Repos: `CertaintyRepo`, `FactProvenanceRepo`, `PromptTemplateRepo`,
+  `CallRecordRepo`, `VerbatimAuditRepo`, `CalibrationAuditRepo`.
+
+#### B — Hardened `@vigil/llm` (16 failure modes)
+
+The `safety/` subtree under [`packages/llm/`](../../packages/llm/src/safety/)
+ships every defence the doctrine requires:
+
+| Module | Failure modes addressed |
+|---|---|
+| `canary.ts` | 4 — daily-rotated phrase Claude is told never to repeat; presence in output triggers quarantine. |
+| `citation.ts` | 1, 5 — `zCitedClaim` forces `{claim, source_record_id, source_field, verbatim_quote}`; `validateVerbatimGrounding` rejects any claim whose quote is not in the cited source field (whitespace + NFKC normalised). |
+| `closed-context.ts` | 4, 5 — wraps every source in `<source_document>` markers with system-preamble explicit "data only / no external knowledge" instructions. |
+| `prompt-registry.ts` | 12 — semver-versioned prompt templates with SHA-256 hashes; `globalPromptRegistry.registrySnapshotHash()` is recorded on every assessment for replayability. |
+| `safe-router.ts` | 1, 4, 14 — single chokepoint: closed-context render, T = 0.1 default, schema validation with retry, canary-trigger throws, model id pinned, every call recorded to `llm.call_record`. |
+
+**15 vitest cases** in
+[`packages/llm/__tests__/safety.test.ts`](../../packages/llm/__tests__/safety.test.ts)
+cover canary determinism + rotation, closed-context rendering and escape,
+verbatim grounding (positive, negative, missing source, whitespace
+normalisation), and `PromptRegistry` versioning + snapshot stability.
+
+#### C — Worker-score wired to the engine
+
+[`apps/worker-score/src/index.ts`](../../apps/worker-score/src/index.ts)
+hands every finding off to `assessFinding()` and persists the resulting
+`CertaintyAssessment` via `CertaintyRepo`. Provenance roots are walked via
+`source.events.source_id` lookup on each signal's
+`evidence_event_ids`. Three-tier dispatch routes:
+- `action_queue` → publish to `STREAMS.COUNTER_EVIDENCE` (downstream
+  worker runs the adversarial pipeline + analyst review enqueue);
+- `investigation_queue` → finding state `review`, no automatic
+  downstream;
+- `log_only` → no downstream, recorded for calibration only.
+
+The legacy `bayesianPosterior()` from `@vigil/patterns` is retained as a
+sanity cross-check (declared `void`); the canonical posterior is the
+engine's.
+
+#### D — Frontend (operator dashboard)
+
+- New [`apps/dashboard/src/app/findings/[id]/certainty-panel.tsx`](../../apps/dashboard/src/app/findings/%5Bid%5D/certainty-panel.tsx) —
+  per-finding panel with prior, posterior, source count vs the 5-source
+  rule, dispatch tier badge, full adversarial-pipeline outcome (devil's
+  advocate, counterfactual, order randomisation, secondary review),
+  hold-reasons list, score-component table (pattern, source, strength,
+  LR, effective weight, provenance roots), and the
+  engine/model/input/prompt-registry hashes for replayability.
+- New [`apps/dashboard/src/lib/certainty.server.ts`](../../apps/dashboard/src/lib/certainty.server.ts) —
+  `getLatestAssessment`, `getLatestCalibrationView`, `getAiSafetyHealth`
+  (24h windowed counts of total Claude calls, canary triggers, schema
+  invalids, verbatim hallucination rate).
+- The [findings/[id] page](../../apps/dashboard/src/app/findings/%5Bid%5D/page.tsx)
+  renders the certainty panel above the dossier panel.
+
+#### E — Documentation + decision log
+
+- [`docs/source/AI-SAFETY-DOCTRINE-v1.md`](../source/AI-SAFETY-DOCTRINE-v1.md)
+  — full binding doctrine with every failure mode mapped to the code
+  defending against it.
+- This entry (DECISION-011 PROVISIONAL) appended to the decision log.
+
+### Outcome
+
+| Metric | Before | After |
+|---|---|---|
+| Bayesian engine in tree | absent | 31 tests passing, deterministic, reproducible |
+| 5-source minimum rule | not enforced | enforced via `independentSourceCount()` over provenance roots |
+| Independence weighting | not implemented | per-source-pair via `infra/certainty/independence-weights.json` |
+| Adversarial pipeline (4 layers) | absent | implemented with `LlmEvaluator` injection + 5 tests |
+| Forced citation schema | absent | `zCitedClaim` + `validateVerbatimGrounding` (4 tests) |
+| Closed-context prompt wrapper | absent | `renderClosedContext` (2 tests) |
+| Daily-rotated canary | absent | `canaryFor` / `canaryTriggered` (5 tests) |
+| Prompt version registry | scaffolded only | `globalPromptRegistry` + DB persistence (4 tests) |
+| Calibration audit infrastructure | absent | tables + repos + dashboard surface |
+| Per-finding certainty UI | absent | `CertaintyPanel` on the operator findings page |
+
+### Alternatives considered
+
+- **Let Claude produce the posterior directly.** Rejected — overconfidence
+  + non-reproducibility (Doctrine §B.3, §B.12).
+- **Skip the 5-source rule, rely on posterior.** Rejected — confabulation
+  defence relies on independence enforcement, not just probability
+  (Doctrine §B.2).
+- **Hard-code the LLM evaluator inside the engine.** Rejected — the
+  `LlmEvaluator` interface keeps the engine pure for tests and lets the
+  worker-counter-evidence path inject a real Claude-backed evaluator
+  while worker-score's deterministic pass uses the default.
+- **Treat NICFI satellite + Sentinel-2 as fully independent.** Already
+  rejected in DECISION-010; pairwise independence registry encodes the
+  partial dependence.
+
+### Rationale
+
+The credibility of VIGIL APEX rests entirely on the *answer* given to the
+question "how do you stop this from accusing innocent people?" Without
+this doctrine codified in code + tests + UI + DB, the answer is "we have
+a smart prompt." With it, the answer is the documented chain in
+§"What a finding's chain of evidence guarantees" of the doctrine.
+
+### Reversibility
+
+Every layer is reversible in isolation:
+- The engine package can be removed without impacting other workers;
+worker-score's legacy `bayesianPosterior` path is intact.
+- `0009_certainty_engine_down.sql` walks the schema back.
+- The frontend `CertaintyPanel` is a single-file removal.
+- The hardened `SafeLlmRouter` is opt-in; existing `LlmRouter.call`
+  clients are untouched.
+
+### Audit-chain reference
+
+audit_event_id: pending (recorded retroactively at first chain-init per
+EXEC §37.3).
+
+### Architect sign-off
+
+PROVISIONAL pending architect review. To promote: review the registry
+calibrations, the dispatch thresholds, and the doctrine wording against
+SRD §19, §20, §28. Sign each subsection (A → E) as a separate commit per
+OPERATIONS.md §3, then flip Status to FINAL.
+
+### Follow-up notes (not blocking)
+
+- Verbatim audit sampler **cron** (5 % daily) — schema + repo are wired;
+  the cron job that samples + writes to `llm.verbatim_audit_sample` is a
+  one-file follow-up.
+- Calibration audit **runner** — schema + repo + dashboard surface are
+  wired; the worker that scans findings + outcomes and computes
+  reliability bands is queued for next cycle.
+- Cluster-detection pre-pass (Haiku-driven) — design landed, implementation
+  deferred until first 100 production findings exist.
+- `SafeLlmRouter` adoption across worker-extract / worker-counter-evidence
+  / worker-pattern is a per-worker migration; the chokepoint is in place.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
