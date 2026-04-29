@@ -44,6 +44,8 @@ docs/source/_generated/
 contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
+contracts/coverage/
+contracts/coverage.json
 
 # Python
 .venv-py/
