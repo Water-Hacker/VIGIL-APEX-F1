@@ -183,21 +183,6 @@ export async function runCalibrationAudit(
   return { runId, bandsWritten };
 }
 
-/** Helper: returns the current quarter label + start/end timestamps. */
-export function currentQuarterWindow(now: Date = new Date()): {
-  periodLabel: string;
-  periodStart: Date;
-  periodEnd: Date;
-} {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth(); // 0..11
-  const q = Math.floor(m / 3) + 1;
-  const startMonth = (q - 1) * 3;
-  const periodStart = new Date(Date.UTC(y, startMonth, 1));
-  const periodEnd = new Date(Date.UTC(y, startMonth + 3, 1));
-  return {
-    periodLabel: `${y}-Q${q}`,
-    periodStart,
-    periodEnd,
-  };
-}
+/** Helper: re-exported from quarter-window.js so callers that already import
+ *  it from this module continue to work. */
+export { currentQuarterWindow } from './quarter-window.js';

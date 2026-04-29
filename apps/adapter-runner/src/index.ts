@@ -14,6 +14,7 @@ import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '
 import {
   CalibrationAuditRepo,
   CallRecordRepo,
+  PublicExportRepo,
   SatelliteRequestRepo,
   SourceRepo,
   VerbatimAuditRepo,
@@ -45,6 +46,7 @@ import {
   currentQuarterWindow,
   runCalibrationAudit,
 } from './triggers/calibration-audit-runner.js';
+import { runQuarterlyAuditExport } from './triggers/quarterly-audit-export.js';
 import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 
 const logger = createLogger({ service: 'adapter-runner' });
@@ -242,6 +244,35 @@ async function main(): Promise<void> {
       );
       tasks.push(calTask);
       logger.info({ cron }, 'calibration-audit-runner-scheduled');
+    }
+  }
+
+  // DECISION-012 — TAL-PA quarterly anonymised export. Pins the prior
+  // quarter's audit log to IPFS and emits an audit-of-audit row.
+  const exportEnabled =
+    (process.env.AUDIT_PUBLIC_EXPORT_ENABLED ?? 'true').toLowerCase() !== 'false';
+  if (exportEnabled) {
+    const exportCron = process.env.AUDIT_PUBLIC_EXPORT_CRON ?? '0 5 1 1,4,7,10 *';
+    if (validate(exportCron)) {
+      const exportRepo = new PublicExportRepo(db);
+      const exportTask = schedule(
+        exportCron,
+        () => {
+          void (async () => {
+            try {
+              const pool = await getPool();
+              await runQuarterlyAuditExport({ db, pool, exportRepo, logger });
+            } catch (err) {
+              logger.error({ err }, 'audit-public-export-failed');
+            }
+          })();
+        },
+        { timezone: 'Africa/Douala', scheduled: true },
+      );
+      tasks.push(exportTask);
+      logger.info({ cron: exportCron }, 'audit-public-export-scheduled');
+    } else {
+      logger.error({ cron: exportCron }, 'invalid-audit-public-export-cron; trigger disabled');
     }
   }
     } else {

@@ -2428,6 +2428,127 @@ OPERATIONS.md §3, then flip Status to FINAL.
 
 ---
 
+## DECISION-012  TAL-PA — Total Action Logging with Public Anchoring
+
+**Status:** PROVISIONAL — promote to FINAL after architect read-through of
+[`docs/source/TAL-PA-DOCTRINE-v1.md`](../source/TAL-PA-DOCTRINE-v1.md).
+
+**Date:** 2026-04-29.
+
+**Principle.** Every privileged action on the platform produces an
+immutable, signed, dual-anchored audit row that is observable — in
+appropriately redacted form — by anyone in the world, in real time. See
+the doctrine §1.
+
+**Why now.** Phase 1 brings real users (operators, analysts, the council
+once enrolled) into contact with real data. Without a complete audit
+substrate the platform's "we watch the watchers" claim is rhetoric, not
+mechanism. The doctrine binds the rhetoric to code.
+
+**Mechanism (cross-references doctrine §2-§11):**
+
+1. **Eleven-category event taxonomy** — every event-type slug maps to one
+   of eleven categories (A Authentication, B Search, C Document Access,
+   D Decision/Vote, E Data Modification, F Configuration, G System,
+   H External Communication, I Public Portal, J Failed/Suspicious,
+   K Audit-of-Audit). New slugs are added to `KNOWN_EVENT_TYPES`; new
+   categories require a doctrine amendment.
+2. **Per-actor hash chain** with CAS in
+   `UserActionEventRepo.insertAndAdvanceChain` — gap-free per actor.
+   Record-hash canonicalisation: NFKC + sorted-key JSON.
+3. **Two-chain anchoring** — global `audit.actions` ledger + Polygon
+   anchors (hourly Merkle batch + 5 s individual fast-lane for
+   `HIGH_SIGNIFICANCE_EVENT_TYPES`).
+4. **Public substrate** — `/public/audit` page, `/api/audit/public` REST,
+   `/api/audit/aggregate` REST. No auth gate. PII redaction by category
+   in `toPublicView()`.
+5. **Halt-on-failure** — `withHaltOnFailure(emit, work)` in
+   `@vigil/audit-log`; the dashboard wrapper translates emitter errors to
+   HTTP 503. The privileged surfaces fail closed when the audit substrate
+   is unavailable.
+6. **Anomaly detection** — 10 deterministic rules in
+   `@vigil/audit-log/anomaly`; evaluated every 5 min by
+   `worker-audit-watch`; alerts persisted in `audit.anomaly_alert`.
+7. **Retention** — append-only; redactions are sibling rows. Quarterly
+   anonymised CSV export → IPFS pin → `audit.public_export` row →
+   `audit.public_export_published` audit-of-audit row. Trigger refuses to
+   run without `AUDIT_PUBLIC_EXPORT_SALT`.
+
+**Files touched (grouped by stream):**
+
+- **Schemas:** `packages/shared/src/schemas/audit-log.ts` (NEW),
+  `packages/shared/src/schemas/audit.ts` (added
+  `audit.public_export_published` to `zAuditAction`).
+- **Migration:** `packages/db-postgres/drizzle/0010_tal_pa.sql` (+ down).
+- **Drizzle + repos:** `packages/db-postgres/src/schema/audit-log.ts`,
+  `packages/db-postgres/src/repos/audit-log.ts`.
+- **SDK:** `packages/audit-log/` (new package: emit / hash / signer /
+  halt / public-view / anomaly + 34 unit tests).
+- **Dashboard:** `apps/dashboard/src/lib/audit-emit.server.ts`,
+  `apps/dashboard/src/app/api/audit/public/route.ts`,
+  `apps/dashboard/src/app/api/audit/aggregate/route.ts`,
+  `apps/dashboard/src/app/public/audit/page.tsx`,
+  `apps/dashboard/src/middleware.ts` (public-prefix allowlist),
+  `apps/dashboard/src/app/api/dossier/[ref]/route.ts` (wrapped in
+  `audit(req, ...)`; emits `dossier.downloaded`; 503 on emitter failure).
+- **Worker (anchor):** `apps/worker-anchor/src/index.ts` adds
+  `runHighSigAnchorLoop()` — 5 s fast-lane for high-sig events.
+- **Worker (audit-watch):** `apps/worker-audit-watch/` (new app) runs the
+  anomaly engine on a 5 min loop and emits `audit.hash_chain_verified`
+  audit-of-audit per cycle.
+- **Adapter-runner:**
+  `apps/adapter-runner/src/triggers/quarterly-audit-export.ts` (new
+  trigger) +
+  `apps/adapter-runner/src/triggers/quarter-window.ts` (lifted helper).
+- **Doctrine:** `docs/source/TAL-PA-DOCTRINE-v1.md` (NEW).
+- **Env:** `.env.example` adds `AUDIT_HIGH_SIG_INTERVAL_MS`,
+  `AUDIT_WATCH_INTERVAL_MS`, `AUDIT_WATCH_WINDOW_HOURS`,
+  `AUDIT_WATCHLIST_ENTITIES`, `AUDIT_PUBLIC_EXPORT_ENABLED`,
+  `AUDIT_PUBLIC_EXPORT_CRON`, `AUDIT_PUBLIC_EXPORT_SALT`.
+
+**Upgrade contract for callers.** Any new dashboard route that mutates
+state or reveals confidential data must wrap its handler body in
+`audit(req, spec, work)` so it inherits halt-on-failure. Read-only public
+routes (`/api/audit/public`, `/api/audit/aggregate`, `/public/*`) are the
+only audit-free paths and must remain in the allowlist in
+`apps/dashboard/src/middleware.ts`.
+
+**Consequences accepted.**
+
+- An audit-emitter outage takes the privileged surfaces of the platform
+  down. This is the deliberate trade-off — completeness over
+  availability. Doctrine §6.
+- Polygon mainnet gas costs on the order of $0.001 per high-sig event and
+  ~$0.05 per hourly Merkle batch. Bounded; cost-monitored via the
+  observability worker.
+- The quarterly CSV export is permanent on IPFS. A field that should not
+  have been there (mistakenly un-redacted) cannot be retracted. The
+  redaction policy in `toPublicView()` is therefore conservative-by-default.
+
+**What this decision does NOT do.**
+
+- Does not replace Hyperledger Fabric for the internal substrate (W-11
+  fix; SRD §17). The current `HashChain` over `audit.actions` is the
+  substrate. A future Fabric upgrade is a new adapter package, not a
+  doctrine change.
+- Does not wire the production YubiKey PKCS#11 signer
+  (`DeterministicTestSigner` is the in-tree default). Production swap-in
+  is HSK-v1 §07.
+- Does not provide an operator UI for redaction approvals (the
+  `audit.redaction` table is in place; the right-to-erasure court-order
+  workflow is a separate plan).
+
+**Verification.**
+
+- `pnpm exec turbo run build --continue --force` — every workspace package
+  green including `worker-audit-watch` and `@vigil/audit-log`.
+- `pnpm exec turbo run test --continue` — 34 audit-log unit tests + 5
+  quarterly-export tests + the integration tests added under H1/H2/H3
+  green.
+- Manual fixture: see doctrine §11 implementation index.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

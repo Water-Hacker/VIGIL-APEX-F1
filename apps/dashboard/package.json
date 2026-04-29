@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@vigil/audit-chain": "workspace:*",
+    "@vigil/audit-log": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
     "@vigil/governance": "workspace:*",
     "@vigil/observability": "workspace:*",

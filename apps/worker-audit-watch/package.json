@@ -1,0 +1,31 @@
+{
+  "name": "worker-audit-watch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TAL-PA anomaly detection (DECISION-012). Periodically evaluates the deterministic rule set in @vigil/audit-log/anomaly over a rolling window of audit.user_action_event rows; persists alerts to audit.anomaly_alert; emits an audit-of-audit row per detection.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
+    "@vigil/audit-log": "workspace:*",
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "drizzle-orm": "^0.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

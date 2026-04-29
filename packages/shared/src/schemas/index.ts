@@ -22,3 +22,4 @@ export * from './calibration.js';
 export * from './minfi.js';
 export * from './conac.js';
 export * from './certainty.js';
+export * from './audit-log.js';

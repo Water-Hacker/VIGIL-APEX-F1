@@ -86,6 +86,9 @@ export const zAuditAction = z.enum([
   'audit.hash_chain_verified',
   'audit.hash_chain_break',
 
+  // DECISION-012 — TAL-PA public-permanence export
+  'audit.public_export_published',
+
   // Phase / decision
   'phase.advanced',
   'decision.recorded',

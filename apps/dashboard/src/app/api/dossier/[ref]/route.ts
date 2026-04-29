@@ -1,7 +1,8 @@
-import { HashChain } from '@vigil/audit-chain';
-import { DossierRepo, getDb, getPool } from '@vigil/db-postgres';
+import { DossierRepo, getDb } from '@vigil/db-postgres';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import { NextResponse, type NextRequest } from 'next/server';
+
+import { audit, AuditEmitterUnavailableError } from '@/lib/audit-emit.server';
 
 /**
  * GET /api/dossier/[ref]?lang=fr|en
@@ -61,52 +62,49 @@ export async function GET(
   const ipfsApiUrl = process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001';
   const kubo = kuboCreate({ url: ipfsApiUrl });
 
-  let bytes: Buffer;
+  // TAL-PA — emit BEFORE the work; halt-on-failure refuses the download
+  // if the audit emitter is unavailable (doctrine §"No dark periods").
   try {
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of kubo.cat(row.pdf_cid)) chunks.push(chunk);
-    bytes = Buffer.concat(chunks);
-  } catch (err) {
-    return NextResponse.json(
-      { error: 'ipfs-fetch-failed', message: String(err) },
-      { status: 503 },
+    return await audit(
+      req,
+      {
+        eventType: 'dossier.downloaded',
+        targetResource: `dossier:${ref}:${lang}`,
+        actionPayload: { ref, lang, sha256: row.pdf_sha256, dossier_id: row.id },
+      },
+      async () => {
+        let bytes: Buffer;
+        try {
+          const chunks: Uint8Array[] = [];
+          for await (const chunk of kubo.cat(row.pdf_cid!)) chunks.push(chunk);
+          bytes = Buffer.concat(chunks);
+        } catch (err) {
+          return NextResponse.json(
+            { error: 'ipfs-fetch-failed', message: String(err) },
+            { status: 503 },
+          );
+        }
+        return new Response(new Uint8Array(bytes), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Length': String(bytes.length),
+            'Content-Disposition': `attachment; filename="${ref}-${lang}.pdf"`,
+            'Cache-Control': 'private, no-store',
+            'X-Dossier-Status': row.status,
+            'X-Dossier-Recipient': row.recipient_body_name,
+            'X-Dossier-Sha256': row.pdf_sha256,
+          },
+        });
+      },
     );
-  }
-
-  // Best-effort audit row. The download happens regardless of audit success;
-  // an audit row failure should be observable in logs but not block the
-  // operator. Pool is reused via getPool(); HashChain.append() is
-  // idempotent on dedup key (audit_event_id is fresh per call).
-  try {
-    const pool = await getPool();
-    const chain = new HashChain(pool);
-    const operator = req.headers.get('x-vigil-username') ?? 'unknown';
-    const ip =
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? 'unknown';
-    await chain.append({
-      action: 'dossier.downloaded',
-      actor: operator,
-      subject_kind: 'dossier',
-      subject_id: row.id,
-      payload: { ref, lang, ip, sha256: row.pdf_sha256 },
-    });
   } catch (err) {
-    // Don't block download on audit failure.
-    console.error('audit-emit-failed', err);
+    if (err instanceof AuditEmitterUnavailableError) {
+      return NextResponse.json(
+        { error: 'audit-emitter-unavailable', message: err.message },
+        { status: 503 },
+      );
+    }
+    throw err;
   }
-
-  // Wrap Node Buffer in a Uint8Array view for Response (Web BodyInit
-  // doesn't accept Buffer directly under TS DOM types).
-  return new Response(new Uint8Array(bytes), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Length': String(bytes.length),
-      'Content-Disposition': `attachment; filename="${ref}-${lang}.pdf"`,
-      'Cache-Control': 'private, no-store',
-      'X-Dossier-Status': row.status,
-      'X-Dossier-Recipient': row.recipient_body_name,
-      'X-Dossier-Sha256': row.pdf_sha256,
-    },
-  });
 }

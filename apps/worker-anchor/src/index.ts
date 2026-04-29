@@ -6,7 +6,12 @@ import {
   PolygonAnchor,
   UnixSocketSignerAdapter,
 } from '@vigil/audit-chain';
-import { getPool } from '@vigil/db-postgres';
+import {
+  PublicAnchorRepo,
+  UserActionEventRepo,
+  getDb,
+  getPool,
+} from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -16,6 +21,8 @@ import {
   registerShutdown,
 } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
+
+import { runHighSigAnchorLoop } from './high-sig-loop.js';
 
 const logger = createLogger({ service: 'worker-anchor' });
 
@@ -61,12 +68,29 @@ async function main(): Promise<void> {
   });
 
   const intervalMs = Number(process.env.AUDIT_ANCHOR_INTERVAL_MS ?? 3_600_000);
+  const highSigIntervalMs = Number(process.env.AUDIT_HIGH_SIG_INTERVAL_MS ?? 5_000);
   let stopping = false;
   registerShutdown('anchor-loop', () => {
     stopping = true;
   });
 
-  logger.info({ intervalMs, contract: polygonContract }, 'worker-anchor-ready');
+  // DECISION-012 TAL-PA — fast-lane anchor for high-significance events.
+  // Polls audit.user_action_event every few seconds for events flagged
+  // `high_significance = true AND chain_anchor_tx IS NULL`, anchors each
+  // individually, and writes the (event_id, polygon_tx_hash) mapping into
+  // audit.public_anchor.
+  const db = await getDb();
+  const userActionRepo = new UserActionEventRepo(db);
+  const publicAnchorRepo = new PublicAnchorRepo(db);
+  void runHighSigAnchorLoop(
+    { anchor, userActionRepo, publicAnchorRepo, logger, intervalMs: highSigIntervalMs },
+    () => stopping,
+  ).catch((e: unknown) => logger.error({ err: e }, 'high-sig-loop-fatal'));
+
+  logger.info(
+    { intervalMs, highSigIntervalMs, contract: polygonContract },
+    'worker-anchor-ready',
+  );
 
   while (!stopping) {
     try {
