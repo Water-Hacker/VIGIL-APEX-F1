@@ -60,6 +60,7 @@ contract VIGILAnchor is Ownable2Step {
     }
 
     constructor(address _committer) Ownable(msg.sender) {
+        if (_committer == address(0)) revert ZeroCommitterAddress();
         committer = _committer;
     }
 

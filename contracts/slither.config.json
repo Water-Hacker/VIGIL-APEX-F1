@@ -1,0 +1,9 @@
+{
+  "filter_paths": "node_modules",
+  "exclude_informational": false,
+  "exclude_optimization": false,
+  "exclude_low": false,
+  "exclude_medium": false,
+  "exclude_high": false,
+  "detectors_to_exclude": "timestamp,cyclomatic-complexity,solc-version,pragma,assembly"
+}
