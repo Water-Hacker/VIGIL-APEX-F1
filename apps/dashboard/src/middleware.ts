@@ -98,7 +98,16 @@ function rolesFromToken(payload: VigilJwtPayload): Set<string> {
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
 
-  if (isPublic(pathname)) return NextResponse.next();
+  if (isPublic(pathname)) {
+    // Public paths are unauthenticated; strip identity headers an adversary
+    // could attempt to spoof (no consumer reads them on public surfaces, but
+    // belt-and-braces matches the protected-path branch below).
+    const headers = new Headers(req.headers);
+    headers.delete('x-vigil-user');
+    headers.delete('x-vigil-username');
+    headers.delete('x-vigil-roles');
+    return NextResponse.next({ request: { headers } });
+  }
 
   const token = req.cookies.get('vigil_access_token')?.value;
   if (!token) {

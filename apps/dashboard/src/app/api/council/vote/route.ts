@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { GovernanceRepo, getDb } from '@vigil/db-postgres';
+import { Constants } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
@@ -30,13 +31,7 @@ const zVote = z.object({
   webauthn_assertion: z.unknown(),
   onchain_tx_hash: z.string().regex(/^0x[0-9a-f]{64}$/i),
   voter_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  voter_pillar: z.enum([
-    'judicial',
-    'civil_society',
-    'academic',
-    'technical',
-    'religious',
-  ]),
+  voter_pillar: z.enum(Constants.PILLARS),
   recuse_reason: z.string().max(500).optional(),
 });
 
@@ -61,7 +56,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const db = await getDb();
   const repo = new GovernanceRepo(db);
 
-  const existing = await repo.getVote(parsed.data.proposal_id, parsed.data.voter_address);
+  // Bind voter_address + voter_pillar to the canonical council registry.
+  // A compromised browser session cannot cast a vote under a pillar it does
+  // not own, nor under an address that has been resigned/revoked. The
+  // on-chain tx remains the authoritative record (SRD §22.5); this is the
+  // off-chain mirror's correctness gate.
+  const voterAddress = parsed.data.voter_address.toLowerCase();
+  const member = await repo.getActiveMemberByAddress(voterAddress);
+  if (!member) {
+    return NextResponse.json({ error: 'voter-not-active-member' }, { status: 403 });
+  }
+  if (member.pillar !== parsed.data.voter_pillar) {
+    return NextResponse.json({ error: 'pillar-address-mismatch' }, { status: 403 });
+  }
+
+  const existing = await repo.getVote(parsed.data.proposal_id, voterAddress);
   if (existing) {
     return NextResponse.json({ error: 'duplicate-vote' }, { status: 409 });
   }
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   await repo.insertVote({
     id: randomUUID(),
     proposal_id: parsed.data.proposal_id,
-    voter_address: parsed.data.voter_address.toLowerCase(),
+    voter_address: voterAddress,
     voter_pillar: parsed.data.voter_pillar,
     choice: parsed.data.choice,
     cast_at: new Date(),

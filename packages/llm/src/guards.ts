@@ -99,9 +99,26 @@ export function l4InsufficientPath(content: unknown): GuardResult {
 
 /* ===== L5 no_extra_fields ==================================================*/
 export function l5NoExtraFields(content: unknown, ctx: GuardContext): GuardResult {
-  // Zod with .strict() in schemas catches this; if no schema, layer is N/A
   if (!ctx.responseSchema) return PASS('L5');
-  return PASS('L5'); // implicitly enforced by L1 when schema is .strict()
+  // L1 may have used a passthrough schema; L5 forces a strict re-parse and
+  // surfaces extra-field violations explicitly. This is independent of L1
+  // so the corpus can target L5 deterministically.
+  const schemaWithStrict = ctx.responseSchema as unknown as {
+    strict?: () => z.ZodSchema;
+  };
+  if (typeof schemaWithStrict.strict !== 'function') return PASS('L5');
+  const r = schemaWithStrict.strict().safeParse(content);
+  if (!r.success) {
+    const extras = r.error.issues.flatMap((i) =>
+      i.code === 'unrecognized_keys' && 'keys' in i
+        ? (i as unknown as { keys: string[] }).keys
+        : [],
+    );
+    if (extras.length > 0) {
+      return { passed: false, layer: 'L5', reason: `extra fields: ${extras.join(', ')}` };
+    }
+  }
+  return PASS('L5');
 }
 
 /* ===== L6 numerical_consistency ============================================*/

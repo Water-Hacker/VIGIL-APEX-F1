@@ -78,7 +78,9 @@ class TipTriageWorker extends WorkerBase<Payload> {
   }
 
   protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
-    const tip = await this.tipRepo.getByRef(env.payload.tip_id);
+    // tip_id is the row UUID (matches Zod schema above + the dashboard
+    // /api/triage/tips/decrypt body). Lookup must hit the id column, not ref.
+    const tip = await this.tipRepo.getById(env.payload.tip_id);
     if (!tip) return { kind: 'dead-letter', reason: 'tip not found' };
 
     // 3-of-5 council quorum decryption (SRD §28.4). The inbound payload

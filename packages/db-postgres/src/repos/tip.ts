@@ -15,6 +15,11 @@ export class TipRepo {
     return rows[0] ?? null;
   }
 
+  async getById(id: string) {
+    const rows = await this.db.select().from(tipSchema.tip).where(eq(tipSchema.tip.id, id)).limit(1);
+    return rows[0] ?? null;
+  }
+
   async listForTriage(limit = 50) {
     return this.db
       .select()

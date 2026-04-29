@@ -76,4 +76,18 @@ export class GovernanceRepo {
       .limit(1);
     return rows[0] ?? null;
   }
+
+  async getActiveMemberByAddress(voterAddress: string) {
+    const rows = await this.db
+      .select()
+      .from(govSchema.member)
+      .where(
+        and(
+          eq(govSchema.member.eth_address, voterAddress.toLowerCase()),
+          eq(govSchema.member.is_active, true),
+        ),
+      )
+      .limit(1);
+    return rows[0] ?? null;
+  }
 }

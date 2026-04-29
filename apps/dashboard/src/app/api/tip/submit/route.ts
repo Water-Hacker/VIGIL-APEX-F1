@@ -105,9 +105,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ ref });
   } catch (e) {
-    return NextResponse.json(
-      { error: 'server-error', message: e instanceof Error ? e.message : 'unknown' },
-      { status: 500 },
-    );
+    // Never leak internals on the public tip portal — the error message can
+    // disclose schema, hostnames, or internal IPs to an adversarial submitter.
+    console.error('[tip/submit] internal error', e);
+    return NextResponse.json({ error: 'server-error' }, { status: 500 });
   }
 }

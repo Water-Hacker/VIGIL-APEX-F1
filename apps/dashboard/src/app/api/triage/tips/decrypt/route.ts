@@ -42,7 +42,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const db = await getDb();
   const repo = new TipRepo(db);
-  const tip = await repo.getByRef(parsed.data.tip_id);
+  // tip_id in the request body is the row UUID, not the public TIP-YYYY-NNNN
+  // ref. The schema validates UUID; lookup must hit the id column.
+  const tip = await repo.getById(parsed.data.tip_id);
   if (!tip) return NextResponse.json({ error: 'unknown-tip' }, { status: 404 });
 
   const correlationId = req.headers.get('x-correlation-id') ?? undefined;

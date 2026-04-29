@@ -1467,6 +1467,125 @@ funding release + council 4-of-5 architectural-review vote.
 
 Architect signature: <<YubiKey-touched audit row id pending council session>>
 
+## DECISION-007  Phase-1 entry weakness reconciliation + targeted code fixes
+
+| Field | Value |
+|---|---|
+| Date | 2026-04-28 |
+| Decided by | Junior Thuram Nana, Sovereign Architect (proposed by build agent) |
+| Status | PROVISIONAL |
+
+### Decision (proposed)
+
+Reconcile `docs/weaknesses/INDEX.md` against the post-Ring-0/1-5 repo state and
+land a targeted batch of code fixes. The pass landed seven discrete changes:
+
+1. **W-27 fix completed.** `scripts/check-decisions.ts` replaces the inline
+   awk in `.github/workflows/phase-gate.yml`. The lint enforces (a) Phase 1+
+   FINAL-within-7-days entries carry a real `audit_event_id` (with an
+   exemption for entries that self-declare as pre-Phase-1 / pre-dating the
+   audit chain, per OPERATIONS.md §7), and (b) phase references stay within
+   the 0-4 range defined in ROADMAP.md.
+
+2. **W-14 corpus expansion.** `packages/llm/__tests__/synthetic-hallucinations.jsonl`
+   grew from 7 to 40 rows covering all 12 SRD §20 layers (worker-layer rows
+   are scaffolded for L8/L9/L10/L12). The L5 guard
+   (`packages/llm/src/guards.ts`) was promoted from a no-op to an active
+   strict-reparse extra-fields check. The test
+   (`packages/llm/__tests__/hallucinations.test.ts`) was tightened: it now
+   asserts per-layer rejection accuracy, not just any-failure-anywhere.
+
+3. **Council pillar enum bug** (HIGH). The
+   `apps/dashboard/src/app/api/council/vote/route.ts` zod enum was
+   `[judicial, civil_society, academic, technical, religious]` — invented
+   `academic`/`religious` and missing canonical `governance`/`audit` per
+   TRUTH §D / SRD §23.2. Audit-pillar members literally could not cast
+   votes. Replaced with `Constants.PILLARS` from `@vigil/shared`. New
+   defence-in-depth: voter_address must be an active member in
+   `governance.member`, and the asserted pillar must match what the
+   registry has stored (`getActiveMemberByAddress` added to
+   `GovernanceRepo`). A compromised browser session can no longer file a
+   vote-mirror entry under a pillar it does not own.
+
+4. **Tip-decrypt UUID/ref bug** (HIGH). Both
+   `apps/dashboard/src/app/api/triage/tips/decrypt/route.ts` and
+   `apps/worker-tip-triage/src/index.ts` validated `tip_id` as UUID but
+   then called `TipRepo.getByRef`, which queries the human-facing
+   `TIP-YYYY-NNNN` ref column. Every decrypt request 404'd. Added
+   `TipRepo.getById` and rewired both call sites.
+
+5. **`/api/tip/submit` info disclosure.** The 500 path included
+   `e.message` in the JSON body — stack/internal context shipped to a
+   public, possibly-adversarial tip submitter. Replaced with structured
+   server-side logging + a generic `{ error: 'server-error' }` payload.
+
+6. **Middleware identity-header strip on public paths.** The fast-exit for
+   `isPublic(pathname)` returned `next()` without scrubbing `x-vigil-user`
+   / `x-vigil-roles` / `x-vigil-username`. No current consumer reads those
+   on public surfaces, but the strip-then-set discipline is now uniform
+   between branches.
+
+7. **`/api/findings/[id]` belt-and-braces role check.** Middleware already
+   gates this path; the route now also enforces `operator|auditor|architect`
+   in-line so a misconfiguration at the edge cannot leak entity names,
+   RCCM numbers, or counter-evidence (the W-15 surface).
+
+INDEX.md status reconciliation: 18 weaknesses now committed (was 9), 2 in
+progress (W-10 native helper, W-14 corpus expansion), 5 institutional gates
+(W-08, W-17, W-23, W-24, W-25 negotiation half), 1 deferred by spec (W-16
+M2 exit). 0 unresolved.
+
+### Alternatives considered
+
+- Fix everything in one large commit. Rejected — OPERATIONS.md §3 wants one
+  logical change per signed commit; I prepared seven discrete diffs so the
+  architect can land them as separate signed commits.
+- Implement L8/L9/L10/L12 hallucination guards now. Rejected — the existing
+  architecture explicitly defers those to worker-extract-level checks (the
+  guards.ts comments say so). Adding worker-level checks for layers whose
+  context (char_span source slices, language detection, entity-tagging)
+  isn't yet plumbed would be Phase-1.5+ work. Worker-layer corpus rows are
+  seeded so the worker-level test runner has scaffolding when those layers
+  come online.
+- Implement W-10 native vote-signing helper. Rejected for this pass — Tauri
+  desktop helper with EV signing is M3-M4 council-standup scope. WebAuthn
+  fallback path is shipped and remains documented.
+- Implement W-16 60-day shadow mode. Rejected — spec says "M2 exit"; we are
+  pre-M1.
+
+### Rationale
+
+The reconciliation pass closes a real gap between INDEX.md (which still
+showed 13 🟨 proposed weaknesses) and the actual repo (where most were
+shipped during Ring 0-5). Two latent bugs (council pillar enum, tip
+decrypt lookup) were uncovered during the audit; both would have surfaced
+the moment the institutional preconditions cleared and council vote /
+tip-handler workflows started exercising real payloads. Catching them
+now, before any institutional partner watches the system, is cheap. The
+medium-severity defensive improvements (info-disclosure, identity strip,
+findings role check) are pure tightening — no behaviour change for
+correctly-authenticated callers.
+
+### Reversibility
+
+Each diff is an independent commit and trivially revertible. The
+INDEX.md reconciliation is a documentation update with no code coupling.
+
+### Audit chain reference
+
+audit_event_id: pending (audit chain ships in this commit; this entry will
+be migrated retroactively at first chain-init per EXEC §37.3 — recognised
+exemption pattern in `scripts/check-decisions.ts`).
+
+### Architect sign-off
+
+This is a PROVISIONAL entry pending architect review of the seven diffs
+listed above. To promote to FINAL: review each diff individually, sign
+each as a separate commit per OPERATIONS.md §3, then update this entry's
+Status to FINAL.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

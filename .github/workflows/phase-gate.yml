@@ -41,16 +41,13 @@ jobs:
           fi
           echo "[gate] DRY-RUN-DECISION: GO ✔"
 
-      - name: Verify decision log discipline (W-27)
-        run: |
-          # Block merge if any FINAL decision in last 7 days lacks audit_event_id
-          # (Phase 1+ only — pre-Phase-1 entries are migrated retroactively).
-          if [ "${{ steps.phase.outputs.current_phase }}" -ge 1 ]; then
-            offenders=$(awk '/^## DECISION-/{d=$0} /Status: FINAL/{f=1} /audit_event_id:.*pending/{p=1} /^---/{if(f && p) print d; f=0; p=0}' docs/decisions/log.md)
-            if [ -n "$offenders" ]; then
-              echo "FATAL: FINAL decisions without audit_event_id:"
-              echo "$offenders"
-              exit 1
-            fi
-          fi
-          echo "[gate] Decision log: ✔"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run scripts/check-decisions.ts (W-27 lint)
+        # Implements OPERATIONS.md §7. Replaces the previous inline awk; the TS
+        # lint understands DECISION block structure, the 7-day FINAL window, and
+        # phase-reference validity.
+        run: npx --yes tsx scripts/check-decisions.ts
