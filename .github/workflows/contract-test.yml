@@ -42,10 +42,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
-      - run: pip install slither-analyzer
-      - name: Static analysis on contracts
-        run: slither contracts/contracts --json slither-report.json || true
+      - run: pip install slither-analyzer solc-select
+      - name: Pin solc 0.8.27 (matches contract pragma)
+        run: |
+          solc-select install 0.8.27
+          solc-select use 0.8.27
+      - name: Static analysis on contracts (gating)
+        # Uses contracts/slither.config.json which suppresses OZ-internal
+        # findings + documented false positives. Any new finding fails the job.
+        # Baseline + reproduce instructions: docs/security/slither-baseline.md
+        working-directory: contracts
+        run: slither . --config-file slither.config.json --json ../slither-report.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: slither-report
           path: slither-report.json
