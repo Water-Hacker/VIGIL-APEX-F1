@@ -1,0 +1,88 @@
+# Gitleaks config — tuned for VIGIL APEX.
+#
+# We extend the default ruleset (Anthropic, AWS, GitHub PAT, Stripe, Slack,
+# generic high-entropy) and add allowlists for known-safe synthetic strings
+# in the test corpus and documentation.
+
+title = "VIGIL APEX"
+
+[extend]
+useDefault = true
+
+# === Allowlist === ============================================================
+# These patterns appear in fixtures / docs / examples and must never trigger
+# the secret scanner.
+
+[[allowlists]]
+description = "Synthetic IPFS CIDs in the anti-hallucination corpus"
+regexes = [
+  '''bafyrealcid[a-z0-9]{30,}''',
+  '''bafyfabricated[a-z0-9]+''',
+  '''bafyspurious[a-z0-9]+''',
+  '''bafyz{30,}''',
+]
+paths = [
+  '''packages/llm/__tests__/synthetic-hallucinations\.jsonl''',
+  '''packages/llm/__tests__/.*\.test\.ts''',
+  '''packages/audit-log/__tests__/.*\.test\.ts''',
+]
+
+[[allowlists]]
+description = "Test fixtures with deterministic placeholder hashes / hex strings"
+regexes = [
+  '''0x[a]{64}''',
+  '''0x[b]{64}''',
+  '''0x[c-f]{64}''',
+  '''[a-f]{64}''',
+]
+paths = [
+  '''.*__tests__/.*\.ts''',
+  '''.*test/.*\.ts''',
+  '''packages/audit-log/__tests__/.*''',
+  '''packages/db-postgres/__tests__/.*''',
+  '''apps/.*/__tests__/.*''',
+]
+
+[[allowlists]]
+description = "PLACEHOLDER markers in templates / docs"
+regexes = [
+  '''PLACEHOLDER(_[A-Z_]+)?''',
+  '''PLACEHOLDER_HIDDEN_SERVICE\.onion''',
+  '''PLACEHOLDER_LIBSODIUM_BASE64''',
+  '''PLACEHOLDER_DEPLOYED_AT_M[1-9]''',
+  '''PLACEHOLDER_PROVISIONED_AT_M[1-9]''',
+]
+paths = [
+  '''\.env\.example''',
+  '''docs/.*''',
+  '''.*\.md''',
+]
+
+[[allowlists]]
+description = "Architect / sample email contacts in documentation"
+regexes = [
+  '''satoshinakamotobull@gmail\.com''',
+  '''noreply@anthropic\.com''',
+]
+paths = [
+  '''docs/.*''',
+  '''.*\.md''',
+  '''CLAUDE\.md''',
+]
+
+# === Repo-wide global path exclusions === ====================================
+# Build artefacts, lockfiles, generated code, third-party vendor dirs.
+
+[[allowlists]]
+description = "Repo-wide path exclusions: build artefacts, lockfiles, generated code, third-party vendor directories"
+paths = [
+  '''node_modules/.*''',
+  '''.*\.lock$''',
+  '''pnpm-lock\.yaml''',
+  '''.*\.tsbuildinfo''',
+  '''dist/.*''',
+  '''build/.*''',
+  '''.next/.*''',
+  '''.turbo/.*''',
+  '''graphify-out/.*''',
+]
