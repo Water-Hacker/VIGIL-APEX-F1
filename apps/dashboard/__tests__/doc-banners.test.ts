@@ -44,6 +44,26 @@ describe('AUDIT-018 — worker-fabric-bridge README documents single-peer status
   });
 });
 
+describe('AUDIT-074 — patterns INDEX matches the doc directory', () => {
+  it('docs/patterns/INDEX.md exists and lists exactly 43 P-*.md entries', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const indexText = await readFile(docPath('docs/patterns/INDEX.md'), 'utf8');
+    const dirEntries = await readdir(docPath('docs/patterns'));
+    const patternDocs = dirEntries.filter((f) => /^P-[A-H]-\d{3}\.md$/.test(f)).sort();
+
+    expect(patternDocs.length).toBe(43);
+    // Every pattern file must appear as a link target in the index.
+    for (const file of patternDocs) {
+      expect(indexText).toContain(`./${file}`);
+    }
+    // INDEX explicitly states the total.
+    expect(indexText).toMatch(/Total[^\n]*43 patterns/);
+    // Mapping table covers every category A..H present on disk.
+    expect(indexText).toMatch(/category-a/);
+    expect(indexText).toMatch(/category-h/);
+  });
+});
+
 describe('AUDIT-072 — SRD §10.2 erratum cross-references TRUTH.md', () => {
   it('SRD-v3.md §10.2 contains the AUDIT-072 erratum banner', () => {
     const text = readFileSync(docPath('docs/source/SRD-v3.md'), 'utf8');
