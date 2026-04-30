@@ -1,16 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [
-    "tsconfig.base.json",
-    ".env.example",
-    "pnpm-workspace.yaml"
-  ],
-  "globalEnv": [
-    "NODE_ENV",
-    "LOG_LEVEL",
-    "OTEL_EXPORTER_OTLP_ENDPOINT",
-    "VIGIL_PHASE"
-  ],
+  "globalDependencies": ["tsconfig.base.json", ".env.example", "pnpm-workspace.yaml"],
+  "globalEnv": ["NODE_ENV", "LOG_LEVEL", "OTEL_EXPORTER_OTLP_ENDPOINT", "VIGIL_PHASE"],
   "globalPassThroughEnv": [
     "VAULT_ADDR",
     "VAULT_TOKEN_FILE",
@@ -41,12 +32,7 @@
     },
     "lint": {
       "dependsOn": ["^build"],
-      "inputs": [
-        "src/**",
-        ".eslintrc.cjs",
-        "../.eslintrc.cjs",
-        "../../.eslintrc.cjs"
-      ],
+      "inputs": ["src/**", ".eslintrc.cjs", "../.eslintrc.cjs", "../../.eslintrc.cjs"],
       "outputs": []
     },
     "typecheck": {
@@ -56,14 +42,12 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": [
-        "src/**",
-        "test/**",
-        "__tests__/**",
-        "*.test.ts",
-        "*.spec.ts",
-        "vitest.config.ts"
-      ],
+      "inputs": ["src/**", "test/**", "__tests__/**", "*.test.ts", "*.spec.ts", "vitest.config.ts"],
+      "outputs": ["coverage/**"]
+    },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "test/**", "__tests__/**", "*.test.ts", "*.spec.ts", "vitest.config.ts"],
       "outputs": ["coverage/**"]
     },
     "test:integration": {
