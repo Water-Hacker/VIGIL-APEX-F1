@@ -106,6 +106,50 @@ describe('parseCrlSerials', () => {
   });
 });
 
+describe('AUDIT-036 — parseCrlSerials is size-capped + bounded-whitespace', () => {
+  it('refuses bodies above 1 MB (returns empty set, no scan)', () => {
+    // 1.5 MB input — over the 1 MB cap. Pre-fix: parser scanned the
+    // whole thing (linear, but still a memory/time exposure on hostile
+    // Vault response). Post-fix: parser short-circuits to empty.
+    const big = 'Serial Number: ' + ' '.repeat(1_500_000) + '0a';
+    expect(big.length).toBeGreaterThan(1_000_000);
+    const t0 = Date.now();
+    const out = parseCrlSerials(big);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(50);
+    expect(out.size).toBe(0);
+  });
+
+  it('handles a long whitespace run within a Serial Number: line in <100ms', () => {
+    const body = 'Serial Number: ' + ' '.repeat(100_000) + '0a:1b';
+    const t0 = Date.now();
+    parseCrlSerials(body);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  it('still parses a normal openssl-text CRL correctly', () => {
+    const body = [
+      'Certificate Revocation List (CRL):',
+      '    Serial Number: 0A:1B:2C:3D',
+      '        Revocation Date: ...',
+      '    Serial Number: ABCD',
+      '        Revocation Date: ...',
+    ].join('\n');
+    const s = parseCrlSerials(body);
+    expect(s.has('0a1b2c3d')).toBe(true);
+    expect(s.has('abcd')).toBe(true);
+  });
+
+  it('still parses a normal Vault JSON CRL correctly', () => {
+    const body = JSON.stringify({
+      data: { revoked_certs: [{ serial_number: '0a:1b:2c:3d' }] },
+    });
+    const s = parseCrlSerials(body);
+    expect(s.has('0a1b2c3d')).toBe(true);
+  });
+});
+
 describe('VaultPkiKeyResolver — signing-key-id gate', () => {
   it('rejects malformed signingKeyId without hitting Vault', async () => {
     const { fetcher, calls } = stubFetcher({});

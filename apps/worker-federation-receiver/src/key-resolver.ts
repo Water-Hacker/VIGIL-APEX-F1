@@ -375,8 +375,18 @@ export class VaultPkiKeyResolver implements KeyResolver {
  *
  * Returns a set of lower-case hex serials with no separators.
  */
+// AUDIT-036: cap on raw CRL body. Real Vault CRL responses are well
+// under 64 KB (`MAX_BODY_BYTES` upstream). 1 MB is a generous defence-
+// in-depth ceiling: anything larger is hostile input and we refuse to
+// scan it.
+const MAX_CRL_BODY_BYTES = 1024 * 1024;
+
 export function parseCrlSerials(body: string): ReadonlySet<string> {
   const out = new Set<string>();
+  // AUDIT-036: refuse over-sized bodies before any regex scan or JSON
+  // parse. The upstream fetcher already caps at 64 KB (MAX_BODY_BYTES);
+  // this is a second-line cap in case parseCrlSerials is reused.
+  if (body.length > MAX_CRL_BODY_BYTES) return out;
   const trimmed = body.trim();
   if (trimmed.startsWith('{')) {
     try {
@@ -396,8 +406,13 @@ export function parseCrlSerials(body: string): ReadonlySet<string> {
       // fall through to text-mode scan
     }
   }
-  // Text-mode: openssl-style "Serial Number: 0a:1b:2c:..."
-  for (const m of trimmed.matchAll(/Serial Number:\s*([0-9a-fA-F:\s]+)/g)) {
+  // Text-mode: openssl-style "Serial Number: 0a:1b:2c:...". AUDIT-036:
+  // bound the whitespace + serial-character runs to {0,8} and {1,256}
+  // so the regex is exhaustively bounded — even if Vault is compromised
+  // and feeds adversarial input, the matcher cannot be coerced into
+  // pathological backtracking (the original `\s*` and `[...]+` were
+  // already linear, but bounding makes the contract explicit).
+  for (const m of trimmed.matchAll(/Serial Number:\s{0,8}([0-9a-fA-F:\s]{1,256})/g)) {
     const cap = m[1];
     if (typeof cap !== 'string') continue;
     const norm = cap.replace(/[^0-9a-f]/gi, '').toLowerCase();
