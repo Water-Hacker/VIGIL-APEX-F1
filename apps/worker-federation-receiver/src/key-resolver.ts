@@ -55,6 +55,29 @@ export class DirectoryKeyResolver implements KeyResolver {
 // ---------------------------------------------------------------------------
 
 /**
+ * Signal that an explicit revocation decision came back from a Vault PKI
+ * region CRL. Distinct from "key unknown" (returned as null) so a layered
+ * resolver can short-circuit (deny) rather than fall through to a stale
+ * on-disk fallback that doesn't see the CRL (AUDIT-007).
+ *
+ * The class name is checked by `LayeredKeyResolver.resolveAsync` via
+ * `err.name === 'RevokedKeyError'` so callers can detect it without
+ * pulling this module's symbols (no instanceof import cycle).
+ */
+export class RevokedKeyError extends Error {
+  override readonly name = 'RevokedKeyError';
+  readonly keyId: string;
+  readonly region: string;
+  readonly serial: string;
+  constructor(keyId: string, region: string, serial: string) {
+    super(`federation key ${keyId} is revoked by region ${region} CRL`);
+    this.keyId = keyId;
+    this.region = region;
+    this.serial = serial;
+  }
+}
+
+/**
  * Live VaultPkiKeyResolver — pulls the federation signing certificate from
  * the per-region Vault PKI mount on demand, derives the SPKI public-key
  * PEM, and caches it under `signingKeyId` for `cacheTtlMs`. Honours the
@@ -184,10 +207,13 @@ export class VaultPkiKeyResolver implements KeyResolver {
     const promise = (async (): Promise<string | null> => {
       try {
         // Check the region CRL first — a revoked serial must never resolve.
+        // AUDIT-007: throw a RevokedKeyError instead of returning null so
+        // a layered resolver can short-circuit (deny) rather than fall
+        // through to a stale on-disk fallback.
         const crl = await this.loadCrlFor(region);
         if (crl.has(serial.toLowerCase())) {
           this.cache.delete(signingKeyId);
-          return null;
+          throw new RevokedKeyError(signingKeyId, region, serial.toLowerCase());
         }
         const pem = await this.fetchCertPem(region, serial);
         if (pem === null) return null;
@@ -196,6 +222,7 @@ export class VaultPkiKeyResolver implements KeyResolver {
         this.cache.set(signingKeyId, { publicKeyPem, insertedAtMs: this.now() });
         return publicKeyPem;
       } catch (err) {
+        if (err instanceof RevokedKeyError) throw err;
         this.logErrorThrottled(`fetch-${region}`, 'vault-pki-fetch-failed', { err: String(err) });
         return null;
       } finally {
@@ -460,16 +487,31 @@ export class LayeredKeyResolver implements KeyResolver {
    * `resolveAsync` method get the live-fetch path (Vault); sync-only
    * layers are probed via their normal `resolve()`. The first non-null
    * wins.
+   *
+   * AUDIT-007: when a layer throws `RevokedKeyError`, that's an explicit
+   * revocation decision from an authoritative source (Vault region CRL).
+   * Short-circuit to `null` (deny) instead of falling through — a stale
+   * on-disk DirectoryKeyResolver entry must not be allowed to override
+   * the CRL. Any other thrown error is treated as a transient fetch
+   * failure and falls through to the next layer (existing behaviour).
    */
   async resolveAsync(signingKeyId: string): Promise<string | null> {
     for (const layer of this.layers) {
       const layerWithAsync = layer as KeyResolver & {
         resolveAsync?: (id: string) => Promise<string | null>;
       };
-      const raw =
-        typeof layerWithAsync.resolveAsync === 'function'
-          ? await layerWithAsync.resolveAsync(signingKeyId)
-          : await layer.resolve(signingKeyId);
+      let raw: string | null;
+      try {
+        raw =
+          typeof layerWithAsync.resolveAsync === 'function'
+            ? await layerWithAsync.resolveAsync(signingKeyId)
+            : await layer.resolve(signingKeyId);
+      } catch (err) {
+        if ((err as { name?: string } | undefined)?.name === 'RevokedKeyError') {
+          return null;
+        }
+        throw err;
+      }
       if (raw !== null) return raw;
     }
     return null;

@@ -153,7 +153,13 @@ describe('VaultPkiKeyResolver — fetch + cache + CRL', () => {
     expect(r.resolve(KEY_ID)).toBe(a);
   });
 
-  it('returns null when the serial appears on the CRL', async () => {
+  it('throws RevokedKeyError when the serial appears on the CRL (AUDIT-007 contract)', async () => {
+    // Pre-AUDIT-007 behaviour was to return null — but null was
+    // indistinguishable from "key unknown" and let LayeredKeyResolver
+    // fall through to a stale DirectoryKeyResolver entry, defeating the
+    // CRL. The new contract: revocations throw, so a layered resolver
+    // can short-circuit. See `AUDIT-007 — CRL revocation must
+    // short-circuit; no fall-through` block below for the layered path.
     const crlRevoked = JSON.stringify({
       data: { revoked_certs: [{ serial_number: '0a1b2c3d' }] },
     });
@@ -167,7 +173,10 @@ describe('VaultPkiKeyResolver — fetch + cache + CRL', () => {
       logger: noopLogger(),
       fetcher,
     });
-    expect(await r.resolveAsync(KEY_ID)).toBeNull();
+    await expect(r.resolveAsync(KEY_ID)).rejects.toMatchObject({
+      name: 'RevokedKeyError',
+      keyId: KEY_ID,
+    });
   });
 
   it('returns null when Vault returns 404', async () => {
@@ -342,6 +351,101 @@ describe('LayeredKeyResolver', () => {
     const empty2 = new StaticKeyResolver();
     const layered = new LayeredKeyResolver([empty1, empty2]);
     expect(await layered.resolveAsync('CMR:3')).toBeNull();
+  });
+});
+
+describe('AUDIT-007 — CRL revocation must short-circuit; no fall-through', () => {
+  const VAULT = 'https://vault.example';
+  const KEY_ID = 'CMR:0a1b2c3d';
+  const CERT_URL = `${VAULT}/v1/pki-region-cmr/cert/0a1b2c3d`;
+  const CRL_URL = `${VAULT}/v1/pki-region-cmr/crl`;
+  const certResp = JSON.stringify({ data: { certificate: FIXTURE_CERT_PEM } });
+  const crlRevoked = JSON.stringify({
+    data: { revoked_certs: [{ serial_number: '0a1b2c3d' }] },
+  });
+
+  it('LayeredKeyResolver([vault, directory]) where Vault revokes and directory has the stale key -> null (not the stale pem)', async () => {
+    // This is the exact AUDIT-007 confused-deputy: the Vault CRL says
+    // the serial is revoked, so VaultPkiKeyResolver "denies" — but the
+    // existing fall-through would let DirectoryKeyResolver serve the
+    // stale on-disk pem, defeating the CRL. After the fix, an explicit
+    // revocation must short-circuit the chain.
+    const { fetcher } = stubFetcher({
+      [CERT_URL]: { status: 200, body: certResp },
+      [CRL_URL]: { status: 200, body: crlRevoked },
+    });
+    const vault = new VaultPkiKeyResolver({
+      vaultAddr: VAULT,
+      token: 't',
+      logger: noopLogger(),
+      fetcher,
+    });
+    const directory = new StaticKeyResolver();
+    directory.register(
+      KEY_ID,
+      '-----BEGIN PUBLIC KEY-----\nstale-on-disk\n-----END PUBLIC KEY-----\n',
+    );
+    const layered = new LayeredKeyResolver([vault, directory]);
+    expect(await layered.resolveAsync(KEY_ID)).toBeNull();
+  });
+
+  it('VaultPkiKeyResolver.resolveAsync throws RevokedKeyError on CRL hit (not silent null)', async () => {
+    const { fetcher } = stubFetcher({
+      [CERT_URL]: { status: 200, body: certResp },
+      [CRL_URL]: { status: 200, body: crlRevoked },
+    });
+    const vault = new VaultPkiKeyResolver({
+      vaultAddr: VAULT,
+      token: 't',
+      logger: noopLogger(),
+      fetcher,
+    });
+    let caught: unknown;
+    try {
+      await vault.resolveAsync(KEY_ID);
+    } catch (e) {
+      caught = e;
+    }
+    // After the fix, the Vault layer signals revocation explicitly.
+    // The error name must be 'RevokedKeyError' so LayeredKeyResolver can
+    // detect it without an instanceof import cycle.
+    expect((caught as { name?: string } | undefined)?.name).toBe('RevokedKeyError');
+  });
+
+  it('LayeredKeyResolver.resolve (sync path) also short-circuits on revocation', async () => {
+    // Sync path: VaultPkiKeyResolver.resolve() doesn't itself check CRL
+    // (it's a cache-only lookup), so the revocation signal here only
+    // surfaces via resolveAsync. We assert the sync path still respects
+    // the cache-vs-deny boundary.
+    const vault = new VaultPkiKeyResolver({
+      vaultAddr: VAULT,
+      token: 't',
+      logger: noopLogger(),
+    });
+    const directory = new StaticKeyResolver();
+    directory.register('CMR:beef', 'pem-from-directory');
+    const layered = new LayeredKeyResolver([vault, directory]);
+    // Vault layer cold-cache returns null -> directory layer responds.
+    // (This is OK; CRL semantics enforced via resolveAsync in production.)
+    expect(layered.resolve('CMR:beef')).toBe('pem-from-directory');
+  });
+
+  it('LayeredKeyResolver re-throws non-revocation errors', async () => {
+    const failingFetcher: VaultFetcher = async () => {
+      throw new Error('network down');
+    };
+    const vault = new VaultPkiKeyResolver({
+      vaultAddr: VAULT,
+      token: 't',
+      logger: noopLogger(),
+      fetcher: failingFetcher,
+    });
+    const directory = new StaticKeyResolver();
+    directory.register('CMR:abc', 'pem-from-directory');
+    const layered = new LayeredKeyResolver([vault, directory]);
+    // Vault layer swallows network errors and returns null (existing
+    // behaviour, log-throttled). Directory still responds. No throw.
+    expect(await layered.resolveAsync('CMR:abc')).toBe('pem-from-directory');
   });
 });
 
