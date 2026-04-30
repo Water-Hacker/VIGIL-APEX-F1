@@ -78,7 +78,13 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     mapping(address => Member) public memberByAccount;
 
     Proposal[] private _proposals;
-    /// @notice Per-proposal vote record per member. Sentinel choice = 255 → not voted.
+    /// @notice Sentinel for `votedChoice`: 0 means "this address has not voted
+    /// on this proposal". Voted entries are stored as `Choice + 1` (1..4) so
+    /// that the absence of a record is distinguishable from a Yes vote (which
+    /// is `Choice.Yes == 0` in the enum). Do NOT change this without auditing
+    /// every read site — the off-chain mirror in packages/governance/src/abi.ts
+    /// pins the same encoding (AUDIT-040).
+    uint8 private constant NOT_VOTED = 0;
     mapping(uint256 => mapping(address => uint8)) public votedChoice;
     mapping(uint256 => mapping(address => bytes32)) public recuseReason;
 
@@ -235,7 +241,7 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
             emit ProposalExpired(proposalIndex);
             revert WindowClosed();
         }
-        if (votedChoice[proposalIndex][msg.sender] != 0) revert AlreadyVoted();
+        if (votedChoice[proposalIndex][msg.sender] != NOT_VOTED) revert AlreadyVoted();
 
         if (choice == uint8(Choice.Yes)) {
             p.yes += 1;
