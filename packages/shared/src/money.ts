@@ -64,19 +64,30 @@ export function formatXaf(xaf: Xaf): string {
 /** Severity bands per SRD §06.4 / MVP §17.1. */
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 
-const SEV_THRESHOLDS_XAF: Record<Severity, [number, number]> = {
-  low: [0, 50_000_000], // < 50 M XAF
-  medium: [50_000_000, 200_000_000], // 50-200 M
-  high: [200_000_000, 1_000_000_000], // 200 M - 1 B
-  critical: [1_000_000_000, Number.POSITIVE_INFINITY], // ≥ 1 B
-};
+// AUDIT-049: stored as a Map so insertion order is part of the type
+// contract (V8 preserves it for string keys today, but Map makes the
+// guarantee explicit and survives a future addition of a numeric-string
+// key — `Object.keys` re-sorts those to the front).
+const SEV_THRESHOLDS_XAF: ReadonlyMap<Severity, readonly [number, number]> = new Map<
+  Severity,
+  readonly [number, number]
+>([
+  ['low', [0, 50_000_000]], // < 50 M XAF
+  ['medium', [50_000_000, 200_000_000]], // 50-200 M
+  ['high', [200_000_000, 1_000_000_000]], // 200 M - 1 B
+  ['critical', [1_000_000_000, Number.POSITIVE_INFINITY]], // ≥ 1 B
+]);
 
 export function severityForXaf(xaf: Xaf): Severity {
   const v = xaf as number;
-  for (const [sev, [lo, hi]] of Object.entries(SEV_THRESHOLDS_XAF) as Array<
-    [Severity, [number, number]]
-  >) {
+  for (const [sev, [lo, hi]] of SEV_THRESHOLDS_XAF) {
     if (v >= lo && v < hi) return sev;
   }
   return 'critical';
+}
+
+/** Test/snapshot helper — exported so AUDIT-049 regression tests can
+ *  assert iteration order without reaching into a private const. */
+export function severityBandsInOrder(): ReadonlyArray<[Severity, readonly [number, number]]> {
+  return [...SEV_THRESHOLDS_XAF];
 }

@@ -6,6 +6,7 @@ import {
   asXaf,
   formatXaf,
   MONEY_SAFE_CEILING,
+  severityBandsInOrder,
   severityForXaf,
   xafToEurReference,
 } from './money.js';
@@ -87,5 +88,27 @@ describe('AUDIT-048 — money brands enforce MONEY_SAFE_CEILING', () => {
 
   it('asUsdMinor rejects just above the ceiling (pre-AUDIT-048: silently passed)', () => {
     expect(() => asUsdMinor(MONEY_SAFE_CEILING + 1)).toThrow(/safe range/);
+  });
+});
+
+describe('AUDIT-049 — severity bands iterate in low->critical order (Map-backed)', () => {
+  it('iteration order is exactly low, medium, high, critical', () => {
+    const bands = severityBandsInOrder();
+    expect(bands.map(([sev]) => sev)).toEqual(['low', 'medium', 'high', 'critical']);
+  });
+
+  it('iteration order is stable across calls', () => {
+    const a = severityBandsInOrder();
+    const b = severityBandsInOrder();
+    expect(a.map(([sev]) => sev)).toEqual(b.map(([sev]) => sev));
+  });
+
+  it('thresholds are contiguous (max of band N = min of band N+1)', () => {
+    const bands = severityBandsInOrder();
+    for (let i = 0; i + 1 < bands.length; i++) {
+      const [, [, hi]] = bands[i]!;
+      const [, [lo]] = bands[i + 1]!;
+      expect(hi).toBe(lo);
+    }
   });
 });
