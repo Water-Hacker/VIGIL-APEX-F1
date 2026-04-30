@@ -33,6 +33,8 @@
  *      input.
  */
 
+import { patternEvalDurationMs } from '@vigil/observability';
+
 import { PatternRegistry } from './registry.js';
 
 import type { PatternContext, PatternDef, PatternStatus, SubjectInput } from './types.js';
@@ -169,6 +171,9 @@ async function runOne(
     ]);
     const elapsedMs = Date.now() - start;
     if (!isValidPatternResult(result, def.id)) {
+      patternEvalDurationMs
+        .labels({ pattern_id: def.id, outcome: 'invalid_result' })
+        .observe(elapsedMs);
       return {
         kind: 'failure',
         patternId: def.id,
@@ -176,10 +181,12 @@ async function runOne(
         detail: `pattern returned ${typeof result}; expected PatternResult`,
       };
     }
+    patternEvalDurationMs.labels({ pattern_id: def.id, outcome: 'ok' }).observe(elapsedMs);
     return { kind: 'success', patternId: def.id, status: def.status, result, elapsedMs };
   } catch (err) {
     const elapsed = Date.now() - start;
     if (err instanceof TimeoutError) {
+      patternEvalDurationMs.labels({ pattern_id: def.id, outcome: 'timeout' }).observe(elapsed);
       return {
         kind: 'failure',
         patternId: def.id,
@@ -187,6 +194,7 @@ async function runOne(
         detail: `exceeded ${timeoutMs}ms (took ≥${elapsed}ms)`,
       };
     }
+    patternEvalDurationMs.labels({ pattern_id: def.id, outcome: 'error' }).observe(elapsed);
     return {
       kind: 'failure',
       patternId: def.id,

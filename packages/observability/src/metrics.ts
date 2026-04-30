@@ -162,6 +162,22 @@ export const patternStrength = new Histogram({
 });
 
 /**
+ * Per-pattern dispatch outcome timer (AUDIT-059). The `outcome` label
+ * lets oncall distinguish "this pattern is slow" (outcome=ok with high
+ * upper-percentile) from "this pattern hangs" (outcome=timeout) from
+ * "this pattern is buggy" (outcome=error / invalid_result). Without
+ * the label all three look identical in a single execution-time
+ * histogram.
+ */
+export const patternEvalDurationMs = new Histogram({
+  name: 'vigil_pattern_eval_duration_ms',
+  help: 'Wall-clock per pattern dispatch invocation, by pattern_id and outcome',
+  labelNames: ['pattern_id', 'outcome'] as const,
+  buckets: [5, 25, 100, 250, 500, 1000, 2000, 5000],
+  registers: [registry],
+});
+
+/**
  * Posterior at the moment scoring writes it. The /findings dashboard
  * uses the histogram's percentiles to track calibration drift.
  */
