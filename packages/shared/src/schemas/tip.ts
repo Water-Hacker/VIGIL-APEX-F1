@@ -17,8 +17,31 @@ export const zTipDisposition = z.enum([
   'DISMISSED',
   'ARCHIVED',
   'PROMOTED',
+  // DECISION-016 — court-ordered redaction. The body ciphertext is
+  // blanked but the row persists, so a citizen verifying their
+  // TIP-YYYY-NNNN reference still sees "your tip is in the system".
+  'REDACTED_BY_COURT_ORDER',
 ]);
 export type TipDisposition = z.infer<typeof zTipDisposition>;
+
+/** Citizen-verifiable receipt returned by `/api/tip/status?ref=…`. The
+ *  receipt contains no plaintext — only attestations the citizen can
+ *  reproduce: the ref they supplied, when it was received, the SHA-256
+ *  of the body ciphertext (proves the tip is unmodified), the current
+ *  disposition, and the audit-event-id of the most recent disposition
+ *  change (so a future inquest can locate the chain entry). */
+export const zTipReceipt = z.object({
+  ref: z.string().regex(/^TIP-\d{4}-\d{4,6}$/),
+  received_at: zIsoInstant,
+  disposition: zTipDisposition,
+  body_ciphertext_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Audit-event-id of the most recent disposition change. Null when
+   *  the tip is still in its original NEW state. */
+  last_disposition_audit_event_id: z.string().nullable(),
+  /** True iff the tip's body ciphertext is intact (i.e. NOT redacted). */
+  body_intact: z.boolean(),
+});
+export type TipReceipt = z.infer<typeof zTipReceipt>;
 
 export const zTipAttachmentKind = z.enum([
   'image/jpeg',
@@ -38,14 +61,7 @@ export const zTipSubmission = z.object({
   contact_ciphertext_b64: z.string().max(2_000).optional(),
   /** Topic hint — optional, helps triage. */
   topic_hint: z
-    .enum([
-      'procurement',
-      'payroll',
-      'infrastructure',
-      'sanctions',
-      'banking',
-      'other',
-    ])
+    .enum(['procurement', 'payroll', 'infrastructure', 'sanctions', 'banking', 'other'])
     .optional(),
   /** Region hint — optional. */
   region: z

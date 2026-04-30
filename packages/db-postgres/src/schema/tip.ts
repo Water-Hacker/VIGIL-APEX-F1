@@ -24,7 +24,10 @@ export const tip = tipSchema.table(
     disposition: text('disposition').notNull().default('NEW'),
     body_ciphertext: bytea('body_ciphertext').notNull(),
     contact_ciphertext: bytea('contact_ciphertext'),
-    attachment_cids: text('attachment_cids').array().notNull().default(sql`ARRAY[]::text[]`),
+    attachment_cids: text('attachment_cids')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
     topic_hint: text('topic_hint'),
     region: text('region'),
     received_at: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
@@ -43,3 +46,30 @@ export const tipSequence = tipSchema.table('tip_sequence', {
   year: text('year').primaryKey(),
   next_seq: text('next_seq').notNull(),
 });
+
+/**
+ * tip.tip_disposition_history — append-only trail of every tip
+ * disposition change.
+ *
+ * DECISION-016. Database triggers (migration 0011_tip_no_delete.sql)
+ * reject every UPDATE / DELETE on this table — `TipRepo
+ * .recordDispositionChange()` is the only sanctioned writer. Every
+ * row links to the audit_event_id of the TAL-PA emit so the trail
+ * survives an off-line forensic walk.
+ */
+export const tipDispositionHistory = tipSchema.table(
+  'tip_disposition_history',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    tip_id: uuid('tip_id').notNull(),
+    prior_disposition: text('prior_disposition').notNull(),
+    new_disposition: text('new_disposition').notNull(),
+    actor: text('actor').notNull(),
+    notes: text('notes'),
+    audit_event_id: text('audit_event_id'),
+    recorded_at: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tipIdx: index('tip_disposition_history_tip_idx').on(t.tip_id, t.recorded_at.desc()),
+  }),
+);

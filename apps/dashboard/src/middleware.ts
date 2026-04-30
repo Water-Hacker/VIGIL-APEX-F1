@@ -25,8 +25,7 @@ interface VigilJwtPayload extends JWTPayload {
   preferred_username?: string;
 }
 
-const KEYCLOAK_ISSUER =
-  process.env.KEYCLOAK_ISSUER ?? 'https://kc.vigilapex.cm/realms/vigil';
+const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? 'https://kc.vigilapex.cm/realms/vigil';
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? 'vigil-dashboard';
 const KEYCLOAK_JWKS_URL =
   process.env.KEYCLOAK_JWKS_URL ?? `${KEYCLOAK_ISSUER}/protocol/openid-connect/certs`;
@@ -81,9 +80,7 @@ const ROUTE_RULES: ReadonlyArray<RouteRule> = [
 function isPublic(pathname: string): boolean {
   // `/` only matches the bare root, not `/anything`.
   if (pathname === '/') return true;
-  return PUBLIC_PREFIXES.some(
-    (p) => p !== '/' && (pathname === p || pathname.startsWith(`${p}/`)),
-  );
+  return PUBLIC_PREFIXES.some((p) => p !== '/' && (pathname === p || pathname.startsWith(`${p}/`)));
 }
 
 function matchRule(pathname: string): RouteRule | null {
@@ -114,6 +111,9 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     headers.delete('x-vigil-user');
     headers.delete('x-vigil-username');
     headers.delete('x-vigil-roles');
+    // Surface the path to the root layout's NavBar so the active link
+    // styling works without each page passing the prop.
+    headers.set('x-vigil-pathname', pathname);
     return NextResponse.next({ request: { headers } });
   }
 
@@ -170,6 +170,9 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   }
   const roles = Array.from(rolesFromToken(payload));
   if (roles.length > 0) headers.set('x-vigil-roles', roles.join(','));
+  // Surface the path to the root layout's NavBar so active-link
+  // styling works without each page passing the prop.
+  headers.set('x-vigil-pathname', pathname);
 
   return NextResponse.next({ request: { headers } });
 }

@@ -3500,6 +3500,135 @@ remains anywhere in the codebase.
 
 ---
 
+## DECISION-016 Tip retention guarantee + dashboard UI/UX foundation
+
+**Status:** PROVISIONAL — promote to FINAL after architect read-through.
+
+**Date:** 2026-04-29.
+
+**Thesis.** The architect requested two things in one pass: (a) a hard
+guarantee that citizen tips, once received, cannot be deleted; (b) a
+quality pass on the dashboard UI — typography, motion, sounds where
+appropriate, every screen connected to its backend. Both are now in
+place.
+
+**(a) Tip retention — three-layer defence.**
+
+1. **Database trigger (`migration 0011_tip_no_delete.sql`).**
+   `tip.refuse_delete()` raises an exception on every DELETE FROM
+   `tip.tip` and `tip.tip_sequence`. Even a privileged operator running
+   raw SQL cannot drop a row. Closed-set CHECK constraint on
+   `disposition` blocks ad-hoc UPDATE-to-`DROPPED` workarounds.
+
+2. **Append-only history table.** New `tip.tip_disposition_history`
+   records every transition with prior + new disposition, actor,
+   notes, audit_event_id, recorded_at. Two more triggers
+   (`tip_history_no_update`, `tip_history_no_delete`) reject UPDATE /
+   DELETE on the history table itself.
+
+3. **Repository layer.** `TipRepo.recordDispositionChange()` is the
+   only sanctioned write path. Atomic transaction:
+   (1) updates the row's disposition + triaged\_{at,by},
+   (2) appends a row to tip_disposition_history.
+   Rejects every transition not in the closed graph
+   `TIP_DISPOSITION_TRANSITIONS`. `REDACTED_BY_COURT_ORDER` is the
+   terminal state — no path leaves it. `TipRepo.redact()` is the
+   convenience wrapper for court-order redactions; it requires an
+   audit_event_id and blanks the body ciphertext while preserving
+   the row + history. The repo intentionally exposes NO direct delete
+   method.
+
+**(b) Citizen-verifiable receipts.**
+
+`TipRepo.buildReceipt(ref)` returns a receipt with the SHA-256 of the
+stored body ciphertext + the audit_event_id of the most recent
+disposition change. The dashboard `/tip/status` page renders this
+receipt and gives the citizen a "verify locally" affordance: upload
+the encrypted blob the browser saved at submit time; the page
+computes its SHA-256 in-browser via `SubtleCrypto` and shows match /
+mismatch. Mismatch is a tamper signal the citizen can take to a
+journalist or the council. The receipt's `body_intact` flag (false
+iff `disposition === 'REDACTED_BY_COURT_ORDER'`) makes redactions
+transparent — a court-redacted tip still verifies "yes, your tip
+is in our system" but flags that the body is no longer intact.
+
+**(c) Dashboard UI/UX foundation.**
+
+- **Typography.** Inter (sans) + IBM Plex Mono loaded via
+  `next/font/google`. Variable font tokens `--font-sans` /
+  `--font-mono` exposed globally. `font-feature-settings` enables
+  Inter's calt + tabular-nums variants for numerical readability.
+
+- **Shared `<NavBar>`.** Sticky, accessible, two-row layout (operator
+  links on the left, civic links on the right). Active link styled
+  via `aria-current='page'`, derived from the request path the
+  middleware surfaces to the layout via `x-vigil-pathname`.
+
+- **`<ToastProvider>` + `useToast()`.** Zero-dep accessible
+  notification primitive. Auto-dismiss with hover-pause; Escape
+  dismisses the most recent; `aria-live=polite` (or `=assertive` for
+  errors). Stacks bottom-right. Plays a tone via `<UiSounds>` when
+  enabled.
+
+- **`<Skeleton>` + `<SkeletonBlock>`.** Pure-CSS animated placeholder
+  for async UI. `prefers-reduced-motion` honoured globally.
+
+- **`<Card>`.** Reusable section container with consistent border /
+  padding / hover-lift transition.
+
+- **`<UiSounds>`.** WebAudio oscillator-synthesised tones for the six
+  event kinds (info / success / warn / error / vote / dl-alert). No
+  audio files in the bundle — every cue is a 60–220 ms oscillator+
+  gain envelope at ~-18 dBFS. Off by default; enabled via the speaker
+  icon in the NavBar (`localStorage.vigil_sounds`) or by pressing the
+  "S" key once on any operator page. `prefers-reduced-motion` and the
+  explicit `vigil_sounds_explicit_off` key both opt out. Exposes
+  `window.__vigil_play_tone(kind)` so any page can play a cue without
+  re-importing the React surface.
+
+- **`globals.css`.** Extended with design tokens
+  (`--vigil-card-bg / -border / -radius / -shadow-{sm,md} /
+-fast / -medium`), nav layout, sound-toggle, skeleton keyframe,
+  toast slide-in, card hover-lift. `prefers-reduced-motion` zeros all
+  transitions.
+
+**(d) Backend integration.**
+
+Audited every page in `apps/dashboard/src/app/`. Every operator and
+civil-society page reaches a real backend via the `@/lib/*.server`
+modules; the only "static" pages are intentional landing pages
+(`/`, `/verify`, `/audit/ai-safety` shell). No inline-stub data
+anywhere.
+
+**Tests.** 9 new unit tests for `isAllowedTransition` covering:
+self-transition rejection, canonical happy path, every IN_TRIAGE
+outbound transition, REDACTED_BY_COURT_ORDER terminal property,
+every disposition's redaction availability, invented-disposition
+rejection, ARCHIVED terminal-except-redaction property, transition-
+graph exhaustiveness.
+
+**Test counts (this decision):**
+
+- `@vigil/shared`: 33 (was 32, +1 `zTipReceipt`)
+- `@vigil/db-postgres`: 18 + 1 skipped (was 9, +9 transition tests)
+- `dashboard`: 12 (unchanged surface tests)
+
+**Architect read-through.**
+
+19. Run the migration on a clean Postgres + verify a `DELETE FROM
+tip.tip` raises `restrict_violation`.
+20. Verify `TipRepo.redact()` blanks the body ciphertext and appends
+    one `tip_disposition_history` row with the supplied
+    `audit_event_id`.
+21. Submit a tip via `/tip`, then visit `/tip/status?ref=…` and
+    confirm the receipt's `body_ciphertext_sha256` equals
+    `sha256(localStorage.vigil_tip_blob)`.
+22. Tab through the operator NavBar with keyboard only and confirm
+    every link is reachable; press Escape on a toast and confirm it
+    dismisses.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
