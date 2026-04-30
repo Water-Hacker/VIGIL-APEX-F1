@@ -34,7 +34,9 @@ export class SourceRepo {
           ...(row.last_run_at !== undefined && { last_run_at: row.last_run_at }),
           ...(row.last_success_at !== undefined && { last_success_at: row.last_success_at }),
           ...(row.last_error !== undefined && { last_error: row.last_error }),
-          ...(row.consecutive_failures !== undefined && { consecutive_failures: row.consecutive_failures }),
+          ...(row.consecutive_failures !== undefined && {
+            consecutive_failures: row.consecutive_failures,
+          }),
           ...(row.rows_in_last_run !== undefined && { rows_in_last_run: row.rows_in_last_run }),
           ...(row.next_scheduled_at !== undefined && { next_scheduled_at: row.next_scheduled_at }),
         },
@@ -88,5 +90,43 @@ export class SourceRepo {
       .where(inArray(sourceSchema.events.source_id, sourceIds as string[]))
       .orderBy(sql`${sourceSchema.events.observed_at} DESC`)
       .limit(limit);
+  }
+
+  /**
+   * Merge `additions` into `source.events.payload` for the named event.
+   * Top-level keys in `additions` win over existing keys at the same path.
+   * Nested objects are NOT deep-merged — replace the whole subtree if you
+   * need to update one nested key. The extraction worker uses this to
+   * write structured fields (bidder_count, procurement_method, etc.) plus
+   * `_extraction_provenance` back to the event row.
+   *
+   * Returns true if a row was updated, false if no event with `id` exists.
+   *
+   * Concurrency: the merge is done in a single SQL `UPDATE … SET payload =
+   * payload || $merge` so two extractor instances writing different keys
+   * cannot lose each other's writes (Postgres jsonb concat is atomic).
+   * Last-writer-wins on the same key.
+   */
+  async mergeEventPayload(
+    id: string,
+    additions: Record<string, unknown>,
+  ): Promise<{ updated: boolean }> {
+    const r = await this.db.execute(sql`
+      UPDATE source.events
+      SET payload = payload || ${JSON.stringify(additions)}::jsonb
+      WHERE id = ${id}
+      RETURNING id
+    `);
+    return { updated: r.rows.length > 0 };
+  }
+
+  /** Single-row read by id; returns null if not found. */
+  async getEventById(id: string): Promise<typeof sourceSchema.events.$inferSelect | null> {
+    const rows = await this.db
+      .select()
+      .from(sourceSchema.events)
+      .where(eq(sourceSchema.events.id, id))
+      .limit(1);
+    return rows[0] ?? null;
   }
 }

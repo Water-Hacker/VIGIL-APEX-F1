@@ -75,6 +75,7 @@ module.exports = {
         'worker-fabric-bridge',
         'worker-federation-agent',
         'worker-federation-receiver',
+        'worker-extractor',
         'audit-bridge',
         'audit-verifier',
         // Python apps + shared
