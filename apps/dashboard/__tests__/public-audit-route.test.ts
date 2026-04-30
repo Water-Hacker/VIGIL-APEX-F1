@@ -160,6 +160,39 @@ describe('GET /api/audit/public — redaction contract', () => {
   });
 });
 
+describe('AUDIT-034 — strict ISO-8601 validation at the route boundary', () => {
+  it('accepts a strictly-formatted RFC-3339 datetime (Z suffix)', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?since=2026-04-30T12:00:00Z'));
+    expect(res.status).toBe(200);
+  });
+
+  it('accepts millisecond-precision RFC-3339', async () => {
+    const res = await GET(
+      makeReq('http://localhost/api/audit/public?since=2026-04-30T12:00:00.123Z'),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a date-only string (no time component) with 400', async () => {
+    // Date.parse('2026-04-30') succeeds (lenient), but the strict ISO-8601
+    // contract at the route boundary should reject.
+    const res = await GET(makeReq('http://localhost/api/audit/public?since=2026-04-30'));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-ISO time format with 400', async () => {
+    const res = await GET(
+      makeReq('http://localhost/api/audit/public?since=April%2030%202026%2012:00'),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects malformed garbage with 400', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?since=not-a-date'));
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('AUDIT-033 — query-param coercion never produces NaN/Infinity/negative values', () => {
   function lastArgs() {
     return (

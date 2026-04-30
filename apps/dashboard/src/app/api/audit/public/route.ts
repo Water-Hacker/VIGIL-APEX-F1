@@ -1,6 +1,14 @@
 import { toPublicView } from '@vigil/audit-log';
 import { UserActionEventRepo, getDb } from '@vigil/db-postgres';
 import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+
+// AUDIT-034: strict RFC-3339 ISO-8601 at the route boundary. Date.parse
+// is lenient (accepts '2026-04-30' date-only, 'April 30 2026' US-format,
+// etc.) and would reach repo.listPublic where Postgres ::timestamptz
+// happily coerces — leaking a 5xx with PG error text on truly malformed
+// input. zod's .datetime() pins the format.
+const zIsoDatetime = z.string().datetime();
 
 /**
  * GET /api/audit/public — TAL-PA public REST API.
@@ -38,7 +46,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const limit = clamp(Number(url.searchParams.get('limit') ?? '100'), 1, 500);
   const offset = clamp(Number(url.searchParams.get('offset') ?? '0'), 0, Number.MAX_SAFE_INTEGER);
 
-  if (Number.isNaN(Date.parse(since)) || Number.isNaN(Date.parse(until))) {
+  // AUDIT-034: strict RFC-3339; reject lenient-parser oddities like
+  // '2026-04-30' (date-only) or 'April 30 2026'.
+  if (!zIsoDatetime.safeParse(since).success || !zIsoDatetime.safeParse(until).success) {
     return NextResponse.json({ error: 'invalid-time-bounds' }, { status: 400 });
   }
 

@@ -1,5 +1,6 @@
 import { UserActionEventRepo, getDb } from '@vigil/db-postgres';
 import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
 
 /**
  * GET /api/audit/aggregate — TAL-PA aggregate counts (events per role per
@@ -8,12 +9,15 @@ import { NextResponse, type NextRequest } from 'next/server';
  */
 export const dynamic = 'force-dynamic';
 
+// AUDIT-034: strict RFC-3339 datetime validation; mirror /api/audit/public.
+const zIsoDatetime = z.string().datetime();
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = req.nextUrl;
   const since =
     url.searchParams.get('since') ?? new Date(Date.now() - 7 * 24 * 3_600_000).toISOString();
   const until = url.searchParams.get('until') ?? new Date().toISOString();
-  if (Number.isNaN(Date.parse(since)) || Number.isNaN(Date.parse(until))) {
+  if (!zIsoDatetime.safeParse(since).success || !zIsoDatetime.safeParse(until).success) {
     return NextResponse.json({ error: 'invalid-time-bounds' }, { status: 400 });
   }
   const db = await getDb();
