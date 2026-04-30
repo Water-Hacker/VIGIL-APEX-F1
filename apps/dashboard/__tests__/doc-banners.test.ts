@@ -29,3 +29,17 @@ describe('AUDIT-017 — HSK §4.8 native PKCS#11 vote-signer is marked deferred'
     expect(text).toMatch(/architect signoff/i);
   });
 });
+
+describe('AUDIT-018 — worker-fabric-bridge README documents single-peer status', () => {
+  it('apps/worker-fabric-bridge/README.md contains the multi-org-deferred status banner', () => {
+    const text = readFileSync(docPath('apps/worker-fabric-bridge/README.md'), 'utf8');
+    expect(text).toMatch(/single-peer through Phase 1/i);
+    expect(text).toMatch(/multi-org deferred to Phase 2/i);
+    expect(text).toMatch(/DECISION-004/);
+    // The Phase-2 checklist must remain — these are the institutional
+    // pre-reqs the architect tracks. If a PR removes them, this fails.
+    expect(text).toMatch(/CONAC engagement letter/i);
+    expect(text).toMatch(/Cour des Comptes/i);
+    expect(text).toMatch(/Endorsement policy/i);
+  });
+});
