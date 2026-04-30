@@ -19,7 +19,8 @@
     "@vigil/observability": "workspace:*",
     "@vigil/queue": "workspace:*",
     "@vigil/shared": "workspace:*",
-    "ioredis": "^5.4.1"
+    "ioredis": "^5.4.1",
+    "undici": "^6.19.8"
   },
   "devDependencies": {
     "@types/node": "^20.16.5",

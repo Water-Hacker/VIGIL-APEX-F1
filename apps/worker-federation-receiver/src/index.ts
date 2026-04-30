@@ -11,7 +11,7 @@ import { QueueClient } from '@vigil/queue';
 import IORedis from 'ioredis';
 
 import { FederationReceiverHandlers } from './handlers.js';
-import { DirectoryKeyResolver } from './key-resolver.js';
+import { DirectoryKeyResolver, LayeredKeyResolver, VaultPkiKeyResolver } from './key-resolver.js';
 
 const logger = createLogger({ service: 'worker-federation-receiver' });
 
@@ -60,12 +60,48 @@ async function main(): Promise<void> {
     redis.disconnect();
   });
 
-  const keyResolver = new DirectoryKeyResolver(keyDir, logger);
-  const loaded = await keyResolver.load();
+  // The directory resolver is always present — it carries the bootstrap
+  // pubkeys the architect copied during the per-region cutover ceremony.
+  const directoryResolver = new DirectoryKeyResolver(keyDir, logger);
+  const loaded = await directoryResolver.load();
   if (loaded === 0) {
     logger.warn(
       { keyDir },
-      'federation-key-resolver-empty (no per-region pubkeys loaded; receiver will reject every envelope)',
+      'federation-key-resolver-empty (no per-region pubkeys loaded; receiver may reject envelopes until Vault PKI succeeds)',
+    );
+  }
+
+  // VaultPkiKeyResolver — primary, live source of truth. Enabled when
+  // VAULT_ADDR + VAULT_TOKEN_FILE are configured (post-R9 cutover).
+  // The directory layer remains as a deterministic fallback so the
+  // receiver keeps verifying envelopes during a Vault outage.
+  const vaultAddr = process.env.VAULT_ADDR;
+  const vaultTokenFile = process.env.VAULT_TOKEN_FILE;
+  const vaultEnabled = vaultAddr !== undefined && vaultTokenFile !== undefined;
+  let keyResolver;
+  if (vaultEnabled) {
+    const { readFile } = await import('node:fs/promises');
+    const token = (await readFile(vaultTokenFile, 'utf8')).trim();
+    const ttlMs = Number(process.env.FEDERATION_KEY_CACHE_TTL_MS ?? 3_600_000);
+    const httpTimeoutMs = Number(process.env.FEDERATION_KEY_HTTP_TIMEOUT_MS ?? 5_000);
+    const namespace = process.env.VAULT_NAMESPACE;
+    const vaultResolver = new VaultPkiKeyResolver({
+      vaultAddr,
+      token,
+      cacheTtlMs: ttlMs,
+      httpTimeoutMs,
+      logger,
+      ...(namespace !== undefined && { namespace }),
+    });
+    keyResolver = new LayeredKeyResolver([vaultResolver, directoryResolver]);
+    logger.info(
+      { vaultAddr, ttlMs, httpTimeoutMs },
+      'federation-key-resolver-layered (vault primary, directory fallback)',
+    );
+  } else {
+    keyResolver = directoryResolver;
+    logger.info(
+      'federation-key-resolver-directory-only (set VAULT_ADDR + VAULT_TOKEN_FILE to enable Vault PKI)',
     );
   }
 

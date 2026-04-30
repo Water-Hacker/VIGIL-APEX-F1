@@ -27,6 +27,7 @@ import { extractDocContent } from './content-extractor.js';
 import { detectLanguage } from './lang.js';
 import { OcrPool } from './ocr-pool.js';
 import { extractPdfMetadata } from './pdf-metadata.js';
+import { extractPdfTextLayer } from './pdf-text.js';
 
 export { detectLanguage };
 
@@ -209,9 +210,26 @@ class DocumentWorker extends WorkerBase<DocPayload> {
       // DECISION-014c — content-extractor pass. Routes by event kind to
       // surface protest_disposition (P-A-008) for cour-des-comptes
       // audit_observation events and progress_pct (P-D-005) for
-      // minepat-bip investment_project events. OCR text is what we have
-      // available here; for non-OCR PDFs (text-extractable) we'd need a
-      // separate text-extraction pass — currently a deferred enhancement.
+      // minepat-bip investment_project events.
+      //
+      // DECISION-015 — for non-OCR PDFs (text-extractable), pull the
+      // text layer directly via extractPdfTextLayer before falling back
+      // to "no text available". This closes the gap noted earlier where
+      // PDFs with a real text layer were skipped because Tesseract only
+      // ran on image MIME types.
+      if (detectedText === null && mime === 'application/pdf' && env.payload.source_event_id) {
+        try {
+          const layerText = extractPdfTextLayer(buf);
+          if (layerText !== null && layerText.length > 0) {
+            detectedText = layerText;
+            textChars = layerText.length;
+            ocrEngine = 'pdf-text-layer';
+          }
+        } catch (e) {
+          logger.warn({ err: e }, 'pdf-text-layer-extraction-failed');
+        }
+      }
+
       if (detectedText !== null && env.payload.source_event_id) {
         try {
           const ev = await this.sourceRepo.getEventById(env.payload.source_event_id);

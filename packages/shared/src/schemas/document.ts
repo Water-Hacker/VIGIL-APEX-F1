@@ -49,7 +49,7 @@ export const zDocumentKind = z.enum([
 ]);
 export type DocumentKind = z.infer<typeof zDocumentKind>;
 
-export const zDocumentOcrEngine = z.enum(['tesseract', 'textract', 'none']);
+export const zDocumentOcrEngine = z.enum(['tesseract', 'textract', 'pdf-text-layer', 'none']);
 export type DocumentOcrEngine = z.infer<typeof zDocumentOcrEngine>;
 
 export const zDocument = z.object({
@@ -84,9 +84,7 @@ export const zDocumentExtractionField = z.object({
   citation: z.object({
     document_cid: zIpfsCid,
     page: z.number().int().nonnegative().nullable(),
-    char_span: z
-      .tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])
-      .nullable(),
+    char_span: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).nullable(),
   }),
 });
 export type DocumentExtractionField = z.infer<typeof zDocumentExtractionField>;

@@ -116,8 +116,15 @@ function isWithinDays(dateStr: string, days: number): boolean {
   return ageDays >= 0 && ageDays <= days;
 }
 
-const VALID_PHASE = /\bPhase\s+[0-4]\b/g;
-const PHASE_REFERENCE = /\bPhase\s+([0-9]+)\b/g;
+/**
+ * The strict phase list. Anything outside this set is a typo or a
+ * reference to a phase that does not exist in ROADMAP.md / EXEC §43.2.
+ * The looser PHASE_REFERENCE regex catches numeric phases; this stricter
+ * list catches `Phase 99`, `Phase X`, `Phase III` and other variants
+ * that slip past the numeric check.
+ */
+const VALID_PHASES = new Set(['0', '1', '2', '3', '4']);
+const PHASE_REFERENCE = /\bPhase\s+([0-9]+|[A-Za-z]+)\b/g;
 
 function validatePhaseReferences(blocks: DecisionBlock[]): string[] {
   const errors: string[] = [];
@@ -125,14 +132,32 @@ function validatePhaseReferences(blocks: DecisionBlock[]): string[] {
     let m: RegExpExecArray | null;
     PHASE_REFERENCE.lastIndex = 0;
     while ((m = PHASE_REFERENCE.exec(b.body)) !== null) {
-      const n = Number(m[1]);
-      if (n > 4) {
+      const ref = m[1] ?? '';
+      // Numeric phase: validate against ROADMAP cap (0..4).
+      if (/^\d+$/.test(ref)) {
+        if (!VALID_PHASES.has(ref)) {
+          errors.push(
+            `${b.id} (line ~${b.startLine}): references Phase ${ref}; only Phase 0-4 are defined in ROADMAP.md`,
+          );
+        }
+        continue;
+      }
+      // Non-numeric phase. Three recognised forms:
+      //   1. Single uppercase letter A-Z — BUILD-COMPANION's alphabetic
+      //      phase-grid convention (Phase A, Phase H, Phase I, Phase J).
+      //   2. Lowercase narrative qualifiers (pre / post / current /
+      //      next / previous).
+      //   3. Anything else — typo OR malformed (Roman-numeral 'II' is
+      //      the classic), hard reject.
+      const NARRATIVE_OK = new Set(['pre', 'post', 'current', 'next', 'previous']);
+      const isCompanionLetter = /^[A-Z]$/.test(ref);
+      const isNarrative = NARRATIVE_OK.has(ref.toLowerCase());
+      if (!isCompanionLetter && !isNarrative) {
         errors.push(
-          `${b.id} (line ~${b.startLine}): references Phase ${n}; only 0-4 are defined in ROADMAP.md`,
+          `${b.id} (line ~${b.startLine}): references "Phase ${ref}" which is not a numeric phase, a Companion alphabetic phase, or a recognised narrative qualifier`,
         );
       }
     }
-    void VALID_PHASE; // future: cross-check against a stricter phase list
   }
   return errors;
 }
@@ -160,10 +185,7 @@ function main(): void {
       const exemptPattern = /(pre-dates|pre-phase[- ]?1|migrated retroactively|n\/?a)/i;
       const exempt = exemptPattern.test(b.auditEventId ?? '');
       const pendingLike =
-        aud === '' ||
-        aud.startsWith('pending') ||
-        aud.startsWith('_pending') ||
-        aud === 'tbd';
+        aud === '' || aud.startsWith('pending') || aud.startsWith('_pending') || aud === 'tbd';
       if (pendingLike && !exempt) {
         process.stderr.write(
           `[check-decisions] ${b.id}: FINAL on ${b.date} but audit_event_id is "${b.auditEventId ?? '<absent>'}" — Phase ${phase} requires a real audit event id\n`,

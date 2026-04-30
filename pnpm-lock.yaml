@@ -789,6 +789,9 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.10.1
+      undici:
+        specifier: ^6.19.8
+        version: 6.25.0
     devDependencies:
       '@types/node':
         specifier: ^20.16.5
