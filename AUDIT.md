@@ -26,7 +26,7 @@
 >
 > - AUDIT-007 promoted **medium → high** (CRL fall-through is a confused-deputy on the federation key path).
 > - AUDIT-027 promoted **low → high** (uneven LLM-safety wrapping across workers is a doctrine breach, not a code-smell).
-> - AUDIT-022 + AUDIT-023 marked `status: blocked-on-architect-decision` — they require a doctrine ratification, not code work. Phase 2 must not touch the umbrella code (`packages/llm/`, `packages/certainty-engine/`, `packages/audit-log/`, `packages/audit-chain/`, `worker-anchor/`, `worker-audit-watch/`, `adapter-runner/quarterly-audit-export.ts`).
+> - AUDIT-022 + AUDIT-023 marked `status: blocked-on-architect-decision` — they require a doctrine ratification, not code work. Phase 2 must not touch the umbrella code (`packages/llm/`, `packages/certainty-engine/`, `packages/audit-log/`, `packages/audit-chain/`, `worker-anchor/`, `worker-audit-watch/`, `adapter-runner/quarterly-audit-export.ts`). **Scope clarification: the umbrella restriction protects against side-effect changes to umbrella code from unrelated findings; it does not forbid fixing findings filed directly against umbrella files. AUDIT-030 was closed under this clarification (commit a4fd3fd).**
 > - AUDIT-073 expanded with the full missing-keys list (17 VIGIL-owned env vars; see §8).
 >
 > **New findings filed during Block A (2026-04-30):**
