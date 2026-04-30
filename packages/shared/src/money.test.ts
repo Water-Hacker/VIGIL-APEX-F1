@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { asXaf, formatXaf, severityForXaf, xafToEurReference } from './money.js';
+import {
+  asEurMinor,
+  asUsdMinor,
+  asXaf,
+  formatXaf,
+  MONEY_SAFE_CEILING,
+  severityForXaf,
+  xafToEurReference,
+} from './money.js';
 
 describe('asXaf', () => {
   it('accepts integers', () => {
@@ -44,5 +52,40 @@ describe('formatXaf', () => {
   it('renders fr-CM grouped', () => {
     const s = formatXaf(asXaf(4_250_000));
     expect(s).toMatch(/4.250.000 FCFA/); // unicode space or thin space
+  });
+});
+
+describe('AUDIT-048 — money brands enforce MONEY_SAFE_CEILING', () => {
+  it('MONEY_SAFE_CEILING is 1e15 (well below Number.MAX_SAFE_INTEGER)', () => {
+    expect(MONEY_SAFE_CEILING).toBe(1e15);
+    expect(MONEY_SAFE_CEILING).toBeLessThan(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('asXaf accepts at exactly the ceiling', () => {
+    expect(asXaf(MONEY_SAFE_CEILING)).toBe(MONEY_SAFE_CEILING);
+  });
+
+  it('asXaf rejects just above the ceiling', () => {
+    expect(() => asXaf(MONEY_SAFE_CEILING + 1)).toThrow(/safe range/);
+  });
+
+  it('asXaf rejects negative just below the floor', () => {
+    expect(() => asXaf(-MONEY_SAFE_CEILING - 1)).toThrow(/safe range/);
+  });
+
+  it('asEurMinor accepts at exactly the ceiling', () => {
+    expect(asEurMinor(MONEY_SAFE_CEILING)).toBe(MONEY_SAFE_CEILING);
+  });
+
+  it('asEurMinor rejects just above the ceiling (pre-AUDIT-048: silently passed)', () => {
+    expect(() => asEurMinor(MONEY_SAFE_CEILING + 1)).toThrow(/safe range/);
+  });
+
+  it('asUsdMinor accepts at exactly the ceiling', () => {
+    expect(asUsdMinor(MONEY_SAFE_CEILING)).toBe(MONEY_SAFE_CEILING);
+  });
+
+  it('asUsdMinor rejects just above the ceiling (pre-AUDIT-048: silently passed)', () => {
+    expect(() => asUsdMinor(MONEY_SAFE_CEILING + 1)).toThrow(/safe range/);
   });
 });

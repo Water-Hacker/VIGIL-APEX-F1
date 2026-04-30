@@ -15,25 +15,41 @@ export type Xaf = number & { readonly __brand: 'Xaf' };
 export type Eur = number & { readonly __brand: 'Eur' };
 export type Usd = number & { readonly __brand: 'Usd' };
 
+// AUDIT-048: explicit safe-range ceiling for every money brand. The
+// 1e15 limit is comfortably below Number.MAX_SAFE_INTEGER (~9e15) and
+// gives ~30 decimal-orders-of-magnitude headroom over the largest
+// realistic procurement contract (Cameroon 2026 budget total: ~5.6e12
+// FCFA). Rejecting above-ceiling at construction time prevents a
+// downstream f64-imprecision bug from corrupting an audit row.
+export const MONEY_SAFE_CEILING = 1e15 as const;
+
 export function asXaf(n: number): Xaf {
   if (!Number.isInteger(n)) throw new Error(`XAF must be an integer (smallest unit): ${n}`);
-  if (n < -1e15 || n > 1e15) throw new Error(`XAF out of safe range: ${n}`);
+  if (n < -MONEY_SAFE_CEILING || n > MONEY_SAFE_CEILING) {
+    throw new Error(`XAF out of safe range: ${n}`);
+  }
   return n as Xaf;
 }
 
 export function asEurMinor(cents: number): Eur {
   if (!Number.isInteger(cents)) throw new Error(`EUR must be cents (integer): ${cents}`);
+  if (cents < -MONEY_SAFE_CEILING || cents > MONEY_SAFE_CEILING) {
+    throw new Error(`EUR out of safe range: ${cents}`);
+  }
   return cents as Eur;
 }
 
 export function asUsdMinor(cents: number): Usd {
   if (!Number.isInteger(cents)) throw new Error(`USD must be cents (integer): ${cents}`);
+  if (cents < -MONEY_SAFE_CEILING || cents > MONEY_SAFE_CEILING) {
+    throw new Error(`USD out of safe range: ${cents}`);
+  }
   return cents as Usd;
 }
 
 /** Reference conversion — for sanity checks, NOT for accounting. */
 export function xafToEurReference(xaf: Xaf): Eur {
-  return Math.round((xaf as number) / XAF_PER_EUR_REFERENCE * 100) as Eur;
+  return Math.round(((xaf as number) / XAF_PER_EUR_REFERENCE) * 100) as Eur;
 }
 
 export function eurToUsdReference(eur: Eur): Usd {
@@ -57,7 +73,9 @@ const SEV_THRESHOLDS_XAF: Record<Severity, [number, number]> = {
 
 export function severityForXaf(xaf: Xaf): Severity {
   const v = xaf as number;
-  for (const [sev, [lo, hi]] of Object.entries(SEV_THRESHOLDS_XAF) as Array<[Severity, [number, number]]>) {
+  for (const [sev, [lo, hi]] of Object.entries(SEV_THRESHOLDS_XAF) as Array<
+    [Severity, [number, number]]
+  >) {
     if (v >= lo && v < hi) return sev;
   }
   return 'critical';
