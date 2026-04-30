@@ -122,6 +122,17 @@ describe('sanitiseFilename — path traversal + control chars', () => {
   it('lowercases the extension only', () => {
     expect(sanitiseFilename('Report.PDF')).toBe('Report.pdf');
   });
+  it('AUDIT-045: extension lowercase is locale-invariant (Turkish-İ rejected upstream by ASCII strip)', () => {
+    // The ASCII-only strip earlier in sanitiseFilename converts non-ASCII
+    // chars to '_'. So 'doc.PDFİ' first becomes 'doc.PDF_' (the İ -> _),
+    // then the extension lowercase makes it 'doc.pdf_'.
+    // The point of this test: the .toLowerCase() call cannot be coerced
+    // into producing Turkish-style 'ı' or 'i̇' even with hostile input.
+    expect(sanitiseFilename('doc.PDFI')).toBe('doc.pdfi');
+    expect(sanitiseFilename('Report.IMG')).toBe('Report.img');
+    // Non-ASCII upper-İ folded by ASCII strip before the lowercase runs.
+    expect(sanitiseFilename('doc.PDFİ')).toBe('doc.pdf_');
+  });
   it('returns null for filenames that sanitise to empty', () => {
     expect(sanitiseFilename('....')).toBeNull();
     expect(sanitiseFilename('   ')).toBeNull();

@@ -56,6 +56,8 @@ audit_event_id: pending (Phase 1; this entry pre-dates audit chain by design).
 | Decided by | _pending_   |
 | Status     | PROVISIONAL |
 
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
+
 ### Decision (proposed)
 
 Production hosting on **Hetzner CCX33** (Falkenstein, Germany) for the
@@ -94,6 +96,8 @@ audit_event_id: pending (Phase 1).
 | Decided by | _pending_   |
 | Status     | PROVISIONAL |
 
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
+
 ### Decision (proposed)
 
 Domain `vigilapex.cm` registered via ANTIC (.cm registry) for the institutional
@@ -121,6 +125,8 @@ High. Both registrars permit transfer.
 | Date       | _pending_   |
 | Decided by | _pending_   |
 | Status     | PROVISIONAL |
+
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
 
 ### Decision (proposed)
 
@@ -165,6 +171,8 @@ High. Additional keys can be ordered. Reducing count requires governance vote
 | Decided by | _pending_   |
 | Status     | PROVISIONAL |
 
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
+
 ### Decision (proposed)
 
 **Defer Hyperledger Fabric to Phase 2.** MVP uses a Postgres `audit.actions`
@@ -201,6 +209,8 @@ chain becomes the canonical pre-Fabric history).
 | Date       | _pending_   |
 | Decided by | _pending_   |
 | Status     | PROVISIONAL |
+
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
 
 ### Decision (proposed)
 
@@ -1462,6 +1472,8 @@ Architect signature: <<YubiKey-touched audit row id pending council session>>
 | Decided by | Junior Thuram Nana, Sovereign Architect (proposed by build agent) |
 | Status     | PROVISIONAL                                                       |
 
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
+
 ### Decision (proposed)
 
 Reconcile `docs/weaknesses/INDEX.md` against the post-Ring-0/1-5 repo state and
@@ -1580,6 +1592,8 @@ Status to FINAL.
 | Date       | 2026-04-28                                                                                                      |
 | Decided by | Junior Thuram Nana, Sovereign Architect (proposed by build agent under approved plan `lucky-doodling-hennessy`) |
 | Status     | PROVISIONAL                                                                                                     |
+
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
 
 ### Decision (proposed)
 
@@ -1797,6 +1811,8 @@ separate signed commit per OPERATIONS.md §3, then flip Status to FINAL.
 | Date       | 2026-04-29                                                                                               |
 | Decided by | Junior Thuram Nana, Sovereign Architect (executed by build agent under explicit "PROCEED" authorisation) |
 | Status     | PROVISIONAL                                                                                              |
+
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
 
 ### Decision (proposed)
 
@@ -2021,6 +2037,8 @@ depend on the earlier ones holding.
 | Decided by | Junior Thuram Nana, Sovereign Architect (executed by build agent under explicit "PROCEED" / "FIX ALL" / "boil the ocean" authorisation) |
 | Status     | PROVISIONAL                                                                                                                             |
 
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
+
 ### Decision (proposed)
 
 Wire two end-to-end gaps the architect's audit pass surfaced after
@@ -2239,6 +2257,8 @@ intake form; flip Status to FINAL.
 | Date       | 2026-04-29                                                                                                                                                                                 |
 | Decided by | Junior Thuram Nana, Sovereign Architect (executed by build agent under explicit "ENSURE ALL THESE IS FULLY IMPLEMENTED BOTH FRONTEND AND BACKEND AND ALSO PRODUCTION GRADE" authorisation) |
 | Status     | PROVISIONAL                                                                                                                                                                                |
+
+> **STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through. Do not cite as authoritative for new PRs.** (AUDIT-071)
 
 ### Decision (proposed)
 

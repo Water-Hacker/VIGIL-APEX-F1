@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { incrementRetry, markResolved } from '../../../../lib/dead-letter.server';
+import { batchDeadLetterUpdate, DeadLetterNotFoundError } from '../../../../lib/dead-letter.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,12 +36,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid', issues: parsed.error.issues }, { status: 400 });
   }
 
-  if (parsed.data.action === 'resolve') {
-    const reason = parsed.data.reason ?? 'manual-resolve';
-    await Promise.all(parsed.data.ids.map((id) => markResolved(id, reason)));
-  } else {
-    await Promise.all(parsed.data.ids.map((id) => incrementRetry(id)));
+  // AUDIT-004: atomic multi-row UPDATE. Single SQL means partial-failure
+  // is impossible — either the entire batch lands or the entire batch
+  // rolls back at the database level.
+  // AUDIT-005: zero affected rows -> typed DeadLetterNotFoundError ->
+  // HTTP 404 (instead of 200 with count: 0). Partial matches return 200
+  // but include `requested - count` in the response so the operator UI
+  // can flag stale ids.
+  let result: { affected: ReadonlyArray<string> };
+  try {
+    result = await batchDeadLetterUpdate(parsed.data.action, parsed.data.ids, parsed.data.reason);
+  } catch (err) {
+    if (err instanceof DeadLetterNotFoundError) {
+      return NextResponse.json(
+        {
+          error: 'not_found',
+          action: err.action,
+          requested: err.requestedIds.length,
+          missing: err.requestedIds,
+        },
+        { status: 404 },
+      );
+    }
+    throw err;
   }
 
-  return NextResponse.json({ ok: true, count: parsed.data.ids.length });
+  return NextResponse.json({
+    ok: true,
+    count: result.affected.length,
+    requested: parsed.data.ids.length,
+    missing: parsed.data.ids.filter((id) => !result.affected.includes(id)),
+  });
 }

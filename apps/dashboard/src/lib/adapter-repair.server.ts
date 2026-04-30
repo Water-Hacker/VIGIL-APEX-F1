@@ -49,11 +49,31 @@ export async function listPendingProposals(): Promise<AdapterRepairProposal[]> {
     generated_by_llm: String(row['generated_by_llm']),
     status: String(row['status']),
     shadow_count: Number(row['shadow_count']),
-    shadow_match_rate:
-      row['shadow_match_rate'] === null ? null : Number(row['shadow_match_rate']),
+    shadow_match_rate: row['shadow_match_rate'] === null ? null : Number(row['shadow_match_rate']),
     shadow_divergence_rate:
       row['shadow_divergence_rate'] === null ? null : Number(row['shadow_divergence_rate']),
   }));
+}
+
+/**
+ * AUDIT-006: typed error raised when the proposal UPDATE matched zero
+ * rows — i.e., the id is unknown OR the proposal is no longer in
+ * `shadow_testing` / `awaiting_approval`. The registry UPDATE never
+ * runs, so a stale UI click cannot promote a non-existent or
+ * already-decided proposal.
+ */
+export class ProposalNotEligibleError extends Error {
+  override readonly name = 'ProposalNotEligibleError';
+  readonly proposalId: string;
+  readonly attemptedDecision: 'promoted' | 'rejected';
+  constructor(proposalId: string, attemptedDecision: 'promoted' | 'rejected') {
+    super(
+      `adapter-repair proposal ${proposalId} is not eligible for ${attemptedDecision} ` +
+        '(unknown id or status not in {shadow_testing, awaiting_approval})',
+    );
+    this.proposalId = proposalId;
+    this.attemptedDecision = attemptedDecision;
+  }
 }
 
 export async function decideProposal(
@@ -63,26 +83,35 @@ export async function decideProposal(
   reason?: string,
 ): Promise<void> {
   const db = await getDb();
-  await db.execute(sql`
-    UPDATE source.adapter_repair_proposal
-       SET status         = ${decision},
-           decided_at     = NOW(),
-           decided_by     = ${decidedBy},
-           decision_reason = ${reason ?? null}
-     WHERE id = ${id}::uuid
-       AND status IN ('shadow_testing', 'awaiting_approval')
-  `);
-
-  if (decision === 'promoted') {
-    // Flip the live selector by writing into adapter_selector_registry.
-    // The adapter-runner reads it on every run cycle.
-    await db.execute(sql`
-      UPDATE source.adapter_selector_registry r
-         SET selector   = p.candidate_selector,
-             updated_at = NOW(),
-             updated_by = ${`approve:${decidedBy}`}
-        FROM source.adapter_repair_proposal p
-       WHERE p.id = ${id}::uuid AND r.source_id = p.source_id
+  // AUDIT-006: single transaction. The proposal UPDATE uses RETURNING id;
+  // if zero rows came back the proposal isn't eligible (unknown id or
+  // status not in shadow_testing / awaiting_approval). We throw before
+  // the registry UPDATE so a stale click can't promote nothing.
+  await db.transaction(async (tx) => {
+    const r = await tx.execute(sql`
+      UPDATE source.adapter_repair_proposal
+         SET status          = ${decision},
+             decided_at      = NOW(),
+             decided_by      = ${decidedBy},
+             decision_reason = ${reason ?? null}
+       WHERE id = ${id}::uuid
+         AND status IN ('shadow_testing', 'awaiting_approval')
+       RETURNING id
     `);
-  }
+    if (r.rowCount === 0 || r.rows.length === 0) {
+      throw new ProposalNotEligibleError(id, decision);
+    }
+    if (decision === 'promoted') {
+      // Flip the live selector by writing into adapter_selector_registry.
+      // The adapter-runner reads it on every run cycle.
+      await tx.execute(sql`
+        UPDATE source.adapter_selector_registry r
+           SET selector   = p.candidate_selector,
+               updated_at = NOW(),
+               updated_by = ${`approve:${decidedBy}`}
+          FROM source.adapter_repair_proposal p
+         WHERE p.id = ${id}::uuid AND r.source_id = p.source_id
+      `);
+    }
+  });
 }

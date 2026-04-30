@@ -3,9 +3,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
 import { StaticKeyResolver, type KeyResolver } from '@vigil/federation-stream';
+import { federationKeysLoaded, type Logger } from '@vigil/observability';
 import { request } from 'undici';
-
-import type { Logger } from '@vigil/observability';
 
 /**
  * DirectoryKeyResolver — boot-time scan of a directory of PEM files.
@@ -34,7 +33,14 @@ export class DirectoryKeyResolver implements KeyResolver {
   ) {}
 
   async load(): Promise<number> {
-    const entries = await readdir(this.directory).catch(() => [] as string[]);
+    // AUDIT-013 — surface a directory-read failure as a warn log AND as
+    // a gauge=0 sample so an alert can fire if the receiver ever ends up
+    // running with zero peer keys. The previous swallow-and-continue
+    // path silently rejected every federation message.
+    const entries = await readdir(this.directory).catch((err: unknown) => {
+      this.logger.warn({ err, directory: this.directory }, 'federation-key-directory-unreadable');
+      return [] as string[];
+    });
     let loaded = 0;
     for (const name of entries) {
       if (!name.endsWith('.pem')) continue;
@@ -43,6 +49,7 @@ export class DirectoryKeyResolver implements KeyResolver {
       this.inner.register(keyId, pem);
       loaded += 1;
     }
+    federationKeysLoaded.labels({ directory: this.directory }).set(loaded);
     this.logger.info({ directory: this.directory, loaded }, 'federation-key-resolver-loaded');
     return loaded;
   }
@@ -53,6 +60,29 @@ export class DirectoryKeyResolver implements KeyResolver {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Signal that an explicit revocation decision came back from a Vault PKI
+ * region CRL. Distinct from "key unknown" (returned as null) so a layered
+ * resolver can short-circuit (deny) rather than fall through to a stale
+ * on-disk fallback that doesn't see the CRL (AUDIT-007).
+ *
+ * The class name is checked by `LayeredKeyResolver.resolveAsync` via
+ * `err.name === 'RevokedKeyError'` so callers can detect it without
+ * pulling this module's symbols (no instanceof import cycle).
+ */
+export class RevokedKeyError extends Error {
+  override readonly name = 'RevokedKeyError';
+  readonly keyId: string;
+  readonly region: string;
+  readonly serial: string;
+  constructor(keyId: string, region: string, serial: string) {
+    super(`federation key ${keyId} is revoked by region ${region} CRL`);
+    this.keyId = keyId;
+    this.region = region;
+    this.serial = serial;
+  }
+}
 
 /**
  * Live VaultPkiKeyResolver — pulls the federation signing certificate from
@@ -184,10 +214,13 @@ export class VaultPkiKeyResolver implements KeyResolver {
     const promise = (async (): Promise<string | null> => {
       try {
         // Check the region CRL first — a revoked serial must never resolve.
+        // AUDIT-007: throw a RevokedKeyError instead of returning null so
+        // a layered resolver can short-circuit (deny) rather than fall
+        // through to a stale on-disk fallback.
         const crl = await this.loadCrlFor(region);
         if (crl.has(serial.toLowerCase())) {
           this.cache.delete(signingKeyId);
-          return null;
+          throw new RevokedKeyError(signingKeyId, region, serial.toLowerCase());
         }
         const pem = await this.fetchCertPem(region, serial);
         if (pem === null) return null;
@@ -196,6 +229,7 @@ export class VaultPkiKeyResolver implements KeyResolver {
         this.cache.set(signingKeyId, { publicKeyPem, insertedAtMs: this.now() });
         return publicKeyPem;
       } catch (err) {
+        if (err instanceof RevokedKeyError) throw err;
         this.logErrorThrottled(`fetch-${region}`, 'vault-pki-fetch-failed', { err: String(err) });
         return null;
       } finally {
@@ -348,8 +382,18 @@ export class VaultPkiKeyResolver implements KeyResolver {
  *
  * Returns a set of lower-case hex serials with no separators.
  */
+// AUDIT-036: cap on raw CRL body. Real Vault CRL responses are well
+// under 64 KB (`MAX_BODY_BYTES` upstream). 1 MB is a generous defence-
+// in-depth ceiling: anything larger is hostile input and we refuse to
+// scan it.
+const MAX_CRL_BODY_BYTES = 1024 * 1024;
+
 export function parseCrlSerials(body: string): ReadonlySet<string> {
   const out = new Set<string>();
+  // AUDIT-036: refuse over-sized bodies before any regex scan or JSON
+  // parse. The upstream fetcher already caps at 64 KB (MAX_BODY_BYTES);
+  // this is a second-line cap in case parseCrlSerials is reused.
+  if (body.length > MAX_CRL_BODY_BYTES) return out;
   const trimmed = body.trim();
   if (trimmed.startsWith('{')) {
     try {
@@ -369,8 +413,13 @@ export function parseCrlSerials(body: string): ReadonlySet<string> {
       // fall through to text-mode scan
     }
   }
-  // Text-mode: openssl-style "Serial Number: 0a:1b:2c:..."
-  for (const m of trimmed.matchAll(/Serial Number:\s*([0-9a-fA-F:\s]+)/g)) {
+  // Text-mode: openssl-style "Serial Number: 0a:1b:2c:...". AUDIT-036:
+  // bound the whitespace + serial-character runs to {0,8} and {1,256}
+  // so the regex is exhaustively bounded — even if Vault is compromised
+  // and feeds adversarial input, the matcher cannot be coerced into
+  // pathological backtracking (the original `\s*` and `[...]+` were
+  // already linear, but bounding makes the contract explicit).
+  for (const m of trimmed.matchAll(/Serial Number:\s{0,8}([0-9a-fA-F:\s]{1,256})/g)) {
     const cap = m[1];
     if (typeof cap !== 'string') continue;
     const norm = cap.replace(/[^0-9a-f]/gi, '').toLowerCase();
@@ -460,16 +509,31 @@ export class LayeredKeyResolver implements KeyResolver {
    * `resolveAsync` method get the live-fetch path (Vault); sync-only
    * layers are probed via their normal `resolve()`. The first non-null
    * wins.
+   *
+   * AUDIT-007: when a layer throws `RevokedKeyError`, that's an explicit
+   * revocation decision from an authoritative source (Vault region CRL).
+   * Short-circuit to `null` (deny) instead of falling through — a stale
+   * on-disk DirectoryKeyResolver entry must not be allowed to override
+   * the CRL. Any other thrown error is treated as a transient fetch
+   * failure and falls through to the next layer (existing behaviour).
    */
   async resolveAsync(signingKeyId: string): Promise<string | null> {
     for (const layer of this.layers) {
       const layerWithAsync = layer as KeyResolver & {
         resolveAsync?: (id: string) => Promise<string | null>;
       };
-      const raw =
-        typeof layerWithAsync.resolveAsync === 'function'
-          ? await layerWithAsync.resolveAsync(signingKeyId)
-          : await layer.resolve(signingKeyId);
+      let raw: string | null;
+      try {
+        raw =
+          typeof layerWithAsync.resolveAsync === 'function'
+            ? await layerWithAsync.resolveAsync(signingKeyId)
+            : await layer.resolve(signingKeyId);
+      } catch (err) {
+        if ((err as { name?: string } | undefined)?.name === 'RevokedKeyError') {
+          return null;
+        }
+        throw err;
+      }
       if (raw !== null) return raw;
     }
     return null;

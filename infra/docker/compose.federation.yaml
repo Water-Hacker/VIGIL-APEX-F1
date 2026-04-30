@@ -1,0 +1,75 @@
+# AUDIT-021 — federation overlay (Phase-3 dormant; nightly CI use only).
+#
+# Boots `worker-federation-agent` (region side) + `worker-federation-
+# receiver` (core side) on a shared in-process gRPC pair so a CI run
+# can verify they exchange a signed envelope end-to-end. The overlay
+# attaches to the existing `vigil-internal` network defined in the
+# main `docker-compose.yaml` so secrets + Vault + Postgres are
+# reachable.
+#
+# Usage:
+#   docker compose -f infra/docker/docker-compose.yaml \
+#                  -f infra/docker/compose.federation.yaml \
+#                  up worker-federation-agent worker-federation-receiver
+#
+# Status: Phase-3 wiring — NOT enabled in the default compose stack.
+# Wired into `.github/workflows/federation-nightly.yml` (TBD per
+# AUDIT-021 follow-up commit) so a CI cron exercises the path nightly.
+#
+# This file MUST NOT be merged into the main compose.yaml until the
+# Phase-3 council vote passes (DECISION-* placeholder).
+
+version: '3.9'
+
+services:
+  worker-federation-agent:
+    profiles: ['federation']
+    image: node:20-bookworm-slim
+    working_dir: /workspace
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.81 }
+    environment:
+      VIGIL_REGION_CODE: CMR-CE
+      FEDERATION_CORE_ENDPOINT: worker-federation-receiver:9070
+      VAULT_ADDR: http://vigil-vault:8200
+      VAULT_PKI_ENABLED: 'true'
+      OTEL_SERVICE_NAME: worker-federation-agent
+      NODE_ENV: development
+    volumes:
+      - ../../:/workspace:ro
+      - federation-agent-tmp:/run/vigil/secrets:rw
+    depends_on:
+      vigil-vault: { condition: service_healthy }
+      vigil-postgres: { condition: service_healthy }
+    command:
+      - sh
+      - -c
+      - 'pnpm --filter worker-federation-agent run start'
+
+  worker-federation-receiver:
+    profiles: ['federation']
+    image: node:20-bookworm-slim
+    working_dir: /workspace
+    networks:
+      vigil-internal: { ipv4_address: 172.20.0.82 }
+    environment:
+      VIGIL_REGION_CODE: CMR-CORE
+      FEDERATION_LISTEN_ADDR: 0.0.0.0:9070
+      VAULT_ADDR: http://vigil-vault:8200
+      VAULT_PKI_ENABLED: 'true'
+      OTEL_SERVICE_NAME: worker-federation-receiver
+      NODE_ENV: development
+    volumes:
+      - ../../:/workspace:ro
+      - federation-receiver-tmp:/run/vigil/secrets:rw
+    depends_on:
+      vigil-vault: { condition: service_healthy }
+      vigil-postgres: { condition: service_healthy }
+    command:
+      - sh
+      - -c
+      - 'pnpm --filter worker-federation-receiver run start'
+
+volumes:
+  federation-agent-tmp:
+  federation-receiver-tmp:

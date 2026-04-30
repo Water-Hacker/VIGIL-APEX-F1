@@ -120,11 +120,16 @@ function checkFile(rel: string, knownDecisions: Set<string>): void {
     ];
     while ((m = BARE_FILE.exec(line)) !== null) {
       const target = m[1]!;
-      const looksRepoRelative =
-        target.startsWith('./') ||
-        target.startsWith('../') ||
-        repoRoots.some((r) => target.startsWith(r));
+      // `./xxx` and `../xxx` in a markdown body are file-relative within
+      // a code excerpt (e.g. `import './procurement.js'`), NOT repo-
+      // relative file paths. Only flag the canonical repo-rooted forms
+      // (apps/, packages/, …) so we don't false-positive on quoted
+      // import statements.
+      const looksRepoRelative = repoRoots.some((r) => target.startsWith(r));
       if (!looksRepoRelative) continue;
+      // Skip placeholder-style paths that document a naming convention
+      // rather than a real file: P-X-NNN.md, X-001.ts, <pattern>, etc.
+      if (/[A-Z]-(?:X|NNN|N+)-[A-Z]/.test(target) || /[<{]/.test(target)) continue;
       const resolved = path.isAbsolute(target) ? target : path.resolve(ROOT, target);
       if (!existsSync(resolved)) {
         issues.push({

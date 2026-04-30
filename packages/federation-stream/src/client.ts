@@ -3,7 +3,12 @@ import { resolve as resolvePath } from 'node:path';
 
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { createLogger, type Logger } from '@vigil/observability';
+import {
+  createLogger,
+  federationFlushLagMs,
+  federationPendingEnvelopes,
+  type Logger,
+} from '@vigil/observability';
 
 import { signEnvelope } from './sign.js';
 
@@ -115,10 +120,12 @@ export class FederationStreamClient {
   private closed = false;
 
   constructor(private readonly opts: FederationClientOptions) {
-    this.logger = opts.logger ?? createLogger({
-      service: 'federation-stream-client',
-      extraBindings: { region: opts.region },
-    });
+    this.logger =
+      opts.logger ??
+      createLogger({
+        service: 'federation-stream-client',
+        extraBindings: { region: opts.region },
+      });
     this.batchSize = opts.batchSize ?? 256;
     this.batchIntervalMs = opts.batchIntervalMs ?? 2_000;
     this.privateKeyPem = readFileSync(opts.signingPrivateKeyPath, 'utf8');
@@ -163,8 +170,16 @@ export class FederationStreamClient {
       signingKeyId: this.opts.signingKeyId,
     };
     this.pendingBatch.push(envelope);
+    federationPendingEnvelopes.labels({ region: this.opts.region }).set(this.pendingBatch.length);
+    const enqueuedAt = Date.now();
     const ackPromise = new Promise<PushAck>((resolve) => {
-      this.pendingResolvers.set(unsigned.envelopeId, resolve);
+      this.pendingResolvers.set(unsigned.envelopeId, (ack) => {
+        // AUDIT-056: observe enqueue -> ack lag.
+        federationFlushLagMs
+          .labels({ region: this.opts.region })
+          .observe((Date.now() - enqueuedAt) / 1000);
+        resolve(ack);
+      });
     });
     if (this.pendingBatch.length >= this.batchSize) {
       void this.flush();
@@ -185,6 +200,7 @@ export class FederationStreamClient {
     }
     const batch = this.pendingBatch;
     this.pendingBatch = [];
+    federationPendingEnvelopes.labels({ region: this.opts.region }).set(0);
     const resolvers = new Map<string, (ack: PushAck) => void>();
     for (const env of batch) {
       const r = this.pendingResolvers.get(env.envelopeId);
@@ -198,11 +214,13 @@ export class FederationStreamClient {
     this.inflightBatch = this.inflightBatch.then(
       () =>
         new Promise<void>((resolve) => {
-          const callable = (grpcClient as unknown as {
-            pushEvents(
-              cb: (err: grpc.ServiceError | null, ack: PushAck) => void,
-            ): grpc.ClientWritableStream<unknown>;
-          }).pushEvents.bind(grpcClient);
+          const callable = (
+            grpcClient as unknown as {
+              pushEvents(
+                cb: (err: grpc.ServiceError | null, ack: PushAck) => void,
+              ): grpc.ClientWritableStream<unknown>;
+            }
+          ).pushEvents.bind(grpcClient);
           const stream = callable((err, ack) => {
             if (err) {
               this.logger.error({ err }, 'federation-stream-batch-error');
@@ -242,12 +260,14 @@ export class FederationStreamClient {
 
   async beacon(req: { agentNowMs: number; agentSeqTotal: number }): Promise<HealthBeaconReply> {
     if (!this.grpcClient) throw new Error('client not started');
-    const callable = (this.grpcClient as unknown as {
-      healthBeacon(
-        req: { region: RegionCode; agentNowMs: number; agentSeqTotal: number },
-        cb: (err: grpc.ServiceError | null, reply: HealthBeaconReply) => void,
-      ): void;
-    }).healthBeacon.bind(this.grpcClient);
+    const callable = (
+      this.grpcClient as unknown as {
+        healthBeacon(
+          req: { region: RegionCode; agentNowMs: number; agentSeqTotal: number },
+          cb: (err: grpc.ServiceError | null, reply: HealthBeaconReply) => void,
+        ): void;
+      }
+    ).healthBeacon.bind(this.grpcClient);
     return new Promise<HealthBeaconReply>((resolve, reject) => {
       callable({ region: this.opts.region, ...req }, (err, reply) => {
         if (err) reject(err);

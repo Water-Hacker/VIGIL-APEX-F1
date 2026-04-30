@@ -109,6 +109,13 @@ The architect commitment that **the Yaoundé core remains the
 single point of authoritative trust** is unchanged. Phase-3
 distributes ingestion, not authority.
 
+The per-region environment keys (`VIGIL_REGION_CODE`,
+`VIGIL_SIGNING_KEY_ID`, `FEDERATION_CORE_ENDPOINT`,
+`FEDERATION_TLS_*`) live in the Helm values files at
+`infra/k8s/charts/regional-node/values-<CODE>.yaml`, not in the
+core node's `.env`. Empty values in `.env.example` signal "this
+node is acting as the Yaoundé core" (AUDIT-077).
+
 ## Section C — Data, Patterns, Intelligence
 
 | Fact                             | Value                                                                                                                      | Source                                                     | Status    |

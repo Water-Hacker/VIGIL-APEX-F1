@@ -109,7 +109,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
   return (
     <ToastCtx.Provider value={api}>
       {children}
-      <div className="vigil-toast-stack" aria-label="notifications">
+      <div role="region" aria-label="notifications" className="vigil-toast-stack">
         {toasts.map((t) => (
           <div
             key={t.id}

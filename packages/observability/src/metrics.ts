@@ -81,6 +81,30 @@ export const llmCallsTotal = new Counter({
   registers: [registry],
 });
 
+// AUDIT-056 — federation-stream client visibility.
+export const federationFlushLagMs = new Histogram({
+  name: 'vigil_federation_flush_lag_seconds',
+  help: 'Wall-clock latency from envelope enqueue to ack returned by the core peer',
+  labelNames: ['region'] as const,
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+  registers: [registry],
+});
+
+export const federationPendingEnvelopes = new Gauge({
+  name: 'vigil_federation_pending_envelopes',
+  help: 'Envelopes currently held in the in-process pendingBatch awaiting flush',
+  labelNames: ['region'] as const,
+  registers: [registry],
+});
+
+// AUDIT-058 — Vault token renewal visibility.
+export const vaultTokenRenewFailedTotal = new Counter({
+  name: 'vigil_vault_token_renew_failed_total',
+  help: 'Vault token renewal attempts that returned non-2xx or threw',
+  labelNames: ['service'] as const,
+  registers: [registry],
+});
+
 export const llmCostUsd = new Counter({
   name: 'vigil_llm_cost_usd_total',
   help: 'Cumulative LLM USD cost',
@@ -134,6 +158,53 @@ export const patternStrength = new Histogram({
   help: 'Per-pattern signal strength values',
   labelNames: ['pattern_id'] as const,
   buckets: [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  registers: [registry],
+});
+
+/**
+ * Per-pattern dispatch outcome timer (AUDIT-059). The `outcome` label
+ * lets oncall distinguish "this pattern is slow" (outcome=ok with high
+ * upper-percentile) from "this pattern hangs" (outcome=timeout) from
+ * "this pattern is buggy" (outcome=error / invalid_result). Without
+ * the label all three look identical in a single execution-time
+ * histogram.
+ */
+export const patternEvalDurationMs = new Histogram({
+  name: 'vigil_pattern_eval_duration_ms',
+  help: 'Wall-clock per pattern dispatch invocation, by pattern_id and outcome',
+  labelNames: ['pattern_id', 'outcome'] as const,
+  buckets: [5, 25, 100, 250, 500, 1000, 2000, 5000],
+  registers: [registry],
+});
+
+/**
+ * Number of federation peer keys currently loaded from the on-disk
+ * key directory (AUDIT-013). When the directory becomes unreadable
+ * mid-flight, the receiver silently rejects every federation message
+ * thinking no peer is authorised. Setting this to 0 (with the
+ * `directory` label) gives oncall an alertable signal:
+ *   `vigil_federation_keys_loaded{directory!=""} == 0`
+ */
+export const federationKeysLoaded = new Gauge({
+  name: 'vigil_federation_keys_loaded',
+  help: 'Number of federation peer keys loaded from the directory resolver',
+  labelNames: ['directory'] as const,
+  registers: [registry],
+});
+
+/**
+ * Turnstile verify outcome counter (AUDIT-015). Distinguishes
+ *   outcome=accepted        — Cloudflare returned success:true
+ *   outcome=rejected        — Cloudflare returned success:false
+ *   outcome=outage          — fetch threw / non-2xx response / timeout
+ *   outcome=misconfigured   — TURNSTILE_SECRET_KEY unset at request time
+ * so a runbook can distinguish "Turnstile is down" from "users are
+ * bots" — both fail closed today, but trigger different responses.
+ */
+export const tipTurnstileVerifyTotal = new Counter({
+  name: 'vigil_tip_turnstile_verify_total',
+  help: 'Tip-submit Turnstile verification outcomes',
+  labelNames: ['outcome'] as const,
   registers: [registry],
 });
 
@@ -203,6 +274,21 @@ export const workerInflight = new Gauge({
   registers: [registry],
 });
 
+/**
+ * Last-tick wall clock per worker, in seconds since the Unix epoch
+ * (AUDIT-076). Updated on every consume-loop iteration in
+ * packages/queue/src/worker.ts. The Prometheus alert
+ * `vigil_apex.WorkerLoopStalled` fires when `time() - this gauge` >
+ * 1 hour, which catches a worker stuck in a degraded state long
+ * before /healthz returns red.
+ */
+export const workerLastTickSeconds = new Gauge({
+  name: 'vigil_worker_last_tick_seconds',
+  help: 'Wall clock of the most recent consume-loop iteration per worker, seconds since epoch',
+  labelNames: ['worker'] as const,
+  registers: [registry],
+});
+
 export const workerEffectiveConcurrency = new Gauge({
   name: 'vigil_worker_effective_concurrency',
   help: 'Effective concurrency after adaptive throttling',
@@ -225,7 +311,9 @@ export interface MetricsServer {
   readonly url: string;
 }
 
-export async function startMetricsServer(port = Number(process.env.PROMETHEUS_PORT ?? 9100)): Promise<MetricsServer> {
+export async function startMetricsServer(
+  port = Number(process.env.PROMETHEUS_PORT ?? 9100),
+): Promise<MetricsServer> {
   const server = http.createServer((req, res) => {
     if (req.url === '/metrics' && req.method === 'GET') {
       void registry

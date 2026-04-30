@@ -34,10 +34,21 @@ regexes = [
   '''0x[b]{64}''',
   '''0x[c-f]{64}''',
   '''[a-f]{64}''',
+  # Ethereum-address-shaped fixtures (40 hex). Test files use 0x000…abc,
+  # 0xffff…ffff, 0xabcdef…01 style fixtures that are obviously not
+  # secrets. gitleaks generic-api-key would otherwise flag any 40-char
+  # hex run.
+  '''0x[a-fA-F0-9]{40}''',
+  # 40-char uppercase-hex GPG fingerprint placeholders used in dossier
+  # tests (TEST_FINGERPRINT = '0123456789ABCDEF...').
+  '''[0-9A-F]{40}''',
 ]
 paths = [
-  '''.*__tests__/.*\.ts''',
-  '''.*test/.*\.ts''',
+  '''.*__tests__/.*''',
+  '''.*tests?/.*\.test\.ts''',
+  '''.*test/.*''',
+  '''.*\.test\.ts''',
+  '''.*\.test\.tsx''',
   '''packages/audit-log/__tests__/.*''',
   '''packages/db-postgres/__tests__/.*''',
   '''apps/.*/__tests__/.*''',

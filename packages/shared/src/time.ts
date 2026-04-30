@@ -10,8 +10,7 @@
  * module. Always use `now()` (or accept a Clock as a parameter for tests).
  */
 
-const ISO_INSTANT_RE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export type IsoInstant = string & { readonly __brand: 'IsoInstant' };
 export type EpochMs = number & { readonly __brand: 'EpochMs' };
@@ -75,3 +74,21 @@ export const seconds = (n: number): number => n * 1000;
 export const minutes = (n: number): number => n * 60_000;
 export const hours = (n: number): number => n * 3_600_000;
 export const days = (n: number): number => n * 86_400_000;
+
+/**
+ * Convention (AUDIT-050):
+ *
+ * - All time values inside the @vigil/* TypeScript code are `number` ms
+ *   since the Unix epoch (`EpochMs` brand). `Date.now()` style.
+ * - The federation-stream wire format uses `bigint` (or `bigint | number`)
+ *   ONLY because protobuf `int64` decodes to bigint in the gRPC binding.
+ *   See `packages/federation-stream/src/sign.ts` (`writeFieldInt64`).
+ * - Cross the boundary explicitly: `BigInt(epochMs)` on the way out,
+ *   `Number(bigintMs)` on the way in. Never let bigint leak into the
+ *   rest of the codebase — `EpochMs` and bigint are NOT interchangeable
+ *   (arithmetic, JSON, comparisons all behave differently).
+ *
+ * If a future feature needs nanosecond precision (e.g. ordering events
+ * inside the same millisecond), introduce a separate `BigIntNs` brand
+ * here rather than overloading EpochMs.
+ */

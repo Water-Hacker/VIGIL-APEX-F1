@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import { createLogger, type Logger } from '@vigil/observability';
+import { createLogger, vaultTokenRenewFailedTotal, type Logger } from '@vigil/observability';
 import { Errors } from '@vigil/shared';
 import nodeVault from 'node-vault';
 
@@ -152,6 +152,12 @@ export class VaultClient {
       this.logger.debug('vault-token-renewed');
     } catch (e) {
       this.logger.error({ err: e }, 'vault-token-renew-failed');
+      // AUDIT-058: increment a counter so an alert can fire on
+      // sustained failures (a worker silently outliving its token
+      // TTL would otherwise look like a Vault outage from the
+      // dashboard hours later).
+      const service = process.env.OTEL_SERVICE_NAME ?? 'unknown';
+      vaultTokenRenewFailedTotal.labels({ service }).inc();
     }
   }
 

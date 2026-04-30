@@ -7,40 +7,40 @@ groups:
         for: 30m
         labels: { severity: warning }
         annotations:
-          summary: "Adapter {{ $labels.source }} failing"
-          description: "Source-website change suspected. Check first-contact archive."
+          summary: 'Adapter {{ $labels.source }} failing'
+          description: 'Source-website change suspected. Check first-contact archive.'
 
       - alert: HashChainBreak
         expr: increase(vigil_errors_total{code="AUDIT_HASH_CHAIN_BROKEN"}[5m]) > 0
         labels: { severity: critical }
         annotations:
-          summary: "FATAL: hash chain integrity violated"
-          description: "Stop all writes; investigate; restore from last-known-good."
+          summary: 'FATAL: hash chain integrity violated'
+          description: 'Stop all writes; investigate; restore from last-known-good.'
 
       - alert: PolygonAnchorFailing
         expr: increase(vigil_polygon_anchor_total{outcome="failed"}[1h]) > 5
         for: 30m
         labels: { severity: warning }
         annotations:
-          summary: "Polygon anchor failing repeatedly"
+          summary: 'Polygon anchor failing repeatedly'
 
       - alert: LlmCircuitOpen
         expr: increase(vigil_llm_calls_total{outcome="error"}[5m]) > 10
         labels: { severity: warning }
         annotations:
-          summary: "LLM circuit-breaker tripped — failing over to Bedrock"
+          summary: 'LLM circuit-breaker tripped — failing over to Bedrock'
 
       - alert: LlmCostCeiling
         expr: increase(vigil_llm_cost_usd_total[1d]) > 30
         labels: { severity: warning }
         annotations:
-          summary: "LLM daily soft-ceiling exceeded"
+          summary: 'LLM daily soft-ceiling exceeded'
 
       - alert: LlmCostHardCeiling
         expr: increase(vigil_llm_cost_usd_total[1d]) > 100
         labels: { severity: critical }
         annotations:
-          summary: "LLM daily HARD ceiling — calls throttled"
+          summary: 'LLM daily HARD ceiling — calls throttled'
 
       - alert: WorkerUnhealthy
         expr: up{job="vigil-workers"} == 0
@@ -52,7 +52,7 @@ groups:
         for: 1h
         labels: { severity: warning }
         annotations:
-          summary: "Expected calibration error above alarm threshold"
+          summary: 'Expected calibration error above alarm threshold'
 
       - alert: PyWorkerUnhealthy
         expr: up{job="vigil-py-workers"} == 0
@@ -64,15 +64,15 @@ groups:
         for: 6h
         labels: { severity: info }
         annotations:
-          summary: "worker-satellite has processed no scenes in 6h"
-          description: "Either no vigil:satellite:request events arrived or the STAC API is unreachable."
+          summary: 'worker-satellite has processed no scenes in 6h'
+          description: 'Either no vigil:satellite:request events arrived or the STAC API is unreachable.'
 
       - alert: ForensicsWorkerStarved
         expr: rate(vigil_forensics_documents_total[1h]) == 0 and vigil_worker_inflight{worker="worker-image-forensics"} == 0
         for: 6h
         labels: { severity: info }
         annotations:
-          summary: "worker-image-forensics has processed no documents in 6h"
+          summary: 'worker-image-forensics has processed no documents in 6h'
 
       # Phase G — Fabric witness divergence. ANY non-zero increase is a
       # P0 incident — Postgres and Fabric disagree on at least one
@@ -82,12 +82,26 @@ groups:
         expr: increase(vigil_errors_total{service="worker-fabric-bridge", code="AUDIT_HASH_CHAIN_BROKEN"}[5m]) > 0
         labels: { severity: critical }
         annotations:
-          summary: "FATAL: Fabric witness divergence — Postgres ↔ Fabric audit-row mismatch"
-          description: "worker-fabric-bridge reported a divergence; investigate immediately. See docs/incident-response/finding-leak.md (audit forensics) + RESTORE.md."
+          summary: 'FATAL: Fabric witness divergence — Postgres ↔ Fabric audit-row mismatch'
+          description: 'worker-fabric-bridge reported a divergence; investigate immediately. See docs/incident-response/finding-leak.md (audit forensics) + RESTORE.md.'
 
       - alert: FabricBridgeBacklog
         expr: vigil_worker_inflight{worker="worker-fabric-bridge"} > 50
         for: 15m
         labels: { severity: warning }
         annotations:
-          summary: "worker-fabric-bridge backlog growing; Fabric peer may be slow or unhealthy"
+          summary: 'worker-fabric-bridge backlog growing; Fabric peer may be slow or unhealthy'
+
+      # AUDIT-076 — generic per-worker stall alert. Fires when ANY
+      # worker's consume-loop has not ticked in over an hour. Catches
+      # worker-entity / worker-pattern / worker-score / worker-extractor
+      # (and every future worker) without per-worker hand-crafting.
+      # The metric is updated on every WorkerBase.loopReadGroup
+      # iteration in packages/queue/src/worker.ts.
+      - alert: WorkerLoopStalled
+        expr: time() - vigil_worker_last_tick_seconds > 3600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Worker {{ $labels.worker }} consume-loop stalled (no tick in >1h)'
+          description: "WorkerBase.loopReadGroup has not iterated for over an hour. The worker is likely stuck in a degraded state long before /healthz returns red. Investigate the worker's logs and Redis stream consumption."

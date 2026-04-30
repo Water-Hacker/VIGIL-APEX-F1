@@ -9,7 +9,10 @@
  *   - Response sets `Cache-Control: public, max-age=60`
  *   - `limit` query param is clamped to ≤ 500
  */
+import * as dbMock from '@vigil/db-postgres';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { GET } from '../src/app/api/audit/public/route.js';
 
 vi.mock('@vigil/db-postgres', async () => {
   const sample = [
@@ -88,16 +91,22 @@ vi.mock('@vigil/db-postgres', async () => {
   };
 });
 
-import { GET } from '../src/app/api/audit/public/route.js';
-import * as dbMock from '@vigil/db-postgres';
-
+let reqCounter = 0;
 function makeReq(url: string) {
   // The route uses `req.nextUrl.searchParams`; the Node-side NextRequest
   // shim from 'next/server' would require a heavier setup. We construct
   // the minimum surface the route actually touches.
+  // AUDIT-037: route now applies a per-IP rate limit. Vary the
+  // x-forwarded-for header per test invocation so the limiter doesn't
+  // pile across the suite.
   const u = new URL(url);
+  reqCounter += 1;
+  const headers = new Map<string, string>([
+    ['x-forwarded-for', `203.0.113.${(reqCounter % 254) + 1}`],
+  ]);
   return {
     nextUrl: u,
+    headers: { get: (k: string) => headers.get(k.toLowerCase()) ?? null },
   } as unknown as Parameters<typeof GET>[0];
 }
 
@@ -138,7 +147,9 @@ describe('GET /api/audit/public — redaction contract', () => {
 
   it('clamps limit to 500 and respects category filter', async () => {
     await GET(makeReq('http://localhost/api/audit/public?limit=600&category=B'));
-    const args = (dbMock as unknown as { __getLastArgs: () => { limit?: number; category?: string } }).__getLastArgs();
+    const args = (
+      dbMock as unknown as { __getLastArgs: () => { limit?: number; category?: string } }
+    ).__getLastArgs();
     expect(args!.limit).toBe(500);
     expect(args!.category).toBe('B');
   });
@@ -155,5 +166,121 @@ describe('GET /api/audit/public — redaction contract', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { category?: string };
     expect(body.category).toBeUndefined();
+  });
+});
+
+describe('AUDIT-037 — public audit route is per-IP rate-limited', () => {
+  it('returns 429 once the per-IP burst (200 req/min) is exceeded', async () => {
+    const fixedIp = '198.51.100.123';
+    const fixedReq = () => {
+      const u = new URL('http://localhost/api/audit/public');
+      const h = new Map<string, string>([['x-forwarded-for', fixedIp]]);
+      return {
+        nextUrl: u,
+        headers: { get: (k: string) => h.get(k.toLowerCase()) ?? null },
+      } as unknown as Parameters<typeof GET>[0];
+    };
+    let last200 = 0;
+    let firstReject = 0;
+    for (let i = 0; i < 220; i++) {
+      const res = await GET(fixedReq());
+      if (res.status === 200) last200 = i;
+      if (res.status === 429 && firstReject === 0) firstReject = i;
+    }
+    expect(last200).toBeGreaterThanOrEqual(199);
+    expect(firstReject).toBeGreaterThanOrEqual(200);
+  });
+});
+
+describe('AUDIT-034 — strict ISO-8601 validation at the route boundary', () => {
+  it('accepts a strictly-formatted RFC-3339 datetime (Z suffix)', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?since=2026-04-30T12:00:00Z'));
+    expect(res.status).toBe(200);
+  });
+
+  it('accepts millisecond-precision RFC-3339', async () => {
+    const res = await GET(
+      makeReq('http://localhost/api/audit/public?since=2026-04-30T12:00:00.123Z'),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a date-only string (no time component) with 400', async () => {
+    // Date.parse('2026-04-30') succeeds (lenient), but the strict ISO-8601
+    // contract at the route boundary should reject.
+    const res = await GET(makeReq('http://localhost/api/audit/public?since=2026-04-30'));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-ISO time format with 400', async () => {
+    const res = await GET(
+      makeReq('http://localhost/api/audit/public?since=April%2030%202026%2012:00'),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects malformed garbage with 400', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?since=not-a-date'));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('AUDIT-033 — query-param coercion never produces NaN/Infinity/negative values', () => {
+  function lastArgs() {
+    return (
+      dbMock as unknown as {
+        __getLastArgs: () => { limit?: number; offset?: number };
+      }
+    ).__getLastArgs();
+  }
+
+  it('limit=-1 -> clamped to 1, no 5xx', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?limit=-1'));
+    expect(res.status).toBe(200);
+    expect(lastArgs()!.limit).toBe(1);
+  });
+
+  it('limit=NaN (non-numeric) -> clamped to 1', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?limit=foo'));
+    expect(res.status).toBe(200);
+    expect(lastArgs()!.limit).toBe(1);
+  });
+
+  it('limit=Infinity -> clamped to 500', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?limit=Infinity'));
+    expect(res.status).toBe(200);
+    expect(lastArgs()!.limit).toBe(500);
+  });
+
+  it('limit=501 -> clamped to 500 (upper-bound pin)', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?limit=501'));
+    expect(res.status).toBe(200);
+    expect(lastArgs()!.limit).toBe(500);
+  });
+
+  it('offset=-1 -> floored to 0', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?offset=-1'));
+    expect(res.status).toBe(200);
+    expect(lastArgs()!.offset).toBe(0);
+  });
+
+  it('offset=NaN (non-numeric) -> floored to 0 (NOT NaN — pre-AUDIT-033 bug)', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?offset=foo'));
+    expect(res.status).toBe(200);
+    expect(Number.isNaN(lastArgs()!.offset)).toBe(false);
+    expect(lastArgs()!.offset).toBe(0);
+  });
+
+  it('offset=Infinity -> floored to a finite value (NOT Infinity — pre-AUDIT-033 bug)', async () => {
+    const res = await GET(makeReq('http://localhost/api/audit/public?offset=Infinity'));
+    expect(res.status).toBe(200);
+    expect(Number.isFinite(lastArgs()!.offset!)).toBe(true);
+  });
+
+  it('limit and offset both produce integers (no fractional)', async () => {
+    await GET(makeReq('http://localhost/api/audit/public?limit=100.7&offset=50.3'));
+    const args = lastArgs();
+    expect(Number.isInteger(args!.limit!)).toBe(true);
+    expect(Number.isInteger(args!.offset!)).toBe(true);
   });
 });

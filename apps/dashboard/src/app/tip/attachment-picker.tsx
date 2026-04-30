@@ -1,6 +1,8 @@
 'use client';
 
-import { TipSanitise } from '@vigil/shared';
+// Deep-import — see tip/page.tsx for rationale (React Refresh +
+// CJS barrel + import.meta).
+import * as TipSanitise from '@vigil/shared/tip-sanitise';
 import { useCallback, useState } from 'react';
 
 /**

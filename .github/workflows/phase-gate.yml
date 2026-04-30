@@ -44,7 +44,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
 
       - name: Run scripts/check-decisions.ts (W-27 lint)
         # Implements OPERATIONS.md §7. Replaces the previous inline awk; the TS
@@ -61,3 +61,22 @@ jobs:
         # Every pattern definition under packages/patterns/src/ must have a
         # paired fixture-test under packages/patterns/test/.
         run: npx --yes tsx scripts/check-pattern-coverage.ts
+
+      - name: Run scripts/check-weaknesses-index.ts (AUDIT-075 drift lint)
+        # docs/weaknesses/INDEX.md must enumerate every W-*.md file on
+        # disk; per-row severity must match the file; the severity tally
+        # must total the row counts. A PR that flips a W-NN.md status
+        # without updating INDEX.md fails here.
+        run: npx --yes tsx scripts/check-weaknesses-index.ts
+
+      - name: Run scripts/check-migration-pairs.ts (AUDIT-051 round-trip lint)
+        # Every new packages/db-postgres/drizzle/NNNN_*.sql must ship a
+        # matching NNNN_*_down.sql. A closed allowlist exempts the
+        # legacy 0001..0006 + 0008 forward-only migrations.
+        run: npx --yes tsx scripts/check-migration-pairs.ts
+
+      - name: Run scripts/check-test-coverage-floor.ts (AUDIT-069 floor)
+        # Every new app under apps/* must ship at least one test file.
+        # A closed allowlist exempts 10 legacy zero-test workers; the
+        # allowlist can only shrink as workers graduate.
+        run: npx --yes tsx scripts/check-test-coverage-floor.ts

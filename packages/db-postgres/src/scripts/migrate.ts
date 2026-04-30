@@ -4,7 +4,7 @@
  * We don't use `drizzle-kit migrate` because:
  *   - it requires the schema TS files to be reachable, which complicates the
  *     production migration container;
- *   - we hand-curate the SQL (000_bootstrap, 0001_init) for fine-grained
+ *   - we hand-curate the SQL (0000_bootstrap, 0001_init) for fine-grained
  *     control of triggers / RLS / GRANTs that drizzle-kit doesn't generate.
  *
  * Strategy: a `_vigil_migrations(name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ)`
@@ -32,8 +32,14 @@ async function main(): Promise<void> {
       )
     `);
 
+    // Forward migrations only — files matching `*_down.sql` are
+    // rollback partners (one per forward migration that ships an
+    // inverse) and must NEVER be applied as part of the forward
+    // sweep, otherwise we'd undo the schema we just created.
+    // Rollbacks are run manually via `drizzle-kit drop` or the
+    // dedicated reset workflow.
     const files = (await readdir(migrationsDir))
-      .filter((f) => f.endsWith('.sql'))
+      .filter((f) => f.endsWith('.sql') && !f.endsWith('_down.sql'))
       .sort();
     for (const file of files) {
       const r = await client.query<{ name: string }>(
@@ -48,10 +54,7 @@ async function main(): Promise<void> {
       await client.query('BEGIN');
       try {
         await client.query(sql);
-        await client.query(
-          'INSERT INTO _vigil_migrations (name) VALUES ($1)',
-          [file],
-        );
+        await client.query('INSERT INTO _vigil_migrations (name) VALUES ($1)', [file]);
         await client.query('COMMIT');
         logger.info({ file }, 'migration-applied');
       } catch (e) {

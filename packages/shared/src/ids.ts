@@ -117,11 +117,18 @@ export function asProposalIndex(s: string): ProposalIndex {
 
 export function asEthAddress(s: string): EthAddress {
   if (!ETH_ADDRESS.test(s)) throw new Error(`Invalid EthAddress: ${s}`);
+  // AUDIT-044: `.toLowerCase()` (no arg) is locale-invariant per the ES
+  // spec — only `.toLocaleLowerCase()` could exhibit the Turkish-İ
+  // bug-class. The ETH_ADDRESS regex above also rejects any non-ASCII
+  // character before this line runs, so even a future regression to
+  // `.toLocaleLowerCase()` would not produce 'ı' or 'i̇' here.
+  // Pinned by ids.test.ts AUDIT-044 block.
   return s.toLowerCase() as EthAddress;
 }
 
 export function asSha256Hex(s: string): Sha256Hex {
   if (!SHA256_HEX.test(s.toLowerCase())) throw new Error(`Invalid sha256 hex: ${s}`);
+  // AUDIT-044: same locale-invariance argument as asEthAddress.
   return s.toLowerCase() as Sha256Hex;
 }
 

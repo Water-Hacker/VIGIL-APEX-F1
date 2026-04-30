@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { decideProposal } from '../../../../../lib/adapter-repair.server';
+import { decideProposal, ProposalNotEligibleError } from '../../../../../lib/adapter-repair.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +26,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const decidedBy = req.headers.get('x-vigil-username') ?? 'unknown';
-  await decideProposal(parsed.data.proposal_id, parsed.data.decision, decidedBy, parsed.data.reason);
+  try {
+    await decideProposal(
+      parsed.data.proposal_id,
+      parsed.data.decision,
+      decidedBy,
+      parsed.data.reason,
+    );
+  } catch (err) {
+    // AUDIT-006: a stale UI click on an already-decided / unknown
+    // proposal returns 409 (Conflict) so the operator can refresh.
+    if (err instanceof ProposalNotEligibleError) {
+      return NextResponse.json(
+        {
+          error: 'not_eligible',
+          proposal_id: err.proposalId,
+          attempted: err.attemptedDecision,
+        },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
   return NextResponse.json({ ok: true });
 }

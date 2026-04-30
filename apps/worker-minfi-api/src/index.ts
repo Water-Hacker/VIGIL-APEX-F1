@@ -20,7 +20,13 @@ import IORedis from 'ioredis';
 
 const logger = createLogger({ service: 'worker-minfi-api' });
 
-function loadMinfiMtls(): { cert: Buffer; key: Buffer; ca: Buffer; requestCert: true; rejectUnauthorized: true } {
+function loadMinfiMtls(): {
+  cert: Buffer;
+  key: Buffer;
+  ca: Buffer;
+  requestCert: true;
+  rejectUnauthorized: true;
+} {
   const certPath = process.env.MINFI_API_TLS_CERT ?? '/run/secrets/minfi_tls_cert';
   const keyPath = process.env.MINFI_API_TLS_KEY ?? '/run/secrets/minfi_tls_key';
   const caPath = process.env.MINFI_API_TLS_CA ?? '/run/secrets/minfi_tls_ca';
@@ -74,8 +80,19 @@ async function main(): Promise<void> {
       process.env.REDIS_PASSWORD_FILE ?? '/run/secrets/redis_password',
       'utf8',
     ).trim();
-  } catch {
+  } catch (err) {
+    // AUDIT-011: log the fallback so an operator notices the docker
+    // secret mount is missing instead of silently downgrading to env
+    // var. Don't include the password value in the log.
     redisPassword = process.env.REDIS_PASSWORD;
+    logger.warn(
+      {
+        err,
+        redisPasswordFile: process.env.REDIS_PASSWORD_FILE ?? '/run/secrets/redis_password',
+        fallback: redisPassword !== undefined ? 'env-var' : 'none',
+      },
+      'minfi-api-redis-password-secret-file-missing',
+    );
   }
   const redis = new IORedis({
     host: redisHost,
@@ -131,9 +148,12 @@ async function main(): Promise<void> {
         reply.code(401);
         return { error: 'invalid-signature' };
       }
-    } else if (process.env.NODE_ENV === 'production') {
-      // Fail closed in prod — no signature verification path means no
-      // way to authenticate the caller and we MUST not score blindly.
+    } else if (process.env.NODE_ENV !== 'development') {
+      // AUDIT-010: fail closed for everything that ISN'T development
+      // (production, staging, test, undefined env). Pre-fix the
+      // condition was `=== 'production'` which let staging silently
+      // accept unsigned requests. The architect's intent is "dev
+      // is the only env that may run without the public key".
       reply.code(503);
       return { error: 'minfi-pubkey-not-provisioned' };
     }
@@ -176,7 +196,13 @@ async function main(): Promise<void> {
     }
     const maxPosterior = findings.reduce((acc, f) => Math.max(acc, f.posterior ?? 0), 0);
     const band: Schemas.MinfiScoreBand =
-      maxPosterior >= 0.85 ? 'red' : maxPosterior >= 0.55 ? 'orange' : maxPosterior >= 0.30 ? 'amber' : 'green';
+      maxPosterior >= 0.85
+        ? 'red'
+        : maxPosterior >= 0.55
+          ? 'orange'
+          : maxPosterior >= 0.3
+            ? 'amber'
+            : 'green';
 
     const computedAt = new Date();
     const validUntil = new Date(computedAt.getTime() + 24 * 3_600_000);
@@ -191,16 +217,15 @@ async function main(): Promise<void> {
       explanation_fr: bandExplanationFr(band, findings.length),
       explanation_en: bandExplanationEn(band, findings.length),
       caveats_fr: 'Décision finale incombe à l’ordonnateur ; cette API conseille, ne bloque pas.',
-      caveats_en: 'Final decision rests with the disbursing officer; this API advises, it does not block.',
+      caveats_en:
+        'Final decision rests with the disbursing officer; this API advises, it does not block.',
       computed_at: computedAt.toISOString(),
       valid_until: validUntil.toISOString(),
     };
 
     // ECDSA-sign the canonical JSON
     const canonical = JSON.stringify(responseUnsigned);
-    const sig = createSign('SHA256')
-      .update(canonical)
-      .sign(expose(responsePrivKey), 'base64');
+    const sig = createSign('SHA256').update(canonical).sign(expose(responsePrivKey), 'base64');
 
     const response: Schemas.MinfiScoreResponse = { ...responseUnsigned, signature: sig };
     await redis.set(cacheKey, JSON.stringify(response), 'EX', 86_400);
@@ -214,14 +239,21 @@ async function main(): Promise<void> {
 }
 
 function bandTitleFr(b: Schemas.MinfiScoreBand): string {
-  return { green: 'Risque faible', amber: 'Risque modéré', orange: 'Risque élevé', red: 'Risque critique' }[b];
+  return {
+    green: 'Risque faible',
+    amber: 'Risque modéré',
+    orange: 'Risque élevé',
+    red: 'Risque critique',
+  }[b];
 }
 function bandTitleEn(b: Schemas.MinfiScoreBand): string {
-  return { green: 'Low risk', amber: 'Moderate risk', orange: 'High risk', red: 'Critical risk' }[b];
+  return { green: 'Low risk', amber: 'Moderate risk', orange: 'High risk', red: 'Critical risk' }[
+    b
+  ];
 }
 function bandExplanationFr(b: Schemas.MinfiScoreBand, n: number): string {
   return b === 'green'
-    ? "Aucun constat actif n’associe le bénéficiaire à une procédure VIGIL APEX en cours."
+    ? 'Aucun constat actif n’associe le bénéficiaire à une procédure VIGIL APEX en cours.'
     : `Le bénéficiaire est associé à ${n} constat(s) actif(s) — band=${b}. Voir les références jointes.`;
 }
 function bandExplanationEn(b: Schemas.MinfiScoreBand, n: number): string {

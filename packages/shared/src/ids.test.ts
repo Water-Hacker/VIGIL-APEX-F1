@@ -55,6 +55,42 @@ describe('asEthAddress', () => {
   });
 });
 
+describe('AUDIT-044 — asEthAddress canonicalization is locale-invariant', () => {
+  it('all-uppercase A-F input maps to all-lowercase a-f exactly', () => {
+    const a = asEthAddress('0xABCDEF0123456789ABCDEF0123456789ABCDEF01');
+    expect(a).toBe('0xabcdef0123456789abcdef0123456789abcdef01');
+  });
+
+  it('mixed case canonicalises consistently across two independent calls', () => {
+    const a = asEthAddress('0xAaBbCcDdEeFf0123456789aAbBcCdDeEfF012345');
+    const b = asEthAddress('0xAaBbCcDdEeFf0123456789aAbBcCdDeEfF012345');
+    expect(a).toBe(b);
+  });
+
+  it('regex allow-list rejects any non-ASCII character (Turkish-İ defence in depth)', () => {
+    // The audit description suggested .toLowerCase() could exhibit
+    // Turkish-İ behaviour. Per ES spec, .toLowerCase() (no arg) is
+    // locale-invariant — only .toLocaleLowerCase() takes a locale and
+    // can produce 'ı' from 'I' under tr-TR. The regex below also
+    // forbids any non-[0-9a-fA-F] character, so even Turkish input
+    // would reject before .toLowerCase() runs.
+    expect(() => asEthAddress('0xİbCdEf0123456789AbCdEf0123456789AbCdEf01')).toThrow();
+    expect(() => asEthAddress('0xAbCdEf0123456789ı_Cdef0123456789AbCdEf01')).toThrow();
+  });
+
+  it('canonicalised address is byte-identical to .toLowerCase() of the input (locale-invariant by spec)', () => {
+    const inputs = [
+      '0x0123456789ABCDEFabcdef0123456789ABCDEFab',
+      '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '0xffffffffffffffffffffffffffffffffffffffff',
+    ];
+    for (const s of inputs) {
+      const out = asEthAddress(s);
+      expect(out).toBe(s.toLowerCase());
+    }
+  });
+});
+
 describe('asSha256Hex', () => {
   it('lowercases valid hex', () => {
     const h = 'A'.repeat(64);

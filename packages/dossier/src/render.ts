@@ -1,19 +1,16 @@
 import { createHash } from 'node:crypto';
 
+import { createLogger, type Logger } from '@vigil/observability';
 import { Routing } from '@vigil/shared';
-import {
-  AlignmentType,
-  Document,
-  HeadingLevel,
-  ImageRun,
-  Packer,
-  Paragraph,
-  TextRun,
-} from 'docx';
+import { AlignmentType, Document, HeadingLevel, ImageRun, Packer, Paragraph, TextRun } from 'docx';
 
 import { generateQrPng } from './qr.js';
 
 import type { DossierInput, DossierRenderResult } from './types.js';
+
+// AUDIT-055: SDK-level emits so dossier-pipeline failures don't rely
+// on the worker to log them.
+const defaultLogger = (): Logger => createLogger({ service: 'dossier-render' });
 
 /**
  * Render a dossier to .docx bytes (deterministic).
@@ -25,10 +22,23 @@ import type { DossierInput, DossierRenderResult } from './types.js';
  *   - Map iteration order is preserved by docx-js
  *   - QR code is deterministic for identical payload
  */
-export async function renderDossierDocx(input: DossierInput): Promise<DossierRenderResult> {
+export async function renderDossierDocx(
+  input: DossierInput,
+  opts: { logger?: Logger } = {},
+): Promise<DossierRenderResult> {
+  const logger = opts.logger ?? defaultLogger();
   const t = input.language === 'fr' ? FR : EN;
 
-  const qrPng = await generateQrPng(input.publicLedgerCheckpointUrl);
+  let qrPng: Buffer;
+  try {
+    qrPng = await generateQrPng(input.publicLedgerCheckpointUrl);
+  } catch (err) {
+    logger.error(
+      { err, ref: input.ref, url: input.publicLedgerCheckpointUrl },
+      'dossier-render-qr-failed',
+    );
+    throw err;
+  }
 
   const headers = Routing.recipientBodyHeaders(input.recipientBody);
   const recipientHeader = input.language === 'fr' ? headers.fr : headers.en;
@@ -36,7 +46,13 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
   const cover = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: 'RÉPUBLIQUE DU CAMEROUN — REPUBLIC OF CAMEROON', bold: true, size: 22 })],
+      children: [
+        new TextRun({
+          text: 'RÉPUBLIQUE DU CAMEROUN — REPUBLIC OF CAMEROON',
+          bold: true,
+          size: 22,
+        }),
+      ],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -101,7 +117,9 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
     new Paragraph({
       children: [
         new TextRun({ text: `${t.field_title}: `, bold: true }),
-        new TextRun({ text: input.language === 'fr' ? input.finding.title_fr : input.finding.title_en }),
+        new TextRun({
+          text: input.language === 'fr' ? input.finding.title_fr : input.finding.title_en,
+        }),
       ],
     }),
     new Paragraph({
@@ -151,7 +169,9 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
         new Paragraph({
           children: [
             new TextRun({ text: `${s.pattern_id ?? s.source}`, bold: true }),
-            new TextRun({ text: ` — strength ${s.strength.toFixed(2)}, weight ${s.weight.toFixed(2)}` }),
+            new TextRun({
+              text: ` — strength ${s.strength.toFixed(2)}, weight ${s.weight.toFixed(2)}`,
+            }),
           ],
         }),
     ),
@@ -206,11 +226,32 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
     ],
   });
 
-  const docxBytes = await Packer.toBuffer(doc);
-  // Hash a canonical model (input + qr) so reproducibility test works
-  const canonical = JSON.stringify(input, Object.keys(input).sort());
+  let docxBytes: Buffer;
+  try {
+    docxBytes = await Packer.toBuffer(doc);
+  } catch (err) {
+    logger.error({ err, ref: input.ref }, 'dossier-render-pack-failed');
+    throw err;
+  }
+  // Hash a canonical model (input + qr) so reproducibility test works.
+  // We canonicalise recursively with sorted keys at every depth — passing
+  // an array of top-level keys to JSON.stringify's replacer would silently
+  // filter every nested property whose name isn't a top-level key
+  // (e.g., finding.posterior, auditAnchor.polygonTxHash), which made the
+  // hash insensitive to most input changes (caught by AUDIT-063 tests).
+  const canonical = canonicalJson(input as unknown);
   const contentHash = createHash('sha256').update(canonical).update(qrPng).digest('hex');
   return { docxBytes, contentHash };
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map((v) => canonicalJson(v)).join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalJson(obj[k])).join(',') + '}';
 }
 
 function classificationColour(c: 'restreint' | 'confidentiel' | 'public'): string {

@@ -5,7 +5,6 @@ import { bodyHash, rowHash } from './canonical.js';
 
 import type { Pool } from 'pg';
 
-
 /**
  * HashChain — append-only, hash-linked audit log in Postgres.
  *
@@ -123,7 +122,14 @@ export class HashChain {
         };
       } catch (e) {
         lastErr = e;
-        await client.query('ROLLBACK').catch(() => {});
+        // AUDIT-012 — the swallow is intentional (the inner error is the
+        // load-bearing one we'll retry on; ROLLBACK failures during
+        // cleanup are uninteresting unless they recur). Log at debug so
+        // a recurring "connection already closed" pattern is at least
+        // visible in detailed traces.
+        await client.query('ROLLBACK').catch((rbErr) => {
+          this.logger.debug({ err: rbErr }, 'audit-chain-rollback-after-error-failed');
+        });
         // Serialization failure ⇒ retry
       } finally {
         client.release();

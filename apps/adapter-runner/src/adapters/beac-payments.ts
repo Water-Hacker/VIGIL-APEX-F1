@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
 import { request } from 'undici';
 import { z } from 'zod';
@@ -52,7 +48,9 @@ const zBeacPayment = z.object({
   }),
   amount_xaf_equivalent: z.number().int(),
   currency: z.string().length(3),
-  flags: z.array(z.enum(['cross_border', 'sanctioned_jurisdiction', 'sanctions_match', 'fatf_greylist'])),
+  flags: z.array(
+    z.enum(['cross_border', 'sanctioned_jurisdiction', 'sanctions_match', 'fatf_greylist']),
+  ),
 });
 const zBeacDigest = z.object({
   generated_at: z.string(),
@@ -79,6 +77,14 @@ class BeacPaymentsAdapter extends Adapter {
     if (process.env.BEAC_ENABLED !== '1') {
       this.logger.info('beac-payments disabled (MOU pending) — no events emitted');
       return { events: [], documents: [], fetchedPages: 0 };
+    }
+    // AUDIT-002 — same shape as AUDIT-001: refuse the run when ENABLED was
+    // flipped without the MOU countersignature, instead of silently passing
+    // through to a downstream API that will reject every unsigned request.
+    if (process.env.BEAC_MOU_ACK !== '1') {
+      throw new Error(
+        'beac-payments: BEAC_ENABLED=1 but BEAC_MOU_ACK is not "1"; refusing to run before the MOU is countersigned',
+      );
     }
 
     const baseUrl = process.env.BEAC_BASE_URL ?? DEFAULT_BASE_URL;

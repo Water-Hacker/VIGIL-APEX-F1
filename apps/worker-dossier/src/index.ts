@@ -4,12 +4,7 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import {
-  DossierRepo,
-  EntityRepo,
-  FindingRepo,
-  getDb,
-} from '@vigil/db-postgres';
+import { DossierRepo, EntityRepo, FindingRepo, getDb } from '@vigil/db-postgres';
 import { renderDossierDocx, gpgDetachSign } from '@vigil/dossier';
 import {
   createLogger,
@@ -69,9 +64,7 @@ function rowToCanonical(
   };
 }
 
-function rowToSignal(
-  row: Awaited<ReturnType<FindingRepo['getSignals']>>[number],
-): Schemas.Signal {
+function rowToSignal(row: Awaited<ReturnType<FindingRepo['getSignals']>>[number]): Schemas.Signal {
   return {
     id: row.id,
     finding_id: row.finding_id,
@@ -132,9 +125,7 @@ class DossierWorker extends WorkerBase<Payload> {
       ...finding,
       detected_at: finding.detected_at.toISOString(),
       last_signal_at: finding.last_signal_at.toISOString(),
-      council_voted_at: finding.council_voted_at
-        ? finding.council_voted_at.toISOString()
-        : null,
+      council_voted_at: finding.council_voted_at ? finding.council_voted_at.toISOString() : null,
       closed_at: finding.closed_at ? finding.closed_at.toISOString() : null,
     } as unknown as Schemas.Finding;
 
@@ -160,9 +151,19 @@ class DossierWorker extends WorkerBase<Payload> {
     });
 
     // Convert .docx to .pdf via LibreOffice headless (deterministic with --calc-headless options)
-    const dir = path.join(tmpdir(), `vigil-dossier-${env.id}`);
+    // AUDIT-039 — defense-in-depth path-traversal guard. env.id and ref are
+    // both UUIDs / formatted refs by construction (Ids.formatDossierRef +
+    // queue envelope id), so this guard never trips today; if a refactor
+    // ever lets a `..` or `/` through, the spawn(soffice,...) call below
+    // would otherwise be the first thing to notice.
+    const safeEnvId = path.basename(env.id);
+    const safeRef = path.basename(ref);
+    if (safeEnvId !== env.id || safeRef !== ref) {
+      throw new Error(`dossier path component contains a separator: env.id=${env.id} ref=${ref}`);
+    }
+    const dir = path.join(tmpdir(), `vigil-dossier-${safeEnvId}`);
     await mkdir(dir, { recursive: true });
-    const docxPath = path.join(dir, `${ref}.docx`);
+    const docxPath = path.join(dir, `${safeRef}.docx`);
     await writeFile(docxPath, docxResult.docxBytes);
     await runLibreOffice(docxPath, dir);
     const pdfPath = docxPath.replace(/\.docx$/, '.pdf');
@@ -261,12 +262,16 @@ function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn('soffice', [
       '--headless',
-      '--convert-to', 'pdf:writer_pdf_Export:UseTaggedPDF=false;ExportFormFields=false;ReduceImageResolution=false',
-      '--outdir', outDir,
+      '--convert-to',
+      'pdf:writer_pdf_Export:UseTaggedPDF=false;ExportFormFields=false;ReduceImageResolution=false',
+      '--outdir',
+      outDir,
       docxPath,
     ]);
     child.on('error', reject);
-    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`soffice exited ${code}`))));
+    child.on('close', (code) =>
+      code === 0 ? resolve() : reject(new Error(`soffice exited ${code}`)),
+    );
   });
 }
 
@@ -286,8 +291,11 @@ async function main(): Promise<void> {
   const entityRepo = new EntityRepo(db);
 
   const gpgFingerprint = process.env.GPG_FINGERPRINT;
-  if (!gpgFingerprint || gpgFingerprint.startsWith('PLACEHOLDER') ||
-      !/^[0-9A-Fa-f]{40}$/.test(gpgFingerprint.replace(/\s+/g, ''))) {
+  if (
+    !gpgFingerprint ||
+    gpgFingerprint.startsWith('PLACEHOLDER') ||
+    !/^[0-9A-Fa-f]{40}$/.test(gpgFingerprint.replace(/\s+/g, ''))
+  ) {
     throw new Error(
       'GPG_FINGERPRINT is unset, PLACEHOLDER, or not a valid 40-hex OpenPGP fingerprint; refusing to start worker-dossier',
     );

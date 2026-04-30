@@ -117,6 +117,17 @@ jobs:
         run: pnpm --filter @vigil/db-postgres run migrate
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
+      # Workspace tests — every package's `test` script runs. Coverage
+      # is collected only for packages that opt in via a `test:coverage`
+      # script (currently @vigil/queue, @vigil/shared, @vigil/observability,
+      # plus @vigil/patterns via the dedicated step below). The split
+      # exists because most packages don't ship @vitest/coverage-v8 as a
+      # dep — adding it everywhere is a separate workspace cleanup.
+      - run: pnpm run test
+        env:
+          POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
+          INTEGRATION_DB_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
+          REDIS_URL: redis://localhost:6379
       - run: pnpm run test:coverage
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
@@ -179,7 +190,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # `@playwright/test` is a devDep of apps/dashboard, not the
+      # workspace root, so `pnpm exec` from root cannot find the
+      # `playwright` CLI. Run via the dashboard filter so pnpm
+      # resolves the binary from apps/dashboard/node_modules/.bin/.
+      - run: pnpm --filter dashboard exec playwright install --with-deps chromium
       - run: pnpm run build
       - name: Apply DB migrations
         run: pnpm --filter @vigil/db-postgres run migrate

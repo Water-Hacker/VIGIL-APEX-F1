@@ -315,3 +315,85 @@ describe('PatternRegistry — singleton fallback', () => {
     expect(typeof PatternRegistry.applicableTo).toBe('function');
   });
 });
+
+describe('AUDIT-059 — pattern dispatch emits per-outcome timing histogram', () => {
+  it('observes the ok branch with outcome="ok" on a successful detect', async () => {
+    const { patternEvalDurationMs } = await import('@vigil/observability');
+    // Reset counts so this test stands on its own. prom-client doesn't
+    // expose a per-label reset; we read the snapshot before/after instead.
+    const before = await patternEvalDurationMs.get();
+    const okBefore = countOutcomeSamples(before, 'P-A-001', 'ok');
+
+    await dispatchPatterns(makeSubject(), ctxStub, {
+      patterns: [fakePattern({ id: 'P-A-001' })],
+    });
+
+    const after = await patternEvalDurationMs.get();
+    const okAfter = countOutcomeSamples(after, 'P-A-001', 'ok');
+    expect(okAfter - okBefore).toBe(1);
+  });
+
+  it('observes outcome="timeout" on a pattern that exceeds its budget', async () => {
+    const { patternEvalDurationMs } = await import('@vigil/observability');
+    const before = await patternEvalDurationMs.get();
+    const tBefore = countOutcomeSamples(before, 'P-A-002', 'timeout');
+
+    await dispatchPatterns(makeSubject(), ctxStub, {
+      timeoutMs: 5,
+      patterns: [
+        fakePattern({
+          id: 'P-A-002',
+          detect: () => new Promise(() => undefined),
+        }),
+      ],
+    });
+
+    const after = await patternEvalDurationMs.get();
+    const tAfter = countOutcomeSamples(after, 'P-A-002', 'timeout');
+    expect(tAfter - tBefore).toBe(1);
+  });
+
+  it('observes outcome="error" when the pattern throws', async () => {
+    const { patternEvalDurationMs } = await import('@vigil/observability');
+    const before = await patternEvalDurationMs.get();
+    const eBefore = countOutcomeSamples(before, 'P-A-003', 'error');
+
+    await dispatchPatterns(makeSubject(), ctxStub, {
+      patterns: [
+        fakePattern({
+          id: 'P-A-003',
+          detect: async () => {
+            throw new Error('boom');
+          },
+        }),
+      ],
+    });
+
+    const after = await patternEvalDurationMs.get();
+    const eAfter = countOutcomeSamples(after, 'P-A-003', 'error');
+    expect(eAfter - eBefore).toBe(1);
+  });
+});
+
+function countOutcomeSamples(
+  snapshot: {
+    values: ReadonlyArray<{
+      metricName?: string;
+      labels: Record<string, string | number>;
+      value: number;
+    }>;
+  },
+  patternId: string,
+  outcome: string,
+): number {
+  for (const v of snapshot.values) {
+    if (
+      v.metricName === 'vigil_pattern_eval_duration_ms_count' &&
+      v.labels.pattern_id === patternId &&
+      v.labels.outcome === outcome
+    ) {
+      return v.value;
+    }
+  }
+  return 0;
+}
