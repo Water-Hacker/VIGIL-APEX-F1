@@ -9,7 +9,7 @@
  *   packages/db-postgres/drizzle/NNNN_<slug>.sql        (forward)
  *   packages/db-postgres/drizzle/NNNN_<slug>_down.sql   (inverse)
  *
- * The bootstrap (`000_bootstrap.sql`) and a closed allowlist of legacy
+ * The bootstrap (`0000_bootstrap.sql`) and a closed allowlist of legacy
  * forward-only migrations (0001..0006, 0008) are exempt — those pre-date
  * the round-trip discipline. Every NNNN >= 0009 must pair.
  *
@@ -65,7 +65,7 @@ function main(): void {
   let legacyCount = 0;
 
   for (const p of pairs) {
-    if (p.stem === '000_bootstrap') {
+    if (p.stem === '0000_bootstrap') {
       legacyCount++;
       continue;
     }

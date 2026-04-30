@@ -4,7 +4,7 @@
  * We don't use `drizzle-kit migrate` because:
  *   - it requires the schema TS files to be reachable, which complicates the
  *     production migration container;
- *   - we hand-curate the SQL (000_bootstrap, 0001_init) for fine-grained
+ *   - we hand-curate the SQL (0000_bootstrap, 0001_init) for fine-grained
  *     control of triggers / RLS / GRANTs that drizzle-kit doesn't generate.
  *
  * Strategy: a `_vigil_migrations(name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ)`
