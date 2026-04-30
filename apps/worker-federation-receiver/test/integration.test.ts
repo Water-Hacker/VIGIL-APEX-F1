@@ -1,10 +1,8 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from 'node:net';
-
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   FederationStreamClient,
@@ -15,6 +13,7 @@ import {
   type HealthBeaconRequest,
   type ReceiverHandlers,
 } from '@vigil/federation-stream';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * Free-port grabber. Bind a server to :0, read the chosen port, close it.
@@ -212,4 +211,28 @@ describe('federation-stream end-to-end (in-process, insecure)', () => {
       await tamperClient.close();
     }
   }, 15_000);
+
+  it('AUDIT-067 — burst of 500 envelopes is fully accepted (no drops, no resolver leaks)', async () => {
+    // Saturate the in-process pair with a large burst. The client
+    // batches at batchSize=10 / batchIntervalMs=50, so a 500-envelope
+    // burst exercises ~50 sequential batches under the pendingResolvers
+    // contract. The integration assertion: every envelope acks (or is
+    // explicitly rejected); none are silently dropped.
+    const N = 500;
+    const baseTs = Date.now();
+    const promises = Array.from({ length: N }, (_, i) =>
+      client.push({
+        envelopeId: `01928c66-7e2f-7000-9000-${String(i).padStart(12, '0')}`,
+        region: 'CE',
+        sourceId: 'audit-067-burst',
+        dedupKey: `audit-067-dedup-${i}`,
+        payload: Buffer.from(`burst-${i}`, 'utf8'),
+        observedAtMs: baseTs + i,
+      }),
+    );
+    const acks = await Promise.all(promises);
+    const acceptedAcrossBatches = new Set<string>();
+    for (const ack of acks) for (const id of ack.accepted) acceptedAcrossBatches.add(id);
+    expect(acceptedAcrossBatches.size).toBe(N);
+  }, 60_000);
 });
