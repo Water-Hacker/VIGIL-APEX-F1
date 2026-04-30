@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import * as dbPkg from '@vigil/db-postgres';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runQuarterlyAuditExport } from '../src/triggers/quarterly-audit-export.js';
@@ -101,7 +102,11 @@ function fixtureEvents() {
   ] as const;
 }
 
-function makeDeps(opts: { rows: ReturnType<typeof fixtureEvents>; existingPeriods?: string[]; salt?: string }) {
+function makeDeps(opts: {
+  rows: ReturnType<typeof fixtureEvents>;
+  existingPeriods?: string[];
+  salt?: string;
+}) {
   const listPublic = vi
     .fn<
       [{ sinceIso?: string; untilIso?: string; limit?: number; offset?: number }],
@@ -127,8 +132,8 @@ function makeDeps(opts: { rows: ReturnType<typeof fixtureEvents>; existingPeriod
   } as unknown as Parameters<typeof runQuarterlyAuditExport>[0]['db'];
 
   const exportRepo = {
-    list: vi.fn(async () =>
-      (opts.existingPeriods ?? []).map((p) => ({ period_label: p })) as never,
+    list: vi.fn(
+      async () => (opts.existingPeriods ?? []).map((p) => ({ period_label: p })) as never,
     ),
     record: vi.fn(async (_row: Record<string, unknown>) => undefined),
   } as never;
@@ -169,8 +174,9 @@ function makeDeps(opts: { rows: ReturnType<typeof fixtureEvents>; existingPeriod
   };
 }
 
-// Patch UserActionEventRepo.prototype.listPublic from the package.
-import * as dbPkg from '@vigil/db-postgres';
+// dbPkg.UserActionEventRepo.prototype.listPublic is patched below; the
+// import lives at the top of the file (TS hoists `import` declarations
+// regardless of position, and ESLint import/order requires this).
 
 let originalListPublic: typeof dbPkg.UserActionEventRepo.prototype.listPublic;
 
@@ -279,5 +285,39 @@ describe('runQuarterlyAuditExport (DECISION-012)', () => {
     expect(result.status).toBe('no_events');
     expect(spies.kuboClient.add).not.toHaveBeenCalled();
     expect(spies.exportRepo.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('AUDIT-030 — quarterly-audit-export does not use new Function as ESM bridge', () => {
+  it('the trigger source contains no new Function() and no eslint-disable for no-new-func', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const path = await import('node:path');
+    const src = await readFile(
+      path.resolve(__dirname, '../src/triggers/quarterly-audit-export.ts'),
+      'utf8',
+    );
+    // Indirect-eval check: any `new Function(...)` in this file is a
+    // regression of AUDIT-030's fix. The native `await import(...)` is
+    // the supported path under module: Node16.
+    expect(src).not.toMatch(/\bnew\s+Function\s*\(/);
+    expect(src).not.toMatch(/eslint-disable[^\n]*no-new-func/);
+  });
+
+  it('the compiled output uses native dynamic import, not require / Function shim', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const path = await import('node:path');
+    const distPath = path.resolve(__dirname, '../dist/triggers/quarterly-audit-export.js');
+    let dist: string;
+    try {
+      dist = await readFile(distPath, 'utf8');
+    } catch {
+      // dist may not exist on a fresh checkout that hasn't run `build`.
+      // Skip in that case rather than fail noisily.
+      return;
+    }
+    // The actual call site should be a native await import(...) of
+    // 'kubo-rpc-client'. require()-form would defeat the ESM-only dep.
+    expect(dist).toMatch(/await import\(['"]kubo-rpc-client['"]\)/);
+    expect(dist).not.toMatch(/\bnew\s+Function\s*\(/);
   });
 });

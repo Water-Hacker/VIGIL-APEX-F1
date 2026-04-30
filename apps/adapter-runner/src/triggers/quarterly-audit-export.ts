@@ -2,17 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { HashChain } from '@vigil/audit-chain';
 import { hashPii, toPublicView } from '@vigil/audit-log';
-import {
-  PublicExportRepo,
-  UserActionEventRepo,
-  type Db,
-} from '@vigil/db-postgres';
+import { PublicExportRepo, UserActionEventRepo, type Db } from '@vigil/db-postgres';
 
 import { currentQuarterWindow } from './quarter-window.js';
 
 import type { Logger } from '@vigil/observability';
 import type { Pool } from 'pg';
-
 
 /**
  * DECISION-012 — TAL-PA quarterly anonymised export.
@@ -58,7 +53,9 @@ export interface QuarterlyAuditExportDeps {
   /** Override the IPFS API URL (useful in tests). */
   readonly ipfsApiUrl?: string;
   /** Override the kubo client (useful in tests). */
-  readonly kuboClient?: { add: (data: Uint8Array, opts?: unknown) => Promise<{ cid: { toString(): string } }> };
+  readonly kuboClient?: {
+    add: (data: Uint8Array, opts?: unknown) => Promise<{ cid: { toString(): string } }>;
+  };
 }
 
 export interface QuarterlyAuditExportResult {
@@ -74,9 +71,7 @@ export async function runQuarterlyAuditExport(
 ): Promise<QuarterlyAuditExportResult> {
   const now = (deps.now ?? (() => new Date()))();
   // Audit the prior quarter — pick a reference 15 days into the previous month.
-  const lastQuarterRef = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15),
-  );
+  const lastQuarterRef = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
   const window = currentQuarterWindow(lastQuarterRef);
 
   const salt = deps.salt ?? process.env.AUDIT_PUBLIC_EXPORT_SALT ?? '';
@@ -192,7 +187,9 @@ export async function runQuarterlyAuditExport(
 
   const kubo =
     deps.kuboClient ??
-    ((await loadKuboClient(deps.ipfsApiUrl ?? process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001')) as unknown as NonNullable<QuarterlyAuditExportDeps['kuboClient']>);
+    ((await loadKuboClient(
+      deps.ipfsApiUrl ?? process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001',
+    )) as unknown as NonNullable<QuarterlyAuditExportDeps['kuboClient']>);
   const added = await kubo.add(csvBytes, { pin: true, cidVersion: 1 });
   const csvCid = added.cid.toString();
 
@@ -253,14 +250,19 @@ export async function runQuarterlyAuditExport(
 async function loadKuboClient(url: string): Promise<{
   add: (data: Uint8Array, opts?: unknown) => Promise<{ cid: { toString(): string } }>;
 }> {
-  // The only way to do a real ES dynamic import from a CJS module.
-  // eslint-disable-next-line no-new-func
-  const dynamicImport = new Function('s', 'return import(s)') as (s: string) => Promise<{
+  // AUDIT-030: native dynamic import. The CJS-with-ESM-dep scenario is
+  // why this used to be wrapped in an indirect-eval shim — the older
+  // `module: CommonJS` TS target rewrote `import(x)` to `require(x)`,
+  // breaking ESM-only kubo-rpc-client. Under `module: Node16`
+  // (workspace-wide since DECISION-014c), TypeScript preserves native
+  // dynamic `import()` calls in CJS output, so the shim is no longer
+  // needed. (Regression-pinned by __tests__/quarterly-audit-export.test.ts
+  // under the AUDIT-030 describe block.)
+  const mod = (await import('kubo-rpc-client')) as {
     create: (opts: { url: string }) => {
       add: (data: Uint8Array, opts?: unknown) => Promise<{ cid: { toString(): string } }>;
     };
-  }>;
-  const mod = await dynamicImport('kubo-rpc-client');
+  };
   return mod.create({ url });
 }
 
