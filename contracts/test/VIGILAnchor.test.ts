@@ -5,11 +5,15 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 
+import type { VIGILAnchor } from '../typechain-types';
+
 describe('VIGILAnchor', () => {
   async function deploy() {
     const [owner, committer, attacker] = await ethers.getSigners();
     const Anchor = await ethers.getContractFactory('VIGILAnchor');
-    const anchor = await Anchor.connect(owner).deploy(committer.address);
+    const anchor = (await Anchor.connect(owner).deploy(
+      committer.address,
+    )) as unknown as VIGILAnchor;
     await anchor.waitForDeployment();
     return { anchor, owner, committer, attacker };
   }

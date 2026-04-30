@@ -16,7 +16,7 @@
     "verify:mumbai": "hardhat verify --network mumbai",
     "verify:mainnet": "hardhat verify --network polygon",
     "lint": "solhint 'contracts/**/*.sol'",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "hardhat compile && tsc --noEmit",
     "clean": "hardhat clean && rimraf cache artifacts typechain-types"
   },
   "dependencies": {
