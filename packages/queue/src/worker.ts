@@ -11,6 +11,7 @@ import {
   redisAckLatency,
   registerShutdown,
   withCorrelation,
+  workerLastTickSeconds,
   type Logger,
 } from '@vigil/observability';
 import { Errors, Ids, Time } from '@vigil/shared';
@@ -201,6 +202,9 @@ export abstract class WorkerBase<TPayload> {
 
     while (this.running && !this.stopping) {
       this.lastTickAtMs = this.clock.now();
+      // AUDIT-076 — surface lastTick to Prometheus so a generic
+      // worker-stalled alert can fire without per-worker handcrafting.
+      workerLastTickSeconds.labels({ worker: name }).set(this.lastTickAtMs / 1000);
       try {
         // Don't pull more than the (adaptive) concurrency permits.
         const slots = Math.max(0, this.effectiveConcurrency() - this.inFlight);

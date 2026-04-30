@@ -274,6 +274,21 @@ export const workerInflight = new Gauge({
   registers: [registry],
 });
 
+/**
+ * Last-tick wall clock per worker, in seconds since the Unix epoch
+ * (AUDIT-076). Updated on every consume-loop iteration in
+ * packages/queue/src/worker.ts. The Prometheus alert
+ * `vigil_apex.WorkerLoopStalled` fires when `time() - this gauge` >
+ * 1 hour, which catches a worker stuck in a degraded state long
+ * before /healthz returns red.
+ */
+export const workerLastTickSeconds = new Gauge({
+  name: 'vigil_worker_last_tick_seconds',
+  help: 'Wall clock of the most recent consume-loop iteration per worker, seconds since epoch',
+  labelNames: ['worker'] as const,
+  registers: [registry],
+});
+
 export const workerEffectiveConcurrency = new Gauge({
   name: 'vigil_worker_effective_concurrency',
   help: 'Effective concurrency after adaptive throttling',
