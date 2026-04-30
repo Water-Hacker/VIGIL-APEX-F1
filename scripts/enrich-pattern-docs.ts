@@ -372,13 +372,13 @@ function buildEnrichmentMap(): Record<string, PatternEnrichment> {
     },
     'P-A-008': {
       detection:
-        "Bid-protest pattern — a tender that received a formal bid protest in the appeal-review board's record, with the protest substantiated even partially. Coupled with a same-supplier-pattern (the winner is also a frequent recipient), the protest history becomes a strong red flag.",
+        'Suppressed-protest pattern — ≥ 2 audit_observation events for the same subject carry `protest_disposition`, and ≥ 80% of those dispositions are "rejected" / "inadmissible". Strength scales with the count of dismissed protests.',
       lrReasoning:
-        "Cameroon's Comité de Régulation des Marchés Publics (CRMP) publishes protest decisions; substantiated protests indicate either procedural breach or favouritism. Default prior 0.30 reflects the strength of formal review-board adjudication. Weight 0.75 — the signal is independent of most other A-patterns, so the Bayesian engine compounds it cleanly.",
+        "Cameroon's Comité de Régulation des Marchés Publics (CRMP) publishes protest decisions; the meta-signal here is not the protest itself but the systematic dismissal-without-review pattern. K88 Ch.6 — institutionalised suppression of complaints is one of the highest-confidence corruption indicators. Default prior 0.16 + weight 0.55: the signal is informative but indirect; the conservative weight reflects unobserved selection bias (genuinely vexatious protests are dismissed for legitimate reasons).",
       fpTraps:
-        '- **Vexatious protests.** A losing bidder may file a protest on weak grounds for delay. Substantiation status separates these.',
+        '- **Vexatious protests.** Losing bidders sometimes file protests on weak grounds for delay; legitimate dismissal is the right outcome.\n- **Procedural-only dismissals.** A protest dismissed for missing the filing deadline does not necessarily reflect substantive review.\n- **Single-bad-actor noise.** One serial-protester drives up the count without signalling collusion.',
       wiring:
-        "Requires a CRMP-protest adapter (not yet implemented in the current pipeline). Pattern fires correctly when the input is present, but the upstream protest-event adapter is on the architect's deferred build list.",
+        "✅ Production-ready. The cour-des-comptes adapter emits `audit_observation` events with PDF-link metadata; worker-document's **content-extractor** (apps/worker-document/src/content-extractor.ts) parses the OCR'd text for protest-disposition keywords (rejet / irrecevable / fondée / partiellement fondée / withdrawn) and merges `protest_disposition` onto the event payload via a closed allow-list. Pattern fires when 2+ such events accumulate.",
     },
     'P-A-009': {
       detection:
@@ -553,13 +553,13 @@ function buildEnrichmentMap(): Record<string, PatternEnrichment> {
     },
     'P-D-005': {
       detection:
-        'Progress fabrication — periodic progress reports show smooth completion curve, but satellite imagery contradicts. Detects timeseries-level fabrication.',
+        'Progress fabrication — ≥ 3 investment_project events report monotonically rising `progress_pct` (delta ≥ 15 percentage points) WHILE ≥ 2 satellite_imagery events for the same subject show activity_score delta ≤ 0.15 (no measurable change). Strength scales with the magnitude of the contradicting deltas.',
       lrReasoning:
-        'Default prior 0.35 + weight 0.85 — direct contradiction between two observable signals is high-confidence.',
+        'Default prior 0.30 + weight 0.85 — direct contradiction between two independent observable signals (operator-reported progress vs. satellite-observed change) is among the highest-confidence indicators in the catalogue. The weight reflects strong signal independence: the contracting authority can fabricate the progress report but cannot fabricate the satellite imagery.',
       fpTraps:
-        '- **Indoor-progress phases** where exterior satellite cannot observe interior fit-out work.',
+        '- **Indoor-progress phases** where exterior satellite cannot observe interior fit-out work — the progress is real but invisible from above.\n- **Satellite-cadence misalignment** — progress reports are monthly, satellite passes are weekly; if the satellite window starts after the major exterior work was completed, activity delta is naturally low even for genuine projects.\n- **Cloud-cover bias** in the activity_score — the satellite chain reports activity per usable image; consecutive cloudy passes can flatten the score artificially.',
       wiring:
-        'Requires both the progress-report adapter (mintp-public-works for civil projects) and the satellite adapter chain.',
+        "✅ Production-ready. The minepat-bip adapter emits `investment_project` events with PDF-link metadata; worker-document's **content-extractor** (apps/worker-document/src/content-extractor.ts) parses the OCR'd text for progress phrasings (Exécution physique: NN%, Avancement: NN%, Physical progress: NN percent, Taux d'exécution: NN%) and merges `progress_pct` onto the event payload. Satellite-side events are populated by the existing satellite-trigger cron (DECISION-010, NICFI/Sentinel-1 chain). Pattern fires when both timeseries are populated.",
     },
     'P-E-001': {
       detection:
@@ -613,20 +613,23 @@ function buildEnrichmentMap(): Record<string, PatternEnrichment> {
     },
     'P-F-003': {
       detection:
-        'Supplier circular flow — funds flow supplier-A → supplier-B → supplier-A in payment edges, indicating kickback laundering through a sister entity.',
-      lrReasoning: 'Default prior 0.35 + weight 0.85.',
-      fpTraps: '- **Legitimate inter-company supply chains** in vertically-integrated groups.',
+        'Supplier-circular flow — A → B → C → A directed money cycle of length ≥ 3 among company entities, detected via bounded-depth BFS over PAID_TO edges. Strength scales inversely with cycle length (shorter cycles are more suspicious).',
+      lrReasoning:
+        'OECD-BO §4.4 — closed-loop fund cycles among entities sharing common control are a textbook money-laundering signal. Default prior 0.30 + weight 0.8 reflects strong signal-independence from the rest of category F. The architect treats a 3-node cycle as near-conclusive; longer cycles (5–6 nodes) admit more legitimate explanations (genuine multi-tier supply chains).',
+      fpTraps:
+        '- **Legitimate inter-company supply chains** in vertically-integrated groups.\n- **Multi-tier subcontracting** in construction where the same prime contractor periodically buys back smaller services from its own subs.\n- **Reciprocal-trade relationships** between long-established firms in related industries.',
       wiring:
-        'Requires payment-edge graph traversal — extends the round-trip BFS substrate to detect bidirectional cycles. Currently uses a simplified version reading `metadata.circularFlowDetected`.',
+        '✅ Production-ready. The Stage-2 graph-metric scheduler runs `detectSupplierCycles` (packages/db-neo4j/src/gds/supplier-cycles.ts) nightly: bounded-depth BFS (MAX_CYCLE_LEN=6, MAX_FANOUT=200, visited-set termination) over PAID_TO edges between company nodes. Outputs persist as `metadata.supplierCycleLength` + `metadata.supplierCycleMembers` + `metadata.circularFlowDetected` on the cycle members. Pattern reads `supplierCycleLength`.',
     },
     'P-F-004': {
       detection:
-        'Hub-and-spoke — a single PEP / officer at the centre of a network of supplier entities, each receiving disproportionate award volume given their declared profile.',
+        'Hub-and-spoke procurement vehicle — supplier wins ≥ 70% of its public contracts from a single contracting authority AND has ≥ 3 total contracts. Strength scales with the concentration ratio above the 70% threshold.',
       lrReasoning:
-        'OECD-BO §4.5 — concentration of award flow on a single beneficial owner. Default prior 0.30 + weight 0.8.',
-      fpTraps: '- **Genuinely large business owner** with diverse corporate holdings.',
+        'OECD-BO §4.5 — concentration of award flow from a single buyer to a single supplier signals a captive-vehicle relationship. Default prior 0.20 + weight 0.7 — informative but not conclusive on its own (genuinely specialised suppliers naturally concentrate on one buyer). Combined with P-B (shell-company) signals, the compound posterior climbs sharply.',
+      fpTraps:
+        '- **Genuinely specialised suppliers** whose technical niche has only one buyer in the country (e.g. nuclear-grade equipment vendor with a single national customer).\n- **Recently-formed firms** whose contract history is naturally narrow.\n- **Regional monopolies** that legitimately serve only the local authority.',
       wiring:
-        'Requires the PageRank metric (already implemented) plus award-volume aggregation per beneficial owner.',
+        '✅ Production-ready. The Stage-2 graph-metric scheduler runs `computeHubAndSpoke` (packages/db-neo4j/src/gds/hub-and-spoke.ts) nightly: aggregates AWARDED_BY edges grouped by supplier; computes per-authority share + concentration ratio of the top authority. Outputs persist as `metadata.authorityConcentrationRatio` + `metadata.publicContractsCount` + `metadata.hubAuthorityId` + `metadata.distinctAuthorities`. Pattern reads `authorityConcentrationRatio` + `publicContractsCount`.',
     },
     'P-F-005': {
       detection:

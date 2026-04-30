@@ -12,5 +12,7 @@ export * from './gds/node-similarity.js';
 export * from './gds/round-trip.js';
 export * from './gds/director-ring.js';
 export * from './gds/bidder-density.js';
+export * from './gds/supplier-cycles.js';
+export * from './gds/hub-and-spoke.js';
 export * from './gds/runner.js';
 export * from './queries.js';

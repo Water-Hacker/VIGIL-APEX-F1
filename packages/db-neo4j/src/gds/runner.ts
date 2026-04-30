@@ -22,9 +22,11 @@
 
 import { computeBidderDensity, type BidderDensity } from './bidder-density.js';
 import { detectDirectorRings, type DirectorRingDetection } from './director-ring.js';
+import { computeHubAndSpoke, type HubAndSpokeMetric } from './hub-and-spoke.js';
 import { louvain, type LouvainResult } from './louvain.js';
 import { pageRank, type PageRankResult } from './page-rank.js';
 import { detectRoundTrips, type RoundTripDetection } from './round-trip.js';
+import { detectSupplierCycles, type SupplierCycleDetection } from './supplier-cycles.js';
 
 import type { Neo4jClient } from '../client.js';
 
@@ -50,6 +52,8 @@ export interface GraphMetricRunOptions {
     roundTrip?: boolean;
     directorRing?: boolean;
     bidderDensity?: boolean;
+    supplierCycles?: boolean;
+    hubAndSpoke?: boolean;
   };
   /** Logger interface (optional). */
   readonly logger?: {
@@ -67,6 +71,8 @@ export interface GraphMetricRunReport {
   readonly roundTrip: { ok: boolean; detections: number; error?: string };
   readonly directorRing: { ok: boolean; ringMembers: number; error?: string };
   readonly bidderDensity: { ok: boolean; tendersComputed: number; error?: string };
+  readonly supplierCycles: { ok: boolean; detections: number; error?: string };
+  readonly hubAndSpoke: { ok: boolean; companiesAnalysed: number; error?: string };
   readonly entitiesUpdated: number;
   readonly tendersUpdated: number;
 }
@@ -77,6 +83,8 @@ const DEFAULT_ENABLE = {
   roundTrip: true,
   directorRing: true,
   bidderDensity: true,
+  supplierCycles: true,
+  hubAndSpoke: true,
 };
 
 const NOOP_LOGGER = {
@@ -166,6 +174,30 @@ export async function runGraphMetrics(
     }
   }
 
+  let supplierCyclesResult: readonly SupplierCycleDetection[] = [];
+  let supplierCyclesErr: string | undefined;
+  if (enable.supplierCycles) {
+    try {
+      supplierCyclesResult = await detectSupplierCycles(neo4j);
+      log.info('graph-metric.supplier-cycles-ok', { detections: supplierCyclesResult.length });
+    } catch (e) {
+      supplierCyclesErr = String(e);
+      log.error('graph-metric.supplier-cycles-failed', { err: supplierCyclesErr });
+    }
+  }
+
+  let hubAndSpokeResult: readonly HubAndSpokeMetric[] = [];
+  let hubAndSpokeErr: string | undefined;
+  if (enable.hubAndSpoke) {
+    try {
+      hubAndSpokeResult = await computeHubAndSpoke(neo4j);
+      log.info('graph-metric.hub-and-spoke-ok', { companies: hubAndSpokeResult.length });
+    } catch (e) {
+      hubAndSpokeErr = String(e);
+      log.error('graph-metric.hub-and-spoke-failed', { err: hubAndSpokeErr });
+    }
+  }
+
   // ---- Merge into per-entity metadata --------------------------------------
   const entityUpdates = new Map<string, Record<string, unknown>>();
   const stamp = now().toISOString();
@@ -195,6 +227,21 @@ export async function runGraphMetrics(
     additions['directorRingFlag'] = true;
     additions['directorRingTenderIds'] = det.sharedTenderIds;
     entityUpdates.set(det.personId, additions);
+  }
+  for (const det of supplierCyclesResult) {
+    const additions = entityUpdates.get(det.companyId) ?? {};
+    additions['supplierCycleLength'] = det.cycleLength;
+    additions['supplierCycleMembers'] = det.cycleMembers;
+    additions['circularFlowDetected'] = true; // alias the doc enrichment references
+    entityUpdates.set(det.companyId, additions);
+  }
+  for (const m of hubAndSpokeResult) {
+    const additions = entityUpdates.get(m.supplierId) ?? {};
+    additions['authorityConcentrationRatio'] = m.authorityConcentrationRatio;
+    additions['publicContractsCount'] = m.publicContractsCount;
+    additions['hubAuthorityId'] = m.hubAuthorityId;
+    additions['distinctAuthorities'] = m.distinctAuthorities;
+    entityUpdates.set(m.supplierId, additions);
   }
 
   // Stamp every updated entity with the graph-metric run timestamp so a
@@ -254,6 +301,16 @@ export async function runGraphMetrics(
       ok: bidderDensityErr === undefined,
       tendersComputed: bidderDensityResult.length,
       ...(bidderDensityErr && { error: bidderDensityErr }),
+    },
+    supplierCycles: {
+      ok: supplierCyclesErr === undefined,
+      detections: supplierCyclesResult.length,
+      ...(supplierCyclesErr && { error: supplierCyclesErr }),
+    },
+    hubAndSpoke: {
+      ok: hubAndSpokeErr === undefined,
+      companiesAnalysed: hubAndSpokeResult.length,
+      ...(hubAndSpokeErr && { error: hubAndSpokeErr }),
     },
     entitiesUpdated,
     tendersUpdated,

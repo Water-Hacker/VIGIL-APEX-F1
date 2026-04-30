@@ -23,6 +23,7 @@ import { create as kuboCreate } from 'kubo-rpc-client';
 import { request } from 'undici';
 import { z } from 'zod';
 
+import { extractDocContent } from './content-extractor.js';
 import { detectLanguage } from './lang.js';
 import { OcrPool } from './ocr-pool.js';
 import { extractPdfMetadata } from './pdf-metadata.js';
@@ -201,6 +202,36 @@ class DocumentWorker extends WorkerBase<DocPayload> {
           logger.warn(
             { err: e, source_event_id: env.payload.source_event_id },
             'merge-document-metadata-failed',
+          );
+        }
+      }
+
+      // DECISION-014c — content-extractor pass. Routes by event kind to
+      // surface protest_disposition (P-A-008) for cour-des-comptes
+      // audit_observation events and progress_pct (P-D-005) for
+      // minepat-bip investment_project events. OCR text is what we have
+      // available here; for non-OCR PDFs (text-extractable) we'd need a
+      // separate text-extraction pass — currently a deferred enhancement.
+      if (detectedText !== null && env.payload.source_event_id) {
+        try {
+          const ev = await this.sourceRepo.getEventById(env.payload.source_event_id);
+          if (ev !== null) {
+            const docContent = extractDocContent({
+              sourceId: ev.source_id,
+              eventKind: ev.kind,
+              ocrText: detectedText,
+            });
+            if (Object.keys(docContent.additions).length > 0) {
+              await this.sourceRepo.mergeEventPayload(env.payload.source_event_id, {
+                ...docContent.additions,
+                _doc_content_provenance: docContent.provenance,
+              });
+            }
+          }
+        } catch (e) {
+          logger.warn(
+            { err: e, source_event_id: env.payload.source_event_id },
+            'doc-content-extraction-failed',
           );
         }
       }

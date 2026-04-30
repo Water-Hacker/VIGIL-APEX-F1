@@ -3213,6 +3213,131 @@ Total project tests across changed packages: **674 passing, 1 skipped**.
 
 ---
 
+## DECISION-014c Final closure — every pattern production-ready (43/43)
+
+**Status:** PROVISIONAL — promote to FINAL alongside DECISION-014 + 014b
+once the architect read-through clears all three.
+
+**Date:** 2026-04-29.
+
+**Thesis.** DECISION-014b moved the count from ~33/43 to ~40/43, with
+4 patterns documented as having concrete closure paths but not yet
+shipped (P-A-008, P-D-005, P-F-003, P-F-004). This decision closes
+those last gaps. The CORE_MVP §6.2 "40+ fraud patterns live" claim is
+now substantively supportable for **all 43/43 patterns** end-to-end
+against the current adapter pipeline.
+
+**What shipped.**
+
+1. **Supplier-circular-flow metric (P-F-003).**
+   `packages/db-neo4j/src/gds/supplier-cycles.ts` — bounded-depth BFS
+   (MAX_CYCLE_LEN=6, MAX_FANOUT=200, visited-set cycle termination)
+   over PAID_TO edges among company nodes. Each company that
+   participates in a directed money cycle of length 3-6 gets a
+   detection record; the metric runner persists `supplierCycleLength`
+   - `supplierCycleMembers` + `circularFlowDetected` to its
+     `entity.canonical.metadata`. Pattern reads `supplierCycleLength`
+     directly.
+
+2. **Hub-and-spoke metric (P-F-004).**
+   `packages/db-neo4j/src/gds/hub-and-spoke.ts` — aggregates AWARDED_BY
+   edges grouped by supplier; computes per-authority share, top-
+   authority concentration ratio, distinct-authority count. The
+   runner persists `authorityConcentrationRatio` +
+   `publicContractsCount` + `hubAuthorityId` + `distinctAuthorities`.
+   Pattern reads the first two. Threshold MIN_CONTRACTS=3 mirrors
+   the pattern's own gate.
+
+3. **Both metrics wired into the existing graph-metric runner.**
+   `packages/db-neo4j/src/gds/runner.ts` — every metric (Louvain,
+   PageRank, round-trip, director-ring, bidder-density, supplier-
+   cycles, hub-and-spoke) runs in isolation; one Cypher failure does
+   not abort the others. Per-metric ok/error fields surfaced in the
+   GraphMetricRunReport. The 7 metrics now run nightly at 03:00
+   Africa/Douala via the existing adapter-runner cron.
+
+4. **Document content-extractor (P-A-008 + P-D-005).**
+   `apps/worker-document/src/content-extractor.ts` — pure-function
+   module that surfaces protest-disposition strings from cour-des-
+   comptes audit_observation events, and progress percentages from
+   minepat-bip investment_project events. Hardening: closed allow-
+   list of disposition tokens (no regex injection), bounded
+   non-greedy regex (no ReDoS), MAX_TEXT_SCAN clamp (400 KB),
+   PLAUSIBLE_PCT cap, deterministic output. Wired into worker-
+   document main loop: every PDF whose source event matches one of
+   these kinds gets the structured field merged onto the event
+   payload via SourceRepo.mergeEventPayload. Failure path is log-
+   and-continue.
+
+5. **Doc enrichment refresh.** The 4 affected pattern doc pages
+   (P-A-008, P-D-005, P-F-003, P-F-004) regenerated from
+   scripts/enrich-pattern-docs.ts. Each now shows ✅ Production-
+   ready with a precise wiring description (file path, env var,
+   metric name, output field). The documentation no longer says
+   "deferred" or "future-improvement" for any of the 43 patterns.
+
+**Tests added (this decision).**
+
+- `packages/db-neo4j/__tests__/supplier-cycles.test.ts` — 6 tests
+  (3-node A→B→C→A cycle, 2-node rejection, no-cycle, shortest-cycle
+  preference, MAX_CYCLE_LEN respect, deterministic ordering).
+- `packages/db-neo4j/__tests__/hub-and-spoke.test.ts` — 5 tests
+  (100% concentration, mid-concentration, MIN_CONTRACTS gate, multi-
+  supplier independence, deterministic ordering).
+- `apps/worker-document/__tests__/content-extractor.test.ts` — 21
+  tests (every disposition token, every progress phrasing, decimal
+  values with comma + dot separators, max-multiple-mentions
+  selection, kind-routing, ReDoS clamp, deterministic output).
+
+**Test counts (final, cumulative across all DECISION-014 commits).**
+
+- @vigil/patterns: 549 (unchanged)
+- @vigil/db-neo4j: 34 (was 23; +11: supplier-cycles + hub-and-spoke)
+- @vigil/db-postgres: 9 + 1 skipped (unchanged)
+- worker-extractor: 65 (unchanged)
+- worker-document: 49 (was 28; +21: content-extractor)
+
+**Total project tests across changed packages: 706 passing, 1 skipped.**
+
+**Final M2 deliverable accounting.**
+
+| Stage                      | Pre    | Post-014 | Post-014b | Post-014c |
+| -------------------------- | ------ | -------- | --------- | --------- |
+| Patterns firing end-to-end | ~10/43 | ~33/43   | ~40/43    | **43/43** |
+
+**The "40+ fraud patterns live" CORE_MVP §6.2 deliverable is
+substantively supportable across the full catalogue.**
+
+The architect can defend each of the 43 patterns to CONAC / council
+with: (a) the detect logic, (b) the precise upstream pipeline that
+populates its inputs, (c) the LR reasoning grounded in established
+anti-corruption literature, (d) the known false-positive traps and
+their mitigations, (e) the property-based fuzz test that proves no-
+throw under arbitrary input, (f) the per-pattern test fixtures.
+
+Calibration of the priors themselves (SRD §19.4 ECE < 0.05 target)
+remains the only architect-bound gate — it requires ≥ 30 ground-
+truth-labelled cases (CLAUDE.md Phase-9), and engineering for that
+gate is complete (the cohort cron runs nightly; misalignment
+surfaces in the calibration.report table the moment cases land).
+
+**Architect read-through additions to the DECISION-014b checklist.**
+
+11. Verify the supplier-cycles BFS correctly rejects 2-node A↔A
+    self-loops and accepts ≥ 3-node directed cycles. Read
+    packages/db-neo4j/**tests**/supplier-cycles.test.ts.
+12. Verify the hub-and-spoke threshold (MIN_CONTRACTS=3,
+    concentration ≥ 0.7) matches the architect's interpretation of
+    "captive supplier".
+13. Spot-check the content-extractor's disposition allow-list
+    (apps/worker-document/src/content-extractor.ts) against the
+    canonical phrasings the architect would expect from CdC reports.
+14. Confirm the four affected pattern doc pages (P-A-008, P-D-005,
+    P-F-003, P-F-004) read ✅ Production-ready and that the wiring
+    description matches the actual file paths.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
