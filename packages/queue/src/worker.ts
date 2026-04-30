@@ -93,6 +93,10 @@ export abstract class WorkerBase<TPayload> {
   private inFlight = 0;
   private running = false;
   private stopping = false;
+  // AUDIT-057: last-tick marker for /healthz / /readyz wiring at the
+  // app layer. Updated every iteration of loopReadGroup; isHealthy()
+  // reports true if the loop ticked within `blockMs * 2`.
+  private lastTickAtMs = 0;
 
   // Phase D9 — adaptive concurrency. We start at the configured ceiling
   // and degrade proportionally to the rolling 60s error rate. Token-
@@ -177,11 +181,26 @@ export abstract class WorkerBase<TPayload> {
     this.logger.info('worker-stopped');
   }
 
+  /**
+   * AUDIT-057: lightweight readiness check. Returns true if the
+   * consume-loop has ticked within `blockMs * 2` of `clock.now()`.
+   * App-layer code wires this into a `http.createServer` /healthz
+   * handler — see worker apps' main() for the pattern.
+   */
+  isHealthy(): boolean {
+    if (!this.running) return false;
+    if (this.lastTickAtMs === 0) return true; // boot grace
+    const now = this.clock.now();
+    const stalenessThresholdMs = this.config.blockMs * 2;
+    return now - this.lastTickAtMs <= stalenessThresholdMs;
+  }
+
   private async loopReadGroup(): Promise<void> {
     const { client, stream, name, blockMs } = this.config;
     const cName = consumerName(name, this.instanceId);
 
     while (this.running && !this.stopping) {
+      this.lastTickAtMs = this.clock.now();
       try {
         // Don't pull more than the (adaptive) concurrency permits.
         const slots = Math.max(0, this.effectiveConcurrency() - this.inFlight);

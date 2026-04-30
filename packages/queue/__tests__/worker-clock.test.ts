@@ -112,6 +112,41 @@ describe('AUDIT-047 — WorkerBase Clock injection', () => {
     expect(w.effectiveConcurrencyPublic()).toBe(4);
   });
 
+  it('AUDIT-057: isHealthy() returns true after start and false when stop()ped', () => {
+    const clock = new FakeClock(1_000_000);
+    const w = new StubWorker({
+      name: 'health-test',
+      stream: 'vigil:test',
+      schema: z.object({ x: z.number() }) as never,
+      client: fakeQueueClient(),
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+        trace: vi.fn(),
+        fatal: vi.fn(),
+        silent: vi.fn(),
+        level: 'info',
+        child: vi.fn(),
+      } as never,
+      concurrency: 1,
+      clock,
+    });
+    // Pre-start: isHealthy() returns false (running == false).
+    expect(w.isHealthy()).toBe(false);
+    // Force-set running to true via the field name (simulates start).
+    (w as unknown as { running: boolean }).running = true;
+    // No tick yet -> isHealthy returns true (boot grace).
+    expect(w.isHealthy()).toBe(true);
+    // Stamp a tick at current clock time.
+    (w as unknown as { lastTickAtMs: number }).lastTickAtMs = clock.now();
+    expect(w.isHealthy()).toBe(true);
+    // Advance past blockMs * 2 (default 5000 -> threshold 10_000).
+    clock.advance(11_000);
+    expect(w.isHealthy()).toBe(false);
+  });
+
   it('falls back to Time.systemClock when no clock is supplied (existing behaviour)', () => {
     const w = new StubWorker({
       name: 'sys-clock-test',
