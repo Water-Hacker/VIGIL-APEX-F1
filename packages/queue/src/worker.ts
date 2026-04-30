@@ -13,7 +13,7 @@ import {
   withCorrelation,
   type Logger,
 } from '@vigil/observability';
-import { Errors, Ids } from '@vigil/shared';
+import { Errors, Ids, Time } from '@vigil/shared';
 import { z } from 'zod';
 
 import { STREAMS, consumerName, groupName, type StreamName } from './streams.js';
@@ -71,13 +71,24 @@ export interface WorkerBaseConfig<TPayload> {
   readonly idleReclaimMs?: number;
   /** Schema version handled. */
   readonly schemaVersion?: number;
+  /**
+   * AUDIT-047: optional Clock for deterministic tests. Defaults to
+   * `Time.systemClock`. Used for the error-window GC, the
+   * adaptive-concurrency circuit, dead-letter envelope timestamps,
+   * and the redisAckLatency histogram.
+   */
+  readonly clock?: Time.Clock;
 }
 
 export abstract class WorkerBase<TPayload> {
   protected readonly logger: Logger;
-  protected readonly config: Required<Omit<WorkerBaseConfig<TPayload>, 'logger' | 'schemaVersion'>> & {
+  protected readonly config: Required<
+    Omit<WorkerBaseConfig<TPayload>, 'logger' | 'schemaVersion' | 'clock'>
+  > & {
     schemaVersion: number;
   };
+  // AUDIT-047: single clock for all time-dependent worker logic.
+  private readonly clock: Time.Clock;
   private readonly instanceId: string;
   private inFlight = 0;
   private running = false;
@@ -93,13 +104,15 @@ export abstract class WorkerBase<TPayload> {
 
   constructor(cfg: WorkerBaseConfig<TPayload>) {
     this.logger = cfg.logger ?? createLogger({ service: cfg.name });
+    this.clock = cfg.clock ?? Time.systemClock;
     this.instanceId = `${hostname()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
     this.config = {
       ...cfg,
       concurrency: cfg.concurrency ?? 8,
       maxRetries: cfg.maxRetries ?? 5,
       blockMs: cfg.blockMs ?? Number(process.env.REDIS_STREAM_BLOCK_MS ?? 5000),
-      idleReclaimMs: cfg.idleReclaimMs ?? Number(process.env.REDIS_CONSUMER_IDLE_RECLAIM_MS ?? 300_000),
+      idleReclaimMs:
+        cfg.idleReclaimMs ?? Number(process.env.REDIS_CONSUMER_IDLE_RECLAIM_MS ?? 300_000),
       schemaVersion: cfg.schemaVersion ?? 1,
     };
   }
@@ -112,7 +125,7 @@ export abstract class WorkerBase<TPayload> {
    */
   private effectiveConcurrency(): number {
     const cfg = this.config.concurrency;
-    const now = Date.now();
+    const now = this.clock.now();
     while (this.errorWindow.length && now - this.errorWindow[0]!.at > this.errorWindowMs) {
       this.errorWindow.shift();
     }
@@ -129,7 +142,7 @@ export abstract class WorkerBase<TPayload> {
   }
 
   protected recordOutcome(ok: boolean): void {
-    this.errorWindow.push({ at: Date.now(), ok });
+    this.errorWindow.push({ at: this.clock.now(), ok });
     if (this.errorWindow.length > 200) this.errorWindow.shift();
   }
 
@@ -145,7 +158,10 @@ export abstract class WorkerBase<TPayload> {
 
     registerShutdown(`worker:${name}`, async () => this.stop());
 
-    this.logger.info({ stream, group: groupName(name), instance: this.instanceId }, 'worker-started');
+    this.logger.info(
+      { stream, group: groupName(name), instance: this.instanceId },
+      'worker-started',
+    );
 
     void this.loopReadGroup();
     void this.loopReclaim();
@@ -231,7 +247,7 @@ export abstract class WorkerBase<TPayload> {
     const { client, stream, name, schema, schemaVersion } = this.config;
 
     this.inFlight++;
-    const enqueuedAt = Date.now();
+    const enqueuedAt = this.clock.now();
 
     try {
       eventsConsumed.labels({ worker: name, stream }).inc();
@@ -292,7 +308,7 @@ export abstract class WorkerBase<TPayload> {
         case 'ack':
           await client.redis.xack(stream, groupName(name), redisId);
           eventsEmitted.labels({ worker: name, stream }).inc();
-          redisAckLatency.labels({ worker: name }).observe((Date.now() - enqueuedAt) / 1000);
+          redisAckLatency.labels({ worker: name }).observe((this.clock.now() - enqueuedAt) / 1000);
           this.recordOutcome(true);
           break;
         case 'retry':
@@ -330,7 +346,7 @@ export abstract class WorkerBase<TPayload> {
       dedup_key: `dlq:${name}:${redisId}`,
       correlation_id: Ids.newCorrelationId() as string,
       producer: name,
-      produced_at: new Date().toISOString(),
+      produced_at: this.clock.isoNow(),
       schema_version: 1,
       payload: {
         original_stream: stream,
@@ -357,7 +373,7 @@ export abstract class WorkerBase<TPayload> {
       dedup_key: `dlq:${name}:${redisId}`,
       correlation_id: Ids.newCorrelationId() as string,
       producer: name,
-      produced_at: new Date().toISOString(),
+      produced_at: this.clock.isoNow(),
       schema_version: 1,
       payload: {
         original_stream: stream,
@@ -385,7 +401,12 @@ export abstract class WorkerBase<TPayload> {
 }
 
 /** Helper: build an envelope from a payload — workers use this when emitting. */
-export function newEnvelope<T>(producer: string, payload: T, dedupKey: string, correlationId?: string): Envelope<T> {
+export function newEnvelope<T>(
+  producer: string,
+  payload: T,
+  dedupKey: string,
+  correlationId?: string,
+): Envelope<T> {
   return {
     id: Ids.newEventId() as string,
     dedup_key: dedupKey,
