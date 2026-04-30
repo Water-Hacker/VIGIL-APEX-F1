@@ -74,3 +74,9 @@ jobs:
         # matching NNNN_*_down.sql. A closed allowlist exempts the
         # legacy 0001..0006 + 0008 forward-only migrations.
         run: npx --yes tsx scripts/check-migration-pairs.ts
+
+      - name: Run scripts/check-test-coverage-floor.ts (AUDIT-069 floor)
+        # Every new app under apps/* must ship at least one test file.
+        # A closed allowlist exempts 10 legacy zero-test workers; the
+        # allowlist can only shrink as workers graduate.
+        run: npx --yes tsx scripts/check-test-coverage-floor.ts

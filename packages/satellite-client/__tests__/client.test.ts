@@ -29,6 +29,31 @@ const SAMPLE: SatelliteRequest = {
   requested_by: 'test-suite',
 };
 
+describe('AUDIT-068 — SatelliteClient.request publishes the full envelope shape, not just request_id', () => {
+  it('the envelope passed to queue.publish has every load-bearing field of SatelliteRequest', async () => {
+    const q = fakeQueue();
+    const client = new SatelliteClient(q as never);
+    await client.request(SAMPLE);
+    expect(q.publish).toHaveBeenCalledTimes(1);
+    const [, env] = q.publish.mock.calls[0]! as [string, { payload: SatelliteRequest }];
+    // Pin every field the SatelliteRequest schema requires — a regression
+    // that drops a field at the publish boundary used to pass the
+    // toHaveBeenCalledTimes(1) assertion silently. This locks down the
+    // payload contract.
+    expect(env.payload).toEqual({
+      request_id: SAMPLE.request_id,
+      project_id: SAMPLE.project_id,
+      finding_id: SAMPLE.finding_id,
+      aoi_geojson: SAMPLE.aoi_geojson,
+      contract_window: SAMPLE.contract_window,
+      providers: SAMPLE.providers,
+      max_cloud_pct: SAMPLE.max_cloud_pct,
+      max_cost_usd: SAMPLE.max_cost_usd,
+      requested_by: SAMPLE.requested_by,
+    });
+  });
+});
+
 describe('SatelliteClient.request', () => {
   it('publishes a validated envelope to the satellite request stream', async () => {
     const q = fakeQueue();
