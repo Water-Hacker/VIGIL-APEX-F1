@@ -175,14 +175,23 @@ function normalise(s: string): string {
  * L8 — when the model emits a numeric field (`amount_xaf`,
  * `amount_xaf_equivalent`, `bidder_count`, etc.) WITH a `document_cid`
  * + `char_span` pair, verify that at least one numeric run inside the
- * cited window is within ±5% of the claimed value. Order-of-magnitude
- * mismatches (claimed 5,000,000 vs source "50,000,000") rejected.
+ * cited window is within `NUMERICAL_TOLERANCE_PCT` of the claimed
+ * value. Order-of-magnitude mismatches (claimed 5,000,000 vs source
+ * "50,000,000") rejected.
  *
  * Pulls the source text from `ctx.sourceTexts.get(document_cid)` and
  * inspects the substring `[char_span[0]-PAD .. char_span[1]+PAD]`. PAD
  * gives the model some slack since LLM-supplied char_spans are often
  * 5-10 chars off from the exact digit-run.
  */
+/**
+ * AUDIT-052 — extracted from the inline `0.05` magic. Tolerance accepts
+ * minor LLM rounding of cited numerics (±5%); larger drift is treated as
+ * a hallucination. Tightening this lowers the false-positive rate of the
+ * extractor; loosening it lowers L8's catch rate. Moves with SRD §20
+ * (extraction temperature contract).
+ */
+const NUMERICAL_TOLERANCE_PCT = 0.05;
 export function l8NumericalDisagreement(content: unknown, ctx: GuardContext): GuardResult {
   const obj = asObject(content);
   if (!obj) return PASS('L8');
@@ -229,7 +238,7 @@ export function l8NumericalDisagreement(content: unknown, ctx: GuardContext): Gu
     };
   }
   for (const c of candidates) {
-    const ok = sourceNumbers.some((n) => withinTolerance(c.value, n, 0.05));
+    const ok = sourceNumbers.some((n) => withinTolerance(c.value, n, NUMERICAL_TOLERANCE_PCT));
     if (!ok) {
       return {
         passed: false,
