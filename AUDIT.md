@@ -37,6 +37,16 @@
 > - AUDIT-091 (§5, low) — AOI radius validation does not reject Infinity.
 > - AUDIT-053 description refined inline (governance-client already has a logger field; the gap is error-path emit calls).
 
+## Phase 1 description corrections logged during Phase 2
+
+Five Phase-1 findings carried materially wrong descriptions. Originals are kept verbatim in the per-section tables for traceability; corrections were applied at closure time. This section is the canonical record and is reproduced verbatim in `AUDIT-REPORT.md`'s "Patterns observed" section at Phase-2 end.
+
+- **AUDIT-061** — original said "no test file"; file existed with thin coverage. Closed as edge-case + invariant pinning. (commit 2bdccfc)
+- **AUDIT-064** — original said "no test file"; file existed with thin coverage. Closed as edge-case + invariant pinning. (commit a0856ff)
+- **AUDIT-053** — original said "no logger import"; logger field already existed. Real gap was no error path emitted via it. (commit 4294c09)
+- **AUDIT-044** — original said `.toLowerCase()` reads locale; per ECMAScript spec it is locale-invariant. False positive on Turkish-İ class; closed with regression tests pinning locale-invariance. (commit 783887c)
+- **AUDIT-027** — original said three workers bypassed `SafeLlmRouter`; in fact one worker had one legacy bypass path. (commit b2d38d5)
+
 Critical = security exploit path or data-loss live in `main`.
 High = correctness, security-defense-in-depth, or test-coverage gap on a load-bearing pillar.
 Medium = real risk but mitigated, deferred, or behind a flag.
