@@ -286,30 +286,30 @@ describe('AUDIT-064 — error path arity', () => {
     expect(() => centroidOfPolygon({ type: 'Polygon', coordinates: [[]] })).toThrow();
   });
 
-  it('NaN radius produces a NaN bbox (current behaviour pin — guard does not catch NaN)', () => {
-    // The guard `if (opts.radiusMeters <= 0)` does NOT catch NaN
-    // (NaN <= 0 is false). The arithmetic propagates NaN. This is
-    // a hardening opportunity — `if (!Number.isFinite(r) || r <= 0)`
-    // would be safer — but it's out of AUDIT-064's testing-gap scope.
-    // Pinning current behaviour so a future correctness PR is caught.
-    const b = bboxFromCentroidMeters({
-      centroid: { lat: 0, lon: 0 },
-      radiusMeters: Number.NaN,
-    });
-    expect(Number.isNaN(b.maxLat)).toBe(true);
-    expect(Number.isNaN(b.minLat)).toBe(true);
+  it('AUDIT-090 — NaN radius is rejected by the !Number.isFinite guard', () => {
+    expect(() =>
+      bboxFromCentroidMeters({
+        centroid: { lat: 0, lon: 0 },
+        radiusMeters: Number.NaN,
+      }),
+    ).toThrow(/positive finite number/);
   });
 
-  it('Infinity radius rejects via the pole-proximity guard or returns Inf bbox', () => {
-    // Behaviour pin: Infinity * (1/EARTH_RADIUS) = Infinity, so the
-    // bbox extends to infinity. This is a degenerate input — we don't
-    // expect callers to ever supply it, but we pin behaviour for
-    // future maintenance.
-    const b = bboxFromCentroidMeters({
-      centroid: { lat: 0, lon: 0 },
-      radiusMeters: Number.POSITIVE_INFINITY,
-    });
-    expect(b.maxLat).toBe(Infinity);
-    expect(b.minLat).toBe(-Infinity);
+  it('AUDIT-091 — Infinity radius is rejected by the !Number.isFinite guard', () => {
+    expect(() =>
+      bboxFromCentroidMeters({
+        centroid: { lat: 0, lon: 0 },
+        radiusMeters: Number.POSITIVE_INFINITY,
+      }),
+    ).toThrow(/positive finite number/);
+  });
+
+  it('AUDIT-091 — negative Infinity radius is rejected', () => {
+    expect(() =>
+      bboxFromCentroidMeters({
+        centroid: { lat: 0, lon: 0 },
+        radiusMeters: Number.NEGATIVE_INFINITY,
+      }),
+    ).toThrow(/positive finite number/);
   });
 });

@@ -28,8 +28,12 @@ export function bboxFromCentroidMeters(opts: {
   readonly centroid: LatLon;
   readonly radiusMeters: number;
 }): BBox {
-  if (opts.radiusMeters <= 0) {
-    throw new Error('radiusMeters must be positive');
+  // AUDIT-090 / AUDIT-091 — guard rejects NaN (NaN <= 0 is false, so NaN
+  // would pass an unsigned `<= 0` check) and Infinity (Infinity > 0 is
+  // true, so it would also pass). The combined Number.isFinite + > 0
+  // predicate covers every non-positive-finite-number input.
+  if (!Number.isFinite(opts.radiusMeters) || opts.radiusMeters <= 0) {
+    throw new Error('radiusMeters must be a positive finite number');
   }
   const dLat = opts.radiusMeters / EARTH_RADIUS_METERS / DEG;
   const cosLat = Math.cos(opts.centroid.lat * DEG);
