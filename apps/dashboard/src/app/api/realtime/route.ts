@@ -1,6 +1,8 @@
 import { QueueClient } from '@vigil/queue';
 import { type NextRequest } from 'next/server';
 
+import { startSseHeartbeat } from '../../../lib/sse-heartbeat';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // SSE needs a long-lived connection — Edge runtime times out
 
@@ -30,20 +32,29 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const encoder = new TextEncoder();
   let lastId = '$'; // start from new entries only
-  let cancelled = false;
+  // AUDIT-035: drive cancellation through an AbortController so the
+  // heartbeat helper observes disconnects synchronously, not on the
+  // 15s xread BLOCK boundary.
+  const cancelCtrl = new AbortController();
+  const cancelSignal = cancelCtrl.signal;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       controller.enqueue(encoder.encode(`event: hello\ndata: {}\n\n`));
 
       // Heartbeat every 25s to defeat reverse-proxy idle-timeouts.
-      const hb = setInterval(() => {
-        if (cancelled) return;
-        controller.enqueue(encoder.encode(`event: ping\ndata: {}\n\n`));
-      }, 25_000);
+      // The helper clears the timer immediately on signal.aborted.
+      const hb = startSseHeartbeat({
+        intervalMs: 25_000,
+        signal: cancelSignal,
+        onTick: () => {
+          if (cancelSignal.aborted) return;
+          controller.enqueue(encoder.encode(`event: ping\ndata: {}\n\n`));
+        },
+      });
 
       try {
-        while (!cancelled) {
+        while (!cancelSignal.aborted) {
           // XREAD COUNT 50 BLOCK 15000 STREAMS <name> <lastId>
           const result = (await queue().redis.xread(
             'COUNT',
@@ -72,12 +83,12 @@ export async function GET(req: NextRequest): Promise<Response> {
           encoder.encode(`event: error\ndata: ${JSON.stringify({ message: String(err) })}\n\n`),
         );
       } finally {
-        clearInterval(hb);
+        hb.stop();
         controller.close();
       }
     },
     cancel() {
-      cancelled = true;
+      cancelCtrl.abort();
     },
   });
 
