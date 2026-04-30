@@ -258,6 +258,12 @@ describe('runQuarterlyAuditExport (DECISION-012)', () => {
     expect(manifest.row_count).toBe(3);
     const expectedSha = createHash('sha256').update(Buffer.from(csv, 'utf8')).digest('hex');
     expect(manifest.csv_sha256).toBe(expectedSha);
+    // AUDIT-024: salt_fingerprint must be the first 8 hex of sha256(salt).
+    const expectedSaltFingerprint = createHash('sha256')
+      .update('test-salt-32-bytes-deadbeef-0123')
+      .digest('hex')
+      .slice(0, 8);
+    expect(manifest.salt_fingerprint).toBe(expectedSaltFingerprint);
 
     // The audit-of-audit row is appended to audit.actions via pool.connect → INSERT.
     // We assert via the pool's connect call count + the INSERT query body.

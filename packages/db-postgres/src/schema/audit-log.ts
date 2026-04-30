@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  char,
   index,
   integer,
   jsonb,
@@ -36,7 +37,9 @@ export const userActionEvent = auditTalPaSchema.table(
     actor_device_fingerprint: text('actor_device_fingerprint'),
     session_id: uuid('session_id'),
     target_resource: text('target_resource').notNull(),
-    action_payload: jsonb('action_payload').notNull().default(sql`'{}'::jsonb`),
+    action_payload: jsonb('action_payload')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     result_status: text('result_status').notNull(),
     prior_event_id: uuid('prior_event_id'),
     correlation_id: uuid('correlation_id'),
@@ -134,6 +137,11 @@ export const publicExport = auditTalPaSchema.table(
     row_count: integer('row_count').notNull(),
     exported_at: timestamp('exported_at', { withTimezone: true }).notNull().defaultNow(),
     audit_event_id: uuid('audit_event_id').notNull(),
+    // AUDIT-024: first 8 hex of sha256(salt). Two consecutive exports
+    // sharing this fingerprint indicate the operator forgot to rotate
+    // the salt — a CI alert + the audit.public_export_salt_collisions
+    // view fire on this condition.
+    salt_fingerprint: char('salt_fingerprint', { length: 8 }).notNull(),
   },
   (t) => ({
     periodUnique: uniqueIndex('public_export_period_label_unique').on(t.period_label),

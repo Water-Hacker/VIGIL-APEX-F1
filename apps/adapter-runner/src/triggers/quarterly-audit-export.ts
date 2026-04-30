@@ -210,6 +210,11 @@ export async function runQuarterlyAuditExport(
     },
   });
 
+  // AUDIT-024: salt_fingerprint = first 8 hex of sha256(salt). Two
+  // consecutive exports sharing this fingerprint indicate the operator
+  // forgot to rotate the salt — `audit.public_export_salt_collisions`
+  // view + Prom alert fire on this condition.
+  const saltFingerprint = createHash('sha256').update(salt).digest('hex').slice(0, 8);
   await deps.exportRepo.record({
     id: randomUUID(),
     period_label: window.periodLabel,
@@ -220,6 +225,7 @@ export async function runQuarterlyAuditExport(
     row_count: rowCount,
     exported_at: new Date(),
     audit_event_id: auditEvent.id,
+    salt_fingerprint: saltFingerprint,
   });
 
   deps.logger.info(
