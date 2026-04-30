@@ -1,14 +1,10 @@
-import {
-  createClaudeLlmEvaluator,
-  runAdversarial,
-} from '@vigil/certainty-engine';
+import { createClaudeLlmEvaluator, runAdversarial } from '@vigil/certainty-engine';
 import { CallRecordRepo, CertaintyRepo, FindingRepo, getDb } from '@vigil/db-postgres';
-import {
-  LlmRouter,
-  SafeLlmRouter,
-  Safety,
-  type LlmCallOptions,
-} from '@vigil/llm';
+import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
+// AUDIT-027: side-effect import registers the
+// `counter-evidence.devils-advocate-narrative` prompt with the global
+// SafeLlmRouter registry. Must be imported before any SafeLlmRouter call.
+import './prompts.js';
 import {
   createLogger,
   installShutdownHandler,
@@ -17,13 +13,7 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
-import {
-  QueueClient,
-  STREAMS,
-  WorkerBase,
-  type Envelope,
-  type HandlerOutcome,
-} from '@vigil/queue';
+import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import { VaultClient } from '@vigil/security';
 import { z } from 'zod';
 
@@ -40,28 +30,12 @@ const zPayload = z.object({
 });
 type Payload = z.infer<typeof zPayload>;
 
-const COUNTER_SYSTEM_PROMPT = `
-You are a senior auditor performing a devil's-advocate review on a finding produced
-by VIGIL APEX, an automated procurement-fraud detection system.
-
-Your job: identify reasons the finding might be wrong, missing context, or have a
-benign alternative explanation. Examples: emergency procurement justified by an
-official decree; an exclusion clause that explains a single-bidder award; a
-satellite cloud-cover false negative; a name collision in entity resolution.
-
-Output:
-{
-  "concerns": ["<concern 1>", "<concern 2>", ...],
-  "alternative_explanation": "<one paragraph or null>",
-  "verification_steps": ["<step 1>", "<step 2>", ...]
-}
-
-If you cannot find any reason the finding might be wrong, output:
-{"concerns":[],"alternative_explanation":null,"verification_steps":["Independently re-verify each numerical citation."]}
-
-Always cite source documents via {document_cid, page, char_span} when referring to
-evidence. Refuse to invent context that isn't in the supplied finding.
-`.trim();
+// AUDIT-027: COUNTER_SYSTEM_PROMPT moved to ./prompts.ts and registered
+// with the SafeLlmRouter prompt registry under the name
+// 'counter-evidence.devils-advocate-narrative'. SafeLlmRouter wraps every
+// call with closed-context preamble + canary; the prompt registry
+// snapshot (name, version, hash) is recorded on every call to
+// llm.call_record (audit-trail).
 
 const zCounterResp = z.object({
   concerns: z.array(z.string()).max(20),
@@ -74,7 +48,6 @@ class CounterWorker extends WorkerBase<Payload> {
     private readonly findingRepo: FindingRepo,
     private readonly certaintyRepo: CertaintyRepo,
     private readonly callRecordRepo: CallRecordRepo,
-    private readonly llm: LlmRouter,
     private readonly safe: SafeLlmRouter,
     private readonly modelId: string,
     queue: QueueClient,
@@ -112,17 +85,31 @@ class CounterWorker extends WorkerBase<Payload> {
           });
           // Persist a fresh assessment row carrying the real adversarial
           // outcome. Hold-reasons on the new row reflect the full pipeline.
-          const holdReasons: Schemas.HoldReason[] = [...(assessment.hold_reasons as Schemas.HoldReason[])];
-          if (!adversarial.order_randomisation_stable && !holdReasons.includes('order_randomisation_disagreement')) {
+          const holdReasons: Schemas.HoldReason[] = [
+            ...(assessment.hold_reasons as Schemas.HoldReason[]),
+          ];
+          if (
+            !adversarial.order_randomisation_stable &&
+            !holdReasons.includes('order_randomisation_disagreement')
+          ) {
             holdReasons.push('order_randomisation_disagreement');
           }
-          if (adversarial.devils_advocate_coherent && !holdReasons.includes('devils_advocate_coherent')) {
+          if (
+            adversarial.devils_advocate_coherent &&
+            !holdReasons.includes('devils_advocate_coherent')
+          ) {
             holdReasons.push('devils_advocate_coherent');
           }
-          if (!adversarial.counterfactual_robust && !holdReasons.includes('counterfactual_collapse')) {
+          if (
+            !adversarial.counterfactual_robust &&
+            !holdReasons.includes('counterfactual_collapse')
+          ) {
             holdReasons.push('counterfactual_collapse');
           }
-          if (!adversarial.secondary_review_agreement && !holdReasons.includes('secondary_review_disagreement')) {
+          if (
+            !adversarial.secondary_review_agreement &&
+            !holdReasons.includes('secondary_review_disagreement')
+          ) {
             holdReasons.push('secondary_review_disagreement');
           }
           // The dispatch tier may downgrade if any defence rejected.
@@ -131,12 +118,11 @@ class CounterWorker extends WorkerBase<Payload> {
             !adversarial.counterfactual_robust ||
             !adversarial.order_randomisation_stable ||
             !adversarial.secondary_review_agreement;
-          const newTier: 'action_queue' | 'investigation_queue' | 'log_only' =
-            downgraded
-              ? Number(assessment.posterior_probability) >= 0.8
-                ? 'investigation_queue'
-                : 'log_only'
-              : (assessment.tier as 'action_queue' | 'investigation_queue' | 'log_only');
+          const newTier: 'action_queue' | 'investigation_queue' | 'log_only' = downgraded
+            ? Number(assessment.posterior_probability) >= 0.8
+              ? 'investigation_queue'
+              : 'log_only'
+            : (assessment.tier as 'action_queue' | 'investigation_queue' | 'log_only');
           await this.certaintyRepo.upsertAssessment({
             id: crypto.randomUUID(),
             finding_id: assessment.finding_id,
@@ -179,38 +165,49 @@ class CounterWorker extends WorkerBase<Payload> {
       }
     }
 
-    // 2) Devil's-advocate NARRATIVE for the operator UI (legacy; uses the
-    //    older non-cited prompt — kept so analysts still get a free-form
-    //    review summary on every finding).
-    const opts: LlmCallOptions = {
-      task: 'devils_advocate',
-      modelClassOverride: 'opus',
-      system: COUNTER_SYSTEM_PROMPT,
-      user: JSON.stringify(
-        {
-          finding_id: finding.id,
-          title_en: finding.title_en,
-          summary_en: finding.summary_en,
-          severity: finding.severity,
-          posterior: finding.posterior,
-          amount_xaf: finding.amount_xaf,
-        },
-        null,
-        2,
-      ),
-      maxTokens: 1500,
-      responseSchema: zCounterResp,
-      ...(env.correlation_id && { correlationId: env.correlation_id }),
-    };
+    // 2) Devil's-advocate NARRATIVE for the operator UI.
+    //    AUDIT-027: routes through SafeLlmRouter using the registered
+    //    'counter-evidence.devils-advocate-narrative' prompt. The
+    //    response schema is non-cited (free-form paragraph by design),
+    //    so the L1/L8/L10/L12 citation-grounded layers don't apply,
+    //    but L4 (canary in output), L5 (schema validation), L9
+    //    (language consistency), and L11 (daily-rotated canary) do.
+    const findingSummaryJson = JSON.stringify(
+      {
+        finding_id: finding.id,
+        title_en: finding.title_en,
+        summary_en: finding.summary_en,
+        severity: finding.severity,
+        posterior: finding.posterior,
+        amount_xaf: finding.amount_xaf,
+      },
+      null,
+      2,
+    );
 
     try {
-      const r = await this.llm.call<z.infer<typeof zCounterResp>>(opts);
+      const outcome = await this.safe.call({
+        findingId: finding.id,
+        assessmentId: env.payload.assessment_id ?? null,
+        promptName: 'counter-evidence.devils-advocate-narrative',
+        task: 'devils_advocate_narrative',
+        sources: [
+          {
+            id: `finding:${finding.id}`,
+            label: 'finding-summary',
+            text: findingSummaryJson,
+          },
+        ],
+        responseSchema: zCounterResp,
+        modelId: this.modelId,
+      });
+      const r = outcome.value;
       const text =
-        `Concerns:\n- ${r.content.concerns.join('\n- ') || 'none identified'}\n\n` +
-        (r.content.alternative_explanation
-          ? `Alternative explanation:\n${r.content.alternative_explanation}\n\n`
+        `Concerns:\n- ${r.concerns.join('\n- ') || 'none identified'}\n\n` +
+        (r.alternative_explanation
+          ? `Alternative explanation:\n${r.alternative_explanation}\n\n`
           : '') +
-        `Verification steps:\n- ${r.content.verification_steps.join('\n- ')}`;
+        `Verification steps:\n- ${r.verification_steps.join('\n- ')}`;
       await this.findingRepo.setCounterEvidence(finding.id, text, 'review');
       void this.callRecordRepo;
       return { kind: 'ack' };
@@ -262,11 +259,15 @@ async function main(): Promise<void> {
     findingRepo,
     certaintyRepo,
     callRecordRepo,
-    llm,
     safe,
     modelId,
     queue,
   );
+  // The raw LlmRouter (`llm`) is held only inside SafeLlmRouter as the
+  // inner provider; the worker class no longer references it directly
+  // (AUDIT-027). Keep the local variable so the SafeLlmRouter
+  // constructor binds the same instance.
+  void llm;
   await worker.start();
   registerShutdown('worker', () => worker.stop());
   logger.info('worker-counter-evidence-ready');
