@@ -11,9 +11,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
+import { Neo4jClient } from '@vigil/db-neo4j';
 import {
   CalibrationAuditRepo,
   CallRecordRepo,
+  EntityRepo,
   PublicExportRepo,
   SatelliteRequestRepo,
   SourceRepo,
@@ -38,15 +40,10 @@ import { schedule, validate, ScheduledTask } from 'node-cron';
 
 import { registerAllAdapters } from './adapters/_register.js';
 import { runOne } from './run-one.js';
-import {
-  currentQuarterWindow,
-  runCalibrationAudit,
-} from './triggers/calibration-audit-runner.js';
+import { currentQuarterWindow, runCalibrationAudit } from './triggers/calibration-audit-runner.js';
+import { runGraphMetricTrigger } from './triggers/graph-metric-runner.js';
 import { runQuarterlyAuditExport } from './triggers/quarterly-audit-export.js';
-import {
-  defaultProviderChain,
-  runSatelliteTrigger,
-} from './triggers/satellite-trigger.js';
+import { defaultProviderChain, runSatelliteTrigger } from './triggers/satellite-trigger.js';
 import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 
 const logger = createLogger({ service: 'adapter-runner' });
@@ -183,98 +180,143 @@ async function main(): Promise<void> {
       tasks.push(satelliteTask);
       logger.info({ cron, providers, bufferMeters }, 'satellite-trigger-scheduled');
 
-  // DECISION-011 — verbatim audit sampler. Daily 5% sampler.
-  const sampleEnabled = (process.env.VERBATIM_SAMPLER_ENABLED ?? 'true').toLowerCase() !== 'false';
-  if (sampleEnabled) {
-    const cron = process.env.VERBATIM_SAMPLER_CRON ?? '15 3 * * *'; // 03:15 daily
-    if (validate(cron)) {
-      const callRecords = new CallRecordRepo(db);
-      const verbatim = new VerbatimAuditRepo(db);
-      const fraction = Number(process.env.VERBATIM_SAMPLER_FRACTION ?? '0.05');
-      const samplerTask = schedule(
-        cron,
-        () => {
-          void runVerbatimAuditSampler({
-            db,
-            callRecords,
-            verbatim,
-            logger,
-            fraction,
-            windowHours: 24,
-          }).catch((e) => logger.error({ err: e }, 'verbatim-sampler-failed'));
-        },
-        { timezone: 'Africa/Douala', scheduled: true },
-      );
-      tasks.push(samplerTask);
-      logger.info({ cron, fraction }, 'verbatim-audit-sampler-scheduled');
-    }
-  }
+      // Stage 2 — graph-metric runner. Computes Louvain communities, PageRank,
+      // round-trip BFS, director-ring detection, and bidder-graph density,
+      // then persists results to entity.canonical.metadata + the relevant
+      // award event payloads. Unblocks pattern category F (all 5) and
+      // strengthens P-B-001 / P-B-005 by populating communityId.
+      const graphMetricEnabled =
+        (process.env.GRAPH_METRIC_ENABLED ?? 'true').toLowerCase() !== 'false';
+      if (graphMetricEnabled) {
+        const cron = process.env.GRAPH_METRIC_CRON ?? '0 3 * * *'; // 03:00 daily
+        if (validate(cron)) {
+          const entityRepo = new EntityRepo(db);
+          const graphTask = schedule(
+            cron,
+            () => {
+              void (async () => {
+                try {
+                  const neo4j = await Neo4jClient.connect();
+                  try {
+                    await runGraphMetricTrigger({
+                      neo4j,
+                      entityRepo,
+                      sourceRepo,
+                      logger,
+                    });
+                  } finally {
+                    await neo4j.close();
+                  }
+                } catch (err) {
+                  logger.error({ err }, 'graph-metric-failed');
+                }
+              })();
+            },
+            { timezone: 'Africa/Douala', scheduled: true },
+          );
+          tasks.push(graphTask);
+          logger.info({ cron }, 'graph-metric-scheduled');
+        } else {
+          logger.error({ cron }, 'invalid-graph-metric-cron; runner disabled');
+        }
+      }
 
-  // DECISION-011 — calibration audit runner. Quarterly (1st of next month after quarter end).
-  const calEnabled = (process.env.CALIBRATION_AUDIT_ENABLED ?? 'true').toLowerCase() !== 'false';
-  if (calEnabled) {
-    const cron = process.env.CALIBRATION_AUDIT_CRON ?? '0 4 1 1,4,7,10 *'; // 04:00 first day of each quarter
-    if (validate(cron)) {
-      const auditRepo = new CalibrationAuditRepo(db);
-      const calTask = schedule(
-        cron,
-        () => {
-          void (async () => {
-            // Audit the just-completed quarter.
-            const now = new Date();
-            const lastQuarterRef = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
-            const window = currentQuarterWindow(lastQuarterRef);
-            try {
-              const pool = await getPool();
-              await runCalibrationAudit({
+      // DECISION-011 — verbatim audit sampler. Daily 5% sampler.
+      const sampleEnabled =
+        (process.env.VERBATIM_SAMPLER_ENABLED ?? 'true').toLowerCase() !== 'false';
+      if (sampleEnabled) {
+        const cron = process.env.VERBATIM_SAMPLER_CRON ?? '15 3 * * *'; // 03:15 daily
+        if (validate(cron)) {
+          const callRecords = new CallRecordRepo(db);
+          const verbatim = new VerbatimAuditRepo(db);
+          const fraction = Number(process.env.VERBATIM_SAMPLER_FRACTION ?? '0.05');
+          const samplerTask = schedule(
+            cron,
+            () => {
+              void runVerbatimAuditSampler({
                 db,
-                pool,
-                audit: auditRepo,
+                callRecords,
+                verbatim,
                 logger,
-                periodLabel: window.periodLabel,
-                periodStart: window.periodStart,
-                periodEnd: window.periodEnd,
-              });
-            } catch (err) {
-              logger.error({ err }, 'calibration-audit-failed');
-            }
-          })();
-        },
-        { timezone: 'Africa/Douala', scheduled: true },
-      );
-      tasks.push(calTask);
-      logger.info({ cron }, 'calibration-audit-runner-scheduled');
-    }
-  }
+                fraction,
+                windowHours: 24,
+              }).catch((e) => logger.error({ err: e }, 'verbatim-sampler-failed'));
+            },
+            { timezone: 'Africa/Douala', scheduled: true },
+          );
+          tasks.push(samplerTask);
+          logger.info({ cron, fraction }, 'verbatim-audit-sampler-scheduled');
+        }
+      }
 
-  // DECISION-012 — TAL-PA quarterly anonymised export. Pins the prior
-  // quarter's audit log to IPFS and emits an audit-of-audit row.
-  const exportEnabled =
-    (process.env.AUDIT_PUBLIC_EXPORT_ENABLED ?? 'true').toLowerCase() !== 'false';
-  if (exportEnabled) {
-    const exportCron = process.env.AUDIT_PUBLIC_EXPORT_CRON ?? '0 5 1 1,4,7,10 *';
-    if (validate(exportCron)) {
-      const exportRepo = new PublicExportRepo(db);
-      const exportTask = schedule(
-        exportCron,
-        () => {
-          void (async () => {
-            try {
-              const pool = await getPool();
-              await runQuarterlyAuditExport({ db, pool, exportRepo, logger });
-            } catch (err) {
-              logger.error({ err }, 'audit-public-export-failed');
-            }
-          })();
-        },
-        { timezone: 'Africa/Douala', scheduled: true },
-      );
-      tasks.push(exportTask);
-      logger.info({ cron: exportCron }, 'audit-public-export-scheduled');
-    } else {
-      logger.error({ cron: exportCron }, 'invalid-audit-public-export-cron; trigger disabled');
-    }
-  }
+      // DECISION-011 — calibration audit runner. Quarterly (1st of next month after quarter end).
+      const calEnabled =
+        (process.env.CALIBRATION_AUDIT_ENABLED ?? 'true').toLowerCase() !== 'false';
+      if (calEnabled) {
+        const cron = process.env.CALIBRATION_AUDIT_CRON ?? '0 4 1 1,4,7,10 *'; // 04:00 first day of each quarter
+        if (validate(cron)) {
+          const auditRepo = new CalibrationAuditRepo(db);
+          const calTask = schedule(
+            cron,
+            () => {
+              void (async () => {
+                // Audit the just-completed quarter.
+                const now = new Date();
+                const lastQuarterRef = new Date(
+                  Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15),
+                );
+                const window = currentQuarterWindow(lastQuarterRef);
+                try {
+                  const pool = await getPool();
+                  await runCalibrationAudit({
+                    db,
+                    pool,
+                    audit: auditRepo,
+                    logger,
+                    periodLabel: window.periodLabel,
+                    periodStart: window.periodStart,
+                    periodEnd: window.periodEnd,
+                  });
+                } catch (err) {
+                  logger.error({ err }, 'calibration-audit-failed');
+                }
+              })();
+            },
+            { timezone: 'Africa/Douala', scheduled: true },
+          );
+          tasks.push(calTask);
+          logger.info({ cron }, 'calibration-audit-runner-scheduled');
+        }
+      }
+
+      // DECISION-012 — TAL-PA quarterly anonymised export. Pins the prior
+      // quarter's audit log to IPFS and emits an audit-of-audit row.
+      const exportEnabled =
+        (process.env.AUDIT_PUBLIC_EXPORT_ENABLED ?? 'true').toLowerCase() !== 'false';
+      if (exportEnabled) {
+        const exportCron = process.env.AUDIT_PUBLIC_EXPORT_CRON ?? '0 5 1 1,4,7,10 *';
+        if (validate(exportCron)) {
+          const exportRepo = new PublicExportRepo(db);
+          const exportTask = schedule(
+            exportCron,
+            () => {
+              void (async () => {
+                try {
+                  const pool = await getPool();
+                  await runQuarterlyAuditExport({ db, pool, exportRepo, logger });
+                } catch (err) {
+                  logger.error({ err }, 'audit-public-export-failed');
+                }
+              })();
+            },
+            { timezone: 'Africa/Douala', scheduled: true },
+          );
+          tasks.push(exportTask);
+          logger.info({ cron: exportCron }, 'audit-public-export-scheduled');
+        } else {
+          logger.error({ cron: exportCron }, 'invalid-audit-public-export-cron; trigger disabled');
+        }
+      }
     } else {
       logger.error({ cron }, 'invalid-satellite-trigger-cron; trigger disabled');
     }
