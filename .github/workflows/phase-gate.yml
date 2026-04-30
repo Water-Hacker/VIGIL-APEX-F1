@@ -61,3 +61,10 @@ jobs:
         # Every pattern definition under packages/patterns/src/ must have a
         # paired fixture-test under packages/patterns/test/.
         run: npx --yes tsx scripts/check-pattern-coverage.ts
+
+      - name: Run scripts/check-weaknesses-index.ts (AUDIT-075 drift lint)
+        # docs/weaknesses/INDEX.md must enumerate every W-*.md file on
+        # disk; per-row severity must match the file; the severity tally
+        # must total the row counts. A PR that flips a W-NN.md status
+        # without updating INDEX.md fails here.
+        run: npx --yes tsx scripts/check-weaknesses-index.ts
