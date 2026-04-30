@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bboxFromCentroidMeters,
+  bboxesFromCentroidMeters,
   centroidOfPolygon,
   polygonFromCentroidMeters,
 } from '../src/aoi.js';
@@ -43,6 +44,68 @@ describe('AUDIT-064 — equator', () => {
     const back = centroidOfPolygon(p);
     expect(back.lat).toBeCloseTo(0, 9);
     expect(back.lon).toBeCloseTo(0, 9);
+  });
+});
+
+describe('AUDIT-089 — bboxesFromCentroidMeters wraps at the antimeridian', () => {
+  it('returns a single bbox when centroid+radius does not cross the dateline', () => {
+    // Yaoundé — well clear of ±180.
+    const out = bboxesFromCentroidMeters({
+      centroid: { lat: 3.866, lon: 11.5167 },
+      radiusMeters: 5000,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.minLon).toBeGreaterThan(-180);
+    expect(out[0]!.maxLon).toBeLessThan(180);
+  });
+
+  it('returns two bboxes when crossing the antimeridian eastbound (centroid near 179.99)', () => {
+    const out = bboxesFromCentroidMeters({
+      centroid: { lat: 0, lon: 179.99 },
+      radiusMeters: 5000,
+    });
+    expect(out).toHaveLength(2);
+    // First bbox extends to 180 (eastern slice).
+    expect(out[0]!.maxLon).toBe(180);
+    // Second bbox starts at -180 (western slice).
+    expect(out[1]!.minLon).toBe(-180);
+    // Each bbox is normalised within [-180, 180].
+    for (const b of out) {
+      expect(b.minLon).toBeGreaterThanOrEqual(-180);
+      expect(b.maxLon).toBeLessThanOrEqual(180);
+    }
+  });
+
+  it('returns two bboxes when crossing the antimeridian westbound (centroid near -179.99)', () => {
+    const out = bboxesFromCentroidMeters({
+      centroid: { lat: 0, lon: -179.99 },
+      radiusMeters: 5000,
+    });
+    expect(out).toHaveLength(2);
+    for (const b of out) {
+      expect(b.minLon).toBeGreaterThanOrEqual(-180);
+      expect(b.maxLon).toBeLessThanOrEqual(180);
+    }
+  });
+
+  it('latitude is preserved across the split (only longitude is split)', () => {
+    const out = bboxesFromCentroidMeters({
+      centroid: { lat: 0, lon: 180 },
+      radiusMeters: 5000,
+    });
+    expect(out).toHaveLength(2);
+    expect(out[0]!.minLat).toBe(out[1]!.minLat);
+    expect(out[0]!.maxLat).toBe(out[1]!.maxLat);
+  });
+
+  it('combined longitude span of the two bboxes equals the original radius span', () => {
+    const r = 5000;
+    const out = bboxesFromCentroidMeters({ centroid: { lat: 0, lon: 179.99 }, radiusMeters: r });
+    const span0 = out[0]!.maxLon - out[0]!.minLon;
+    const span1 = out[1]!.maxLon - out[1]!.minLon;
+    const raw = bboxFromCentroidMeters({ centroid: { lat: 0, lon: 179.99 }, radiusMeters: r });
+    const expected = raw.maxLon - raw.minLon;
+    expect(span0 + span1).toBeCloseTo(expected, 9);
   });
 });
 

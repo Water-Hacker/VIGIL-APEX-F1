@@ -13,6 +13,7 @@ export {
 } from './types.js';
 export {
   bboxFromCentroidMeters,
+  bboxesFromCentroidMeters,
   polygonFromCentroidMeters,
   centroidOfPolygon,
   type BBox,

@@ -31,12 +31,12 @@ export function bboxFromCentroidMeters(opts: {
   if (opts.radiusMeters <= 0) {
     throw new Error('radiusMeters must be positive');
   }
-  const dLat = (opts.radiusMeters / EARTH_RADIUS_METERS) / DEG;
+  const dLat = opts.radiusMeters / EARTH_RADIUS_METERS / DEG;
   const cosLat = Math.cos(opts.centroid.lat * DEG);
   if (cosLat < 1e-9) {
     throw new Error('centroid latitude too close to a pole for equirectangular bbox');
   }
-  const dLon = (opts.radiusMeters / (EARTH_RADIUS_METERS * cosLat)) / DEG;
+  const dLon = opts.radiusMeters / (EARTH_RADIUS_METERS * cosLat) / DEG;
   return {
     minLon: opts.centroid.lon - dLon,
     minLat: opts.centroid.lat - dLat,
@@ -62,6 +62,52 @@ export function polygonFromCentroidMeters(opts: {
       ],
     ],
   };
+}
+
+/**
+ * AUDIT-089 — dateline-aware AOI helper.
+ *
+ * Returns one bbox when the centroid+radius does NOT cross the
+ * antimeridian, OR two bboxes when it does. Each bbox is normalised so
+ * `minLon` and `maxLon` are within `[-180, 180]`. The two-bbox form is
+ * what Sentinel Hub / Planet / Maxar all accept directly — most
+ * provider APIs document a side-by-side AOI as the canonical
+ * dateline-spanning shape.
+ *
+ * Cameroon (8-16°E) never crosses the antimeridian; this helper exists
+ * for federation peers in other longitudes (Pacific Rim members, future
+ * partners) and for defence-in-depth on hostile / mistaken inputs.
+ *
+ * `bboxFromCentroidMeters` (above) keeps the simpler single-bbox form
+ * for back-compat: it returns un-wrapped longitudes (maxLon may exceed
+ * 180), which the original AUDIT-064 pinning test asserts. Callers
+ * who need the wrapped form should use `bboxesFromCentroidMeters`.
+ */
+export function bboxesFromCentroidMeters(opts: {
+  readonly centroid: LatLon;
+  readonly radiusMeters: number;
+}): ReadonlyArray<BBox> {
+  const raw = bboxFromCentroidMeters(opts);
+  // No wrap needed — most cases including Cameroon.
+  if (raw.minLon >= -180 && raw.maxLon <= 180) {
+    return [raw];
+  }
+  // Crosses the antimeridian. Normalise both ends into [-180, 180]
+  // and split the bbox at the seam.
+  const wrap = (lon: number): number => {
+    let v = ((lon + 180) % 360) - 180;
+    if (v < -180) v += 360;
+    if (v > 180) v -= 360;
+    return v;
+  };
+  const wrappedMin = wrap(raw.minLon);
+  const wrappedMax = wrap(raw.maxLon);
+  // After wrap, wrappedMax < wrappedMin in the dateline-crossing case.
+  // Split: [wrappedMin .. 180] U [-180 .. wrappedMax].
+  return [
+    { minLon: wrappedMin, minLat: raw.minLat, maxLon: 180, maxLat: raw.maxLat },
+    { minLon: -180, minLat: raw.minLat, maxLon: wrappedMax, maxLat: raw.maxLat },
+  ];
 }
 
 /** Centroid of a (closed) GeoJSON Polygon's outer ring; rough average. */
