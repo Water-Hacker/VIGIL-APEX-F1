@@ -50,6 +50,26 @@ export async function incrementRetry(id: string): Promise<void> {
 }
 
 /**
+ * AUDIT-005: typed error raised when a dead-letter batch matched no
+ * rows. The route maps this to HTTP 404 so an operator clicking
+ * "retry" on a stale UI doesn't silently get a 200 with `count: 0`.
+ */
+export class DeadLetterNotFoundError extends Error {
+  override readonly name = 'DeadLetterNotFoundError';
+  readonly requestedIds: ReadonlyArray<string>;
+  readonly action: 'resolve' | 'retry';
+  constructor(action: 'resolve' | 'retry', requestedIds: ReadonlyArray<string>) {
+    super(
+      `dead_letter ${action} matched zero rows for ids ${requestedIds.slice(0, 5).join(', ')}${
+        requestedIds.length > 5 ? `, +${requestedIds.length - 5} more` : ''
+      }`,
+    );
+    this.requestedIds = requestedIds;
+    this.action = action;
+  }
+}
+
+/**
  * AUDIT-004: atomic multi-row dead-letter update.
  *
  * The earlier route layer issued `Promise.all(ids.map(markResolved))` —
@@ -59,8 +79,12 @@ export async function incrementRetry(id: string): Promise<void> {
  *
  * The new contract: a single `UPDATE ... WHERE id = ANY($1::uuid[])
  * RETURNING id`. Atomic by definition, one round-trip, returns the
- * exact set of IDs the database actually touched (used by the route
- * to surface row-count mismatches — AUDIT-005).
+ * exact set of IDs the database actually touched.
+ *
+ * AUDIT-005: throws DeadLetterNotFoundError when ZERO rows matched.
+ * Partial matches (some-but-not-all) are surfaced via the returned
+ * `affected` set; the route compares `affected.length` to the
+ * requested length and reports both.
  */
 export async function batchDeadLetterUpdate(
   action: 'resolve' | 'retry',
@@ -91,5 +115,9 @@ export async function batchDeadLetterUpdate(
            WHERE id = ANY(${idsArray})
          RETURNING id::text
         `);
-  return { affected: r.rows.map((row) => String((row as Record<string, unknown>)['id'])) };
+  const affected = r.rows.map((row) => String((row as Record<string, unknown>)['id']));
+  if (affected.length === 0) {
+    throw new DeadLetterNotFoundError(action, ids);
+  }
+  return { affected };
 }

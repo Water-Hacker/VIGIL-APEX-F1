@@ -107,3 +107,68 @@ describe('AUDIT-004 — batchDeadLetterUpdate is atomic (single multi-row UPDATE
     await expect(batchDeadLetterUpdate('resolve', [], 'r')).rejects.toThrow();
   });
 });
+
+describe('AUDIT-005 — row-count validation: zero affected throws DeadLetterNotFound', () => {
+  it('throws DeadLetterNotFoundError when zero rows match the WHERE id = ANY(...)', async () => {
+    executeMock.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    const mod = await import('../src/lib/dead-letter.server');
+    const { batchDeadLetterUpdate, DeadLetterNotFoundError } = mod as unknown as {
+      batchDeadLetterUpdate: (
+        action: 'resolve' | 'retry',
+        ids: ReadonlyArray<string>,
+        reason?: string,
+      ) => Promise<{ affected: ReadonlyArray<string> }>;
+      DeadLetterNotFoundError: new (...args: never[]) => Error;
+    };
+    expect(typeof DeadLetterNotFoundError).toBe('function');
+    let caught: unknown;
+    try {
+      await batchDeadLetterUpdate('resolve', ['00000000-0000-0000-0000-000000000000'], 'r');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DeadLetterNotFoundError);
+    expect((caught as { name?: string }).name).toBe('DeadLetterNotFoundError');
+  });
+
+  it('does NOT throw when at least one row was affected (partial OK; route can surface)', async () => {
+    executeMock.mockResolvedValueOnce({
+      rows: [{ id: '11111111-1111-1111-1111-111111111111' }],
+      rowCount: 1,
+    });
+    const mod = await import('../src/lib/dead-letter.server');
+    const { batchDeadLetterUpdate } = mod as unknown as {
+      batchDeadLetterUpdate: (
+        action: 'resolve' | 'retry',
+        ids: ReadonlyArray<string>,
+        reason?: string,
+      ) => Promise<{ affected: ReadonlyArray<string> }>;
+    };
+    const r = await batchDeadLetterUpdate(
+      'resolve',
+      ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'],
+      'r',
+    );
+    expect(r.affected.length).toBe(1);
+  });
+
+  it('DeadLetterNotFoundError carries the requested ids for the route to surface', async () => {
+    executeMock.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    const mod = await import('../src/lib/dead-letter.server');
+    const { batchDeadLetterUpdate } = mod as unknown as {
+      batchDeadLetterUpdate: (
+        action: 'resolve' | 'retry',
+        ids: ReadonlyArray<string>,
+        reason?: string,
+      ) => Promise<{ affected: ReadonlyArray<string> }>;
+    };
+    const ids = ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'];
+    let caught: unknown;
+    try {
+      await batchDeadLetterUpdate('retry', ids);
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as { requestedIds?: ReadonlyArray<string> }).requestedIds).toEqual(ids);
+  });
+});
