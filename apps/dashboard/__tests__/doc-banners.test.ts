@@ -43,3 +43,29 @@ describe('AUDIT-018 — worker-fabric-bridge README documents single-peer status
     expect(text).toMatch(/Endorsement policy/i);
   });
 });
+
+describe('AUDIT-071 — every PROVISIONAL decision in log.md has the body-is-forward-looking banner', () => {
+  it('the count of "### Decision (proposed)" sections == count of PROVISIONAL banners', () => {
+    const text = readFileSync(docPath('docs/decisions/log.md'), 'utf8');
+    const proposedHeadings = text.match(/^### Decision \(proposed\)$/gm) ?? [];
+    const banners =
+      text.match(
+        /STATUS: PROVISIONAL — body is forward-looking; ratification pending architect read-through\. Do not cite as authoritative for new PRs\.\*\* \(AUDIT-071\)/g,
+      ) ?? [];
+    // Every "Decision (proposed)" subheading must be preceded by the
+    // AUDIT-071 banner.
+    expect(proposedHeadings.length).toBeGreaterThan(0);
+    expect(banners.length).toBe(proposedHeadings.length);
+  });
+
+  it('the banner appears immediately before each "Decision (proposed)" subheading', () => {
+    const text = readFileSync(docPath('docs/decisions/log.md'), 'utf8');
+    // Match the canonical pattern: banner blockquote, blank line, heading.
+    // Banner format:
+    //   > **STATUS: PROVISIONAL — body is forward-looking; ... PRs.** (AUDIT-071)
+    const pattern = /\*\*STATUS: PROVISIONAL[^\n]*\*\* \(AUDIT-071\)\n\n### Decision \(proposed\)/g;
+    const matches = text.match(pattern) ?? [];
+    const proposed = text.match(/^### Decision \(proposed\)$/gm) ?? [];
+    expect(matches.length).toBe(proposed.length);
+  });
+});
