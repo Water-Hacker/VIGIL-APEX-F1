@@ -1,6 +1,12 @@
 'use client';
 
-import { TipSanitise } from '@vigil/shared';
+// Deep-import via the `@vigil/shared/tip-sanitise` subpath instead of
+// the root barrel: the barrel re-exports `Ids` (which imports
+// `node:crypto`) and triggers Next dev's React Refresh loader to
+// inject `import.meta.webpackHot.accept()` into the CJS dist file —
+// webpack then fails to parse it. The subpath import only pulls in
+// the pure-string sanitisation helpers tip/page.tsx actually uses.
+import * as TipSanitise from '@vigil/shared/tip-sanitise';
 import Script from 'next/script';
 import { useCallback, useEffect, useState } from 'react';
 

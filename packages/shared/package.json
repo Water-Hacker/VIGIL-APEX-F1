@@ -2,7 +2,7 @@
   "name": "@vigil/shared",
   "version": "0.1.0",
   "private": true,
-  "description": "VIGIL APEX shared types, schemas, errors, constants \u2014 foundation for every other package.",
+  "description": "VIGIL APEX shared types, schemas, errors, constants — foundation for every other package.",
   "license": "UNLICENSED",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -27,6 +27,10 @@
     "./time": {
       "types": "./dist/time.d.ts",
       "default": "./dist/time.js"
+    },
+    "./tip-sanitise": {
+      "types": "./dist/tip-sanitise.d.ts",
+      "default": "./dist/tip-sanitise.js"
     }
   },
   "files": [

@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 
 import { createRequire } from 'node:module';
+import path from 'node:path';
 
 // Per-surface CSP — operator dashboards, public verify, and the tip portal
 // each have different trust requirements. Defining them here (rather than
@@ -56,6 +57,14 @@ const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
   poweredByHeader: false,
+  // Transpile workspace packages so Next compiles them through its own
+  // SWC pipeline instead of consuming the prebuilt CJS dist directly.
+  // Without this, Next dev's React Refresh loader injects
+  // `import.meta.webpackHot.accept()` into the CJS module, which
+  // webpack cannot parse and the page returns 500. Production
+  // (`next build`) is unaffected because Refresh isn't injected, but
+  // the a11y job runs against `next dev` so it hits the dev-only path.
+  transpilePackages: ['@vigil/shared', '@vigil/observability'],
   experimental: {
     serverComponentsExternalPackages: ['pg', '@vigil/db-postgres'],
   },
@@ -135,6 +144,29 @@ const nextConfig = {
       const wp = webpack.webpack ?? webpack;
       config.plugins ??= [];
       config.plugins.push(new wp.NormalModuleReplacementPlugin(/^node:crypto$/, 'crypto'));
+    }
+    // Client bundle alias: redirect `@vigil/shared/tip-sanitise` to
+    // its TypeScript source so Next compiles it through its own SWC
+    // pipeline instead of consuming the prebuilt CJS dist. The dist
+    // is `type: "commonjs"`, but Next dev's React Refresh loader
+    // injects `import.meta.webpackHot.accept()` into every JS module
+    // it processes — webpack's CJS parser then rejects `import.meta`
+    // and the route returns 500. Compiling from .ts dodges the
+    // CJS/ESM mismatch entirely. transpilePackages above ensures the
+    // SWC pipeline applies. Server bundle keeps the dist (no Refresh
+    // loader, no problem).
+    if (!isServer) {
+      // Resolve @vigil/shared via its registered "." entry, then walk
+      // up from the resolved dist file to the package root, then point
+      // at src/tip-sanitise.ts. Alternative `@vigil/shared/package.json`
+      // lookup fails because the package's `exports` field doesn't
+      // expose package.json.
+      const sharedDistEntry = createRequire(import.meta.url).resolve('@vigil/shared');
+      const sharedRoot = path.resolve(sharedDistEntry, '..', '..');
+      config.resolve.alias = {
+        ...(config.resolve.alias ?? {}),
+        '@vigil/shared/tip-sanitise$': path.join(sharedRoot, 'src', 'tip-sanitise.ts'),
+      };
     }
     return config;
   },
