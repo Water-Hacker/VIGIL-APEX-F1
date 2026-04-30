@@ -260,3 +260,99 @@ describe('AUDIT-062 — type imports', () => {
     expect(typesPresent).toBe(true);
   });
 });
+
+describe('AUDIT-053 — GovernanceReadClient error paths emit via the logger', () => {
+  function makeFakeLogger() {
+    return {
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      fatal: vi.fn(),
+      silent: vi.fn(),
+      level: 'info',
+      child: vi.fn(),
+    } as unknown as import('@vigil/observability').Logger & {
+      error: ReturnType<typeof vi.fn>;
+      warn: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  function clientWithFailingFn(name: string) {
+    const logger = makeFakeLogger();
+    const client = new GovernanceReadClient(
+      'http://127.0.0.1:1',
+      '0x0000000000000000000000000000000000000001',
+      logger,
+    );
+    const fake = {
+      getFunction: vi.fn(() => ({
+        staticCall: vi.fn(() => Promise.reject(new Error(`rpc-${name}-down`))),
+      })),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    (client as unknown as { contract: typeof fake }).contract = fake;
+    return { client, logger };
+  }
+
+  it('getProposal failure logs at error level with proposal index', async () => {
+    const { client, logger } = clientWithFailingFn('getProposal');
+    await expect(client.getProposal(7)).rejects.toThrow();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toMatchObject({
+      method: 'getProposal',
+      proposalIndex: 7,
+    });
+  });
+
+  it('totalProposals failure logs at error level', async () => {
+    const { client, logger } = clientWithFailingFn('totalProposals');
+    await expect(client.totalProposals()).rejects.toThrow();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toMatchObject({ method: 'totalProposals' });
+  });
+
+  it('quorumRequired failure logs at error level', async () => {
+    const { client, logger } = clientWithFailingFn('quorumRequired');
+    await expect(client.quorumRequired()).rejects.toThrow();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toMatchObject({ method: 'quorumRequired' });
+  });
+
+  it('watch() handler that throws gets logged at warn level (handler isolation)', () => {
+    const logger = makeFakeLogger();
+    const client = new GovernanceReadClient(
+      'http://127.0.0.1:1',
+      '0x0000000000000000000000000000000000000001',
+      logger,
+    );
+    const listeners = new Map<string, (...a: unknown[]) => void>();
+    const fake = {
+      getFunction: vi.fn(),
+      on: vi.fn((event: string, fn: (...a: unknown[]) => void) => {
+        listeners.set(event, fn);
+      }),
+      off: vi.fn(),
+    };
+    (client as unknown as { contract: typeof fake }).contract = fake;
+
+    const userHandlerThatThrows = vi.fn(() => {
+      throw new Error('user-handler-explodes');
+    });
+    client.watch({ onProposalEscalated: userHandlerThatThrows });
+
+    // Fire the ethers callback as ethers v6 would.
+    const cb = listeners.get('ProposalEscalated')!;
+    cb(99n);
+
+    // The user handler threw — the wrapper must isolate it (log, don't
+    // bubble) so a single bad handler doesn't kill the listener set.
+    expect(userHandlerThatThrows).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toMatchObject({
+      event: 'ProposalEscalated',
+    });
+  });
+});
