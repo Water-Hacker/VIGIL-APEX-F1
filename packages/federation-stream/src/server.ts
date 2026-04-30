@@ -147,7 +147,12 @@ export class FederationStreamServer {
               };
           rejected.push(r);
           this.logger.warn(
-            { envelopeId: env.envelopeId, code: result.code, detail: result.detail, region: env.region },
+            {
+              envelopeId: env.envelopeId,
+              code: result.code,
+              detail: result.detail,
+              region: env.region,
+            },
             'federation-envelope-rejected',
           );
           return;
@@ -187,7 +192,13 @@ export class FederationStreamServer {
       .then((reply) => callback(null, reply))
       .catch((err) => {
         this.logger.error({ err, region: call.request.region }, 'federation-beacon-error');
-        callback({ code: grpc.status.INTERNAL, message: err instanceof Error ? err.message : 'beacon failed' } as grpc.ServiceError, null);
+        callback(
+          {
+            code: grpc.status.INTERNAL,
+            message: err instanceof Error ? err.message : 'beacon failed',
+          } as grpc.ServiceError,
+          null,
+        );
       });
   }
 
@@ -210,6 +221,16 @@ export class FederationStreamServer {
           'federation-stream: tlsCertPath/tlsKeyPath unset and VIGIL_FEDERATION_INSECURE_OK is not "true"; refusing to start without TLS',
         );
       }
+      // AUDIT-041 — second-stage guard: even when the dev-only opt-in IS
+      // set, refuse to bind insecure if NODE_ENV=production. The opt-in
+      // exists for in-process tests + the local dev compose stack; it must
+      // not be the difference between "secure prod" and "plaintext prod"
+      // because someone fat-fingered an env file.
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'federation-stream: VIGIL_FEDERATION_INSECURE_OK="true" is forbidden when NODE_ENV=production; provide tlsCertPath/tlsKeyPath',
+        );
+      }
       this.logger.warn(
         'federation-stream-server-insecure (VIGIL_FEDERATION_INSECURE_OK=true; for in-process tests + dev only)',
       );
@@ -219,7 +240,10 @@ export class FederationStreamServer {
     await new Promise<void>((resolve, reject) => {
       this.server.bindAsync(this.opts.listenAddress, credentials, (err, port) => {
         if (err) return reject(err);
-        this.logger.info({ port, listen: this.opts.listenAddress }, 'federation-stream-server-started');
+        this.logger.info(
+          { port, listen: this.opts.listenAddress },
+          'federation-stream-server-started',
+        );
         resolve();
       });
     });
