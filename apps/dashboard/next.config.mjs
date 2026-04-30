@@ -34,7 +34,7 @@ const CSP_TIP = [
   "default-src 'self'",
   // Cloudflare Turnstile drops a script + iframe.
   "script-src 'self' https://challenges.cloudflare.com",
-  "frame-src https://challenges.cloudflare.com",
+  'frame-src https://challenges.cloudflare.com',
   "style-src 'self' 'unsafe-inline'",
   // libsodium-wrappers is bundled locally — no remote CDN.
   "connect-src 'self'",
@@ -106,18 +106,36 @@ const nextConfig = {
       },
     ];
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     // libsodium-wrappers-sumo@0.7.16 ships an ESM build that references a
     // sibling .mjs file that pnpm hoists to a different package directory,
     // which webpack cannot resolve. Force resolution through the package's
     // CJS main entry, which is self-contained.
-    const sumoCjs = createRequire(import.meta.url).resolve(
-      'libsodium-wrappers-sumo',
-    );
+    const sumoCjs = createRequire(import.meta.url).resolve('libsodium-wrappers-sumo');
     config.resolve.alias = {
       ...(config.resolve.alias ?? {}),
       'libsodium-wrappers-sumo$': sumoCjs,
     };
+    // The client bundle pulls @vigil/shared via the tip portal's
+    // `import { TipSanitise } from '@vigil/shared'`. The shared package's
+    // barrel re-exports `Ids` (ids.ts), which imports `randomUUID` from
+    // `node:crypto`. The actual call is dead code from the browser's
+    // perspective — TipSanitise doesn't use Ids — but webpack still
+    // bundles the file, then chokes on the `node:` URL scheme. We mark
+    // node:crypto / crypto as unavailable on the client; any unintended
+    // call will throw at runtime instead of failing the build silently.
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...(config.resolve.fallback ?? {}),
+        crypto: false,
+      };
+      // Strip the `node:` URL scheme so the fallback above (crypto: false)
+      // takes effect on the client bundle.
+      const webpack = createRequire(import.meta.url)('next/dist/compiled/webpack/webpack.js');
+      const wp = webpack.webpack ?? webpack;
+      config.plugins ??= [];
+      config.plugins.push(new wp.NormalModuleReplacementPlugin(/^node:crypto$/, 'crypto'));
+    }
     return config;
   },
 };

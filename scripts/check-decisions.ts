@@ -126,12 +126,27 @@ function isWithinDays(dateStr: string, days: number): boolean {
 const VALID_PHASES = new Set(['0', '1', '2', '3', '4']);
 const PHASE_REFERENCE = /\bPhase\s+([0-9]+|[A-Za-z]+)\b/g;
 
+/**
+ * Strip Markdown code spans before scanning for phase references.
+ * Phrases like `Phase 99` or `Phase II` inside fenced or inline code
+ * blocks are by definition examples — typically documentation of the
+ * lint itself in DECISION-015 — not authoritative references to real
+ * phases. Replacing the spans with same-length whitespace keeps line
+ * numbers stable for the diagnostic message.
+ */
+function stripCodeSpans(body: string): string {
+  return body
+    .replace(/```[\s\S]*?```/g, (m) => ' '.repeat(m.length))
+    .replace(/`[^`\n]*`/g, (m) => ' '.repeat(m.length));
+}
+
 function validatePhaseReferences(blocks: DecisionBlock[]): string[] {
   const errors: string[] = [];
   for (const b of blocks) {
+    const scannable = stripCodeSpans(b.body);
     let m: RegExpExecArray | null;
     PHASE_REFERENCE.lastIndex = 0;
-    while ((m = PHASE_REFERENCE.exec(b.body)) !== null) {
+    while ((m = PHASE_REFERENCE.exec(scannable)) !== null) {
       const ref = m[1] ?? '';
       // Numeric phase: validate against ROADMAP cap (0..4).
       if (/^\d+$/.test(ref)) {
