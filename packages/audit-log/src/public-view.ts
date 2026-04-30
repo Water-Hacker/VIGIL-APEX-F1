@@ -58,7 +58,21 @@ export function toPublicView(row: PublicViewRow): Schemas.PublicAuditView {
 }
 
 /** Hashes a piece of PII so the public-view can show "a search happened"
- *  without exposing the original string. */
-export function hashPii(value: string, salt = 'tal-pa-public-salt'): string {
+ *  without exposing the original string.
+ *
+ *  AUDIT-031: the `salt` parameter is REQUIRED. A default salt would
+ *  produce rainbow-tableable hashes for any caller that forgets to
+ *  pass one. Production callers source the salt from
+ *  AUDIT_PUBLIC_EXPORT_SALT (rotated quarterly per DECISION-016);
+ *  tests pass a literal 'test-salt' or similar. Empty string and
+ *  the literal 'PLACEHOLDER' are also rejected.
+ */
+export function hashPii(value: string, salt: string): string {
+  if (typeof salt !== 'string' || salt.length === 0) {
+    throw new Error('hashPii: salt is required (non-empty string)');
+  }
+  if (salt === 'PLACEHOLDER') {
+    throw new Error('hashPii: refusing PLACEHOLDER salt — set AUDIT_PUBLIC_EXPORT_SALT');
+  }
   return createHash('sha256').update(`${salt}|${value}`).digest('hex').slice(0, 16);
 }

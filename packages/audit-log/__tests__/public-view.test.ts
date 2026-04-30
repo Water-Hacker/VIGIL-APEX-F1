@@ -35,15 +35,15 @@ describe('toPublicView', () => {
   });
 
   it('preserves target_resource for D / E / F categories (decisions, modifications, config)', () => {
-    expect(toPublicView(row({ category: 'D', target_resource: 'proposal:42' })).target_resource).toBe(
-      'proposal:42',
-    );
-    expect(toPublicView(row({ category: 'E', target_resource: 'finding:abc' })).target_resource).toBe(
-      'finding:abc',
-    );
-    expect(toPublicView(row({ category: 'F', target_resource: 'prompt:v2.0.0' })).target_resource).toBe(
-      'prompt:v2.0.0',
-    );
+    expect(
+      toPublicView(row({ category: 'D', target_resource: 'proposal:42' })).target_resource,
+    ).toBe('proposal:42');
+    expect(
+      toPublicView(row({ category: 'E', target_resource: 'finding:abc' })).target_resource,
+    ).toBe('finding:abc');
+    expect(
+      toPublicView(row({ category: 'F', target_resource: 'prompt:v2.0.0' })).target_resource,
+    ).toBe('prompt:v2.0.0');
   });
 
   it('marks public-portal events as [PUBLIC] without leaking submitter identity', () => {
@@ -67,12 +67,30 @@ describe('toPublicView', () => {
 
 describe('hashPii', () => {
   it('is deterministic for the same input', () => {
-    expect(hashPii('Mr X')).toEqual(hashPii('Mr X'));
+    expect(hashPii('Mr X', 'test-salt')).toEqual(hashPii('Mr X', 'test-salt'));
   });
   it('rotates with the salt', () => {
     expect(hashPii('Mr X', 'salt-a')).not.toEqual(hashPii('Mr X', 'salt-b'));
   });
   it('returns 16 hex chars', () => {
-    expect(hashPii('any').length).toBe(16);
+    expect(hashPii('any', 'test-salt').length).toBe(16);
+  });
+});
+
+describe('AUDIT-031 — hashPii salt is required (no default)', () => {
+  it('throws at runtime when called without a salt (forced via cast)', () => {
+    expect(() => (hashPii as unknown as (v: string) => string)('Mr X')).toThrow(/salt/i);
+  });
+
+  it('throws when called with empty-string salt (would be a rainbow-tableable hash)', () => {
+    expect(() => hashPii('Mr X', '')).toThrow(/salt/i);
+  });
+
+  it('throws when called with PLACEHOLDER salt', () => {
+    expect(() => hashPii('Mr X', 'PLACEHOLDER')).toThrow(/PLACEHOLDER|salt/i);
+  });
+
+  it('accepts any non-empty non-PLACEHOLDER salt', () => {
+    expect(hashPii('Mr X', 'real-salt-32-bytes-of-entropy-here')).toMatch(/^[0-9a-f]{16}$/);
   });
 });
