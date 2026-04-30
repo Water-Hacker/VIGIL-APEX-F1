@@ -44,6 +44,20 @@ describe('AUDIT-018 — worker-fabric-bridge README documents single-peer status
   });
 });
 
+describe('AUDIT-072 — SRD §10.2 erratum cross-references TRUTH.md', () => {
+  it('SRD-v3.md §10.2 contains the AUDIT-072 erratum banner', () => {
+    const text = readFileSync(docPath('docs/source/SRD-v3.md'), 'utf8');
+    expect(text).toMatch(/Erratum \(AUDIT-072\):/);
+    expect(text).toMatch(/TRUTH\.md.*authoritative/);
+    expect(text).toMatch(/DECISION-008/);
+  });
+
+  it('TRUTH.md §C still records 27 sources (the canonical count)', () => {
+    const text = readFileSync(docPath('TRUTH.md'), 'utf8');
+    expect(text).toMatch(/Source count[^\n]*27/);
+  });
+});
+
 describe('AUDIT-071 — every PROVISIONAL decision in log.md has the body-is-forward-looking banner', () => {
   it('the count of "### Decision (proposed)" sections == count of PROVISIONAL banners', () => {
     const text = readFileSync(docPath('docs/decisions/log.md'), 'utf8');
