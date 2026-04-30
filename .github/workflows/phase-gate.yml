@@ -68,3 +68,9 @@ jobs:
         # must total the row counts. A PR that flips a W-NN.md status
         # without updating INDEX.md fails here.
         run: npx --yes tsx scripts/check-weaknesses-index.ts
+
+      - name: Run scripts/check-migration-pairs.ts (AUDIT-051 round-trip lint)
+        # Every new packages/db-postgres/drizzle/NNNN_*.sql must ship a
+        # matching NNNN_*_down.sql. A closed allowlist exempts the
+        # legacy 0001..0006 + 0008 forward-only migrations.
+        run: npx --yes tsx scripts/check-migration-pairs.ts
