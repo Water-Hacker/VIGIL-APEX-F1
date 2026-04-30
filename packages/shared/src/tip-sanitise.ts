@@ -164,6 +164,11 @@ export function sanitiseFilename(raw: string): string | null {
     }
   }
   // Lowercase the extension only.
+  // AUDIT-045: `.toLowerCase()` (no arg) is locale-invariant per the ES
+  // spec — only `.toLocaleLowerCase()` could exhibit the Turkish-İ
+  // bug-class. The downstream allow-list (TipSanitise.allowedTipMime)
+  // is also strict ASCII, so even a future regression to
+  // `.toLocaleLowerCase()` would not produce 'ı' or 'i̇' here.
   const dot = s.lastIndexOf('.');
   if (dot > 0) {
     s = s.slice(0, dot) + s.slice(dot).toLowerCase();
