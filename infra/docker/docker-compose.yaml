@@ -589,6 +589,27 @@ services:
       WORKER_NAME: worker-pattern
       OTEL_SERVICE_NAME: worker-pattern
 
+  # DECISION-014 Stream 1 — procurement field extractor.
+  # Bridges raw ADAPTER_OUT scraper payloads to ENTITY_RESOLVE with
+  # structured fields the patterns expect (bidder_count, amount_xaf,
+  # procurement_method, supplier_name, dates). Deterministic French
+  # regex pass + optional LLM fallback (off by default).
+  worker-extractor:
+    <<: *worker-base
+    build:
+      context: ../..
+      dockerfile: infra/docker/dockerfiles/Worker.Dockerfile
+      args: { WORKER_NAME: worker-extractor }
+    image: vigil-apex/worker-extractor:0.1.0
+    container_name: worker-extractor
+    hostname: worker-extractor
+    networks: { vigil-internal: { ipv4_address: 172.20.0.33 } }
+    environment:
+      <<: *worker-env
+      WORKER_NAME: worker-extractor
+      OTEL_SERVICE_NAME: worker-extractor
+      EXTRACTOR_LLM_ENABLED: ${EXTRACTOR_LLM_ENABLED:-false}
+
   worker-score:
     <<: *worker-base
     build:

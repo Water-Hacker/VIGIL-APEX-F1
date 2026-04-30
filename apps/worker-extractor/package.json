@@ -18,7 +18,9 @@
     "@vigil/db-postgres": "workspace:*",
     "@vigil/llm": "workspace:*",
     "@vigil/observability": "workspace:*",
+    "@vigil/patterns": "workspace:*",
     "@vigil/queue": "workspace:*",
+    "@vigil/security": "workspace:*",
     "@vigil/shared": "workspace:*",
     "zod": "^3.23.8"
   },
