@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
 import { request } from 'undici';
 import { z } from 'zod';
@@ -78,6 +74,14 @@ class AnifAmlScreenAdapter extends Adapter {
     if (process.env.ANIF_ENABLED !== '1') {
       this.logger.info('anif-amlscreen disabled (MOU pending) — no events emitted');
       return { events: [], documents: [], fetchedPages: 0 };
+    }
+    // AUDIT-003 — same shape as AUDIT-001: refuse the run when ENABLED was
+    // flipped without the MOU countersignature, instead of silently passing
+    // through to a downstream API that will reject every unsigned request.
+    if (process.env.ANIF_MOU_ACK !== '1') {
+      throw new Error(
+        'anif-amlscreen: ANIF_ENABLED=1 but ANIF_MOU_ACK is not "1"; refusing to run before the MOU is countersigned',
+      );
     }
 
     const baseUrl = process.env.ANIF_BASE_URL ?? DEFAULT_BASE_URL;

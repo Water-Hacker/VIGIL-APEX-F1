@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
 import { Agent, request } from 'undici';
 import { z } from 'zod';
@@ -73,6 +69,17 @@ class MinfiBisAdapter extends Adapter {
       // so operations can see the placeholder is reachable.
       this.logger.info('minfi-bis disabled (MOU pending) — no events emitted');
       return { events: [], documents: [], fetchedPages: 0 };
+    }
+    // AUDIT-001 — refuse to run when the operator has flipped MINFI_BIS_ENABLED=1
+    // but the MOU has not been countersigned. The previous code would have
+    // silently produced zero rows in this state because the downstream API
+    // rejects every unsigned request; the pipeline appeared healthy while
+    // ingesting nothing. Loud throw makes it impossible to ramp this adapter
+    // before the institutional gate clears.
+    if (process.env.MINFI_BIS_MOU_ACK !== '1') {
+      throw new Error(
+        'minfi-bis: MINFI_BIS_ENABLED=1 but MINFI_BIS_MOU_ACK is not "1"; refusing to run before the MOU is countersigned',
+      );
     }
 
     const baseUrl = process.env.MINFI_BIS_BASE_URL ?? DEFAULT_BASE_URL;
