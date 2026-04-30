@@ -7,6 +7,8 @@
  * us regardless and that's a finding category G signal.
  */
 
+import { randomInt } from 'node:crypto';
+
 import { Constants } from '@vigil/shared';
 
 export interface FingerprintProfile {
@@ -25,7 +27,10 @@ const VIEWPORT_POOL: ReadonlyArray<{ width: number; height: number }> = [
 ];
 
 export function pickFingerprint(seed?: string): FingerprintProfile {
-  const i = seed ? hashToInt(seed) : Math.floor(Math.random() * VIEWPORT_POOL.length);
+  // AUDIT-029: no-seed branch must use cryptographic randomness so
+  // a target site cannot predict our viewport rotation and cluster
+  // requests for stealth-of-the-crawler rate-limiting.
+  const i = seed ? hashToInt(seed) : randomInt(0, VIEWPORT_POOL.length);
   return {
     userAgent: Constants.getAdapterUserAgent(),
     viewport: VIEWPORT_POOL[i % VIEWPORT_POOL.length]!,
