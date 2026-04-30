@@ -28,8 +28,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const until = url.searchParams.get('until') ?? new Date().toISOString();
   const categoryParam = url.searchParams.get('category');
   const category = categoryParam && VALID_CATEGORIES.has(categoryParam) ? categoryParam : undefined;
+  // AUDIT-033: limit + offset must never produce NaN / Infinity /
+  // negative / fractional values. The `limit` path went through clamp()
+  // which already guarded against NaN; the `offset` path used a raw
+  // Math.max(Number(...), 0) that returned NaN/Infinity intact when
+  // the input was malformed. Route both through clamp(), with offset's
+  // upper bound at Number.MAX_SAFE_INTEGER (effectively unbounded but
+  // finite + integer).
   const limit = clamp(Number(url.searchParams.get('limit') ?? '100'), 1, 500);
-  const offset = Math.max(Number(url.searchParams.get('offset') ?? '0'), 0);
+  const offset = clamp(Number(url.searchParams.get('offset') ?? '0'), 0, Number.MAX_SAFE_INTEGER);
 
   if (Number.isNaN(Date.parse(since)) || Number.isNaN(Date.parse(until))) {
     return NextResponse.json({ error: 'invalid-time-bounds' }, { status: 400 });
@@ -59,7 +66,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }),
   );
   return NextResponse.json(
-    { since, until, ...(category !== undefined && { category }), limit, offset, count: events.length, events },
+    {
+      since,
+      until,
+      ...(category !== undefined && { category }),
+      limit,
+      offset,
+      count: events.length,
+      events,
+    },
     {
       status: 200,
       headers: {
