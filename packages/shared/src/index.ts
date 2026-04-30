@@ -15,12 +15,6 @@ export * as Money from './money.js';
 export * as Constants from './constants.js';
 export * as Result from './result.js';
 export * as Routing from './routing/index.js';
+export * as TipSanitise from './tip-sanitise.js';
 
-export type {
-  Brand,
-  DeepReadonly,
-  Json,
-  JsonObject,
-  Nullable,
-  Optional,
-} from './types.js';
+export type { Brand, DeepReadonly, Json, JsonObject, Nullable, Optional } from './types.js';
