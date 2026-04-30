@@ -190,7 +190,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # `@playwright/test` is a devDep of apps/dashboard, not the
+      # workspace root, so `pnpm exec` from root cannot find the
+      # `playwright` CLI. Run via the dashboard filter so pnpm
+      # resolves the binary from apps/dashboard/node_modules/.bin/.
+      - run: pnpm --filter dashboard exec playwright install --with-deps chromium
       - run: pnpm run build
       - name: Apply DB migrations
         run: pnpm --filter @vigil/db-postgres run migrate
