@@ -1554,6 +1554,9 @@ importers:
 
   packages/satellite-client:
     dependencies:
+      '@vigil/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@vigil/queue':
         specifier: workspace:*
         version: link:../queue

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { SatelliteClient, SATELLITE_REQUEST_STREAM, satelliteRequestKey } from '../src/client.js';
 import { polygonFromCentroidMeters } from '../src/aoi.js';
+import { SatelliteClient, SATELLITE_REQUEST_STREAM, satelliteRequestKey } from '../src/client.js';
+
 import type { SatelliteRequest } from '../src/types.js';
 
 function fakeQueue() {
@@ -59,10 +60,57 @@ describe('SatelliteClient.request', () => {
     await expect(
       client.request({ ...SAMPLE, providers: [] as unknown as SatelliteRequest['providers'] }),
     ).rejects.toThrow();
-    await expect(
-      client.request({ ...SAMPLE, max_cloud_pct: -1 }),
-    ).rejects.toThrow();
+    await expect(client.request({ ...SAMPLE, max_cloud_pct: -1 })).rejects.toThrow();
     expect(q.publish).not.toHaveBeenCalled();
+  });
+});
+
+describe('AUDIT-054 — SatelliteClient emits structured events on failures', () => {
+  function fakeLogger() {
+    return {
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      fatal: vi.fn(),
+      silent: vi.fn(),
+      level: 'info',
+      child: vi.fn(),
+    };
+  }
+
+  it('logs satellite-request-validation-failed on schema rejection', async () => {
+    const q = fakeQueue();
+    const logger = fakeLogger();
+    const client = new SatelliteClient(q as never, logger as never);
+    await expect(client.request({ ...SAMPLE, max_cloud_pct: -1 })).rejects.toThrow();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0]![1]).toBe('satellite-request-validation-failed');
+  });
+
+  it('logs satellite-request-publish-failed on queue.publish() rejection', async () => {
+    const q = {
+      publish: vi.fn(async () => {
+        throw new Error('redis-down');
+      }),
+    };
+    const logger = fakeLogger();
+    const client = new SatelliteClient(q as never, logger as never);
+    await expect(client.request(SAMPLE)).rejects.toThrow(/redis-down/);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0]![1]).toBe('satellite-request-publish-failed');
+    expect(logger.error.mock.calls[0]![0]).toMatchObject({
+      requestId: SAMPLE.request_id,
+    });
+  });
+
+  it('does NOT log on the happy path', async () => {
+    const q = fakeQueue();
+    const logger = fakeLogger();
+    const client = new SatelliteClient(q as never, logger as never);
+    await client.request(SAMPLE);
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });
 

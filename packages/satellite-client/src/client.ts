@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from '@vigil/observability';
 import { QueueClient, newEnvelope } from '@vigil/queue';
 import { Ids } from '@vigil/shared';
 
@@ -21,7 +22,17 @@ export function satelliteRequestKey(input: {
 }
 
 export class SatelliteClient {
-  constructor(private readonly queue: QueueClient) {}
+  private readonly logger: Logger;
+
+  constructor(
+    private readonly queue: QueueClient,
+    logger?: Logger,
+  ) {
+    // AUDIT-054: emit structured events on validation + publish failures
+    // so a lost satellite task doesn't only surface at the downstream
+    // pattern's "no recent imagery" diagnostic.
+    this.logger = logger ?? createLogger({ service: 'satellite-client' });
+  }
 
   /**
    * Validates and publishes a SatelliteRequest. Returns the deterministic
@@ -29,7 +40,16 @@ export class SatelliteClient {
    * tracking row before the worker picks it up.
    */
   async request(req: SatelliteRequest): Promise<{ requestId: string; dedupKey: string }> {
-    const validated = zSatelliteRequest.parse(req);
+    let validated: SatelliteRequest;
+    try {
+      validated = zSatelliteRequest.parse(req);
+    } catch (err) {
+      this.logger.error(
+        { err, projectId: req.project_id, findingId: req.finding_id },
+        'satellite-request-validation-failed',
+      );
+      throw err;
+    }
     const dedupKey = satelliteRequestKey({
       projectId: validated.project_id,
       findingId: validated.finding_id,
@@ -37,7 +57,15 @@ export class SatelliteClient {
       contractEnd: validated.contract_window.end,
     });
     const env = newEnvelope('satellite-client', validated, dedupKey);
-    await this.queue.publish(SATELLITE_REQUEST_STREAM, env);
+    try {
+      await this.queue.publish(SATELLITE_REQUEST_STREAM, env);
+    } catch (err) {
+      this.logger.error(
+        { err, requestId: validated.request_id, dedupKey },
+        'satellite-request-publish-failed',
+      );
+      throw err;
+    }
     return { requestId: validated.request_id, dedupKey };
   }
 
