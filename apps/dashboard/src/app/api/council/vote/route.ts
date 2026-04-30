@@ -6,6 +6,11 @@ import { Constants } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import {
+  InvalidWebauthnOriginError,
+  parseAllowedWebauthnOrigins,
+} from '../../../../lib/webauthn-origin';
+
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 
 /**
@@ -81,14 +86,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const challenge = await repo.findOpenWebauthnChallenge(parsed.data.proposal_id, voterAddress);
   if (!challenge) {
     return NextResponse.json(
-      { error: 'no-open-challenge', detail: 'request a fresh challenge via GET /api/council/vote/challenge' },
+      {
+        error: 'no-open-challenge',
+        detail: 'request a fresh challenge via GET /api/council/vote/challenge',
+      },
       { status: 409 },
     );
   }
   const rpId = process.env.WEBAUTHN_RP_ID ?? 'vigilapex.cm';
-  const expectedOrigin = process.env.WEBAUTHN_RP_ORIGIN
-    ? process.env.WEBAUTHN_RP_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
-    : [`https://${rpId}`];
+  let expectedOrigin: string[];
+  try {
+    expectedOrigin = parseAllowedWebauthnOrigins(process.env.WEBAUTHN_RP_ORIGIN, rpId);
+  } catch (e) {
+    if (e instanceof InvalidWebauthnOriginError) {
+      return NextResponse.json(
+        { error: 'webauthn-origin-misconfigured', detail: e.message },
+        { status: 500 },
+      );
+    }
+    throw e;
+  }
   try {
     const result = await verifyAuthentication({
       response: parsed.data.webauthn_assertion as AuthenticationResponseJSON,
