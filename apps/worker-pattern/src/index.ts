@@ -1,10 +1,5 @@
 import { Neo4jClient } from '@vigil/db-neo4j';
-import {
-  EntityRepo,
-  FindingRepo,
-  SourceRepo,
-  getDb,
-} from '@vigil/db-postgres';
+import { EntityRepo, FindingRepo, SourceRepo, getDb } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -17,6 +12,7 @@ import {
 } from '@vigil/observability';
 import {
   PatternRegistry,
+  dispatchPatterns,
   type PatternContext,
   type SubjectInput,
 } from '@vigil/patterns';
@@ -118,7 +114,8 @@ function rowToFinding(
     closed_at: row.closed_at ? row.closed_at.toISOString() : null,
     closure_reason: row.closure_reason,
     // DECISION-010
-    recommended_recipient_body: row.recommended_recipient_body as Schemas.Finding['recommended_recipient_body'],
+    recommended_recipient_body:
+      row.recommended_recipient_body as Schemas.Finding['recommended_recipient_body'],
     primary_pattern_id: row.primary_pattern_id as Schemas.Finding['primary_pattern_id'],
   };
 }
@@ -165,9 +162,7 @@ class PatternWorker extends WorkerBase<Payload> {
     ]);
 
     // 1-hop graph neighbours via Neo4j (falls back to Postgres relationship table).
-    const graphNeighbourIds = canonical_id
-      ? await this.loadGraphNeighbourIds(canonical_id)
-      : [];
+    const graphNeighbourIds = canonical_id ? await this.loadGraphNeighbourIds(canonical_id) : [];
     const neighboursById = new Map<string, Schemas.EntityCanonical>();
     for (const r of relatedFromHint) neighboursById.set(r.id, r);
     if (graphNeighbourIds.length > 0) {
@@ -199,13 +194,30 @@ class PatternWorker extends WorkerBase<Payload> {
       },
     };
 
-    const applicable = PatternRegistry.applicable(subject);
     const findingId = finding_id ?? (Ids.newFindingId() as string);
 
+    // DECISION-014 Stream 3 — pattern dispatch via the hardened wrapper.
+    // Provides: no-throw guarantee, per-pattern timeout (default 2000ms),
+    // bounded fan-out (8 concurrent), subject-kind gate, status partition
+    // (live → results, shadow → shadowResults), provenance stamping
+    // (dispatch_timing_ms + dispatch_pattern_status), deterministic ordering,
+    // runtime result-shape validation. Failures + shadow results are
+    // surfaced for observability without poisoning the live result stream.
+    const dispatch = await dispatchPatterns(subject, ctx);
+    if (dispatch.failures.length > 0) {
+      logger.warn(
+        { failures: dispatch.failures, finding_id: findingId },
+        'pattern-dispatch-failures',
+      );
+    }
+
+    // Look up the pattern def (for prior/weight) by id from the registry,
+    // since the dispatch annotation strips that field.
     let signalCount = 0;
-    for (const pat of applicable) {
-      const result = await pat.detect(subject, ctx);
+    for (const result of dispatch.results) {
       if (!result.matched) continue;
+      const pat = PatternRegistry.get(result.pattern_id);
+      if (!pat) continue; // dispatch ran a pattern not in the registry — impossible in production but defensive
       signalCount++;
       // Persist signal — DB commit BEFORE stream emit (SRD §15.1)
       await this.findingRepo.addSignal({
@@ -219,8 +231,25 @@ class PatternWorker extends WorkerBase<Payload> {
         evidence_event_ids: [...result.contributing_event_ids],
         evidence_document_cids: [...result.contributing_document_cids],
         contributed_at: new Date(),
-        metadata: { rationale: result.rationale },
+        metadata: {
+          rationale: result.rationale,
+          dispatch_timing_ms: result.dispatch_timing_ms,
+          dispatch_pattern_status: result.dispatch_pattern_status,
+        },
       });
+    }
+    // Shadow-mode patterns are observed but not folded into findings.
+    if (dispatch.shadowResults.length > 0) {
+      logger.info(
+        {
+          finding_id: findingId,
+          shadow_pattern_ids: dispatch.shadowResults
+            .filter((r) => r.matched)
+            .map((r) => r.pattern_id),
+          shadow_match_count: dispatch.shadowResults.filter((r) => r.matched).length,
+        },
+        'pattern-shadow-matches',
+      );
     }
 
     if (signalCount > 0) {
@@ -252,9 +281,7 @@ class PatternWorker extends WorkerBase<Payload> {
     return rows.map(rowToCanonical);
   }
 
-  private async loadEvents(
-    ids: readonly string[],
-  ): Promise<readonly Schemas.SourceEvent[]> {
+  private async loadEvents(ids: readonly string[]): Promise<readonly Schemas.SourceEvent[]> {
     if (ids.length === 0) return [];
     const rows = await this.sourceRepo.getEventsByIds(ids);
     return rows.map(rowToEvent);

@@ -25,6 +25,7 @@ import { z } from 'zod';
 
 import { detectLanguage } from './lang.js';
 import { OcrPool } from './ocr-pool.js';
+import { extractPdfMetadata } from './pdf-metadata.js';
 
 export { detectLanguage };
 
@@ -108,6 +109,30 @@ class DocumentWorker extends WorkerBase<DocPayload> {
       }
       const language = detectLanguage(detectedText, mime);
 
+      // PDF info-dict extraction — populates event.payload.document_metadata
+      // for P-G-001 (backdated-document) and P-G-003 (metadata-anomaly).
+      let documentMetadata: Record<string, unknown> | null = null;
+      let pdfAnomalyFlags: ReadonlyArray<string> = [];
+      if (mime === 'application/pdf') {
+        try {
+          const m = extractPdfMetadata(buf);
+          documentMetadata = {
+            title: m.title,
+            author: m.author,
+            subject: m.subject,
+            creator: m.creator,
+            producer: m.producer,
+            creation_date: m.creation_date,
+            mod_date: m.mod_date,
+            keywords: m.keywords,
+            extracted_ok: m.extracted_ok,
+          };
+          pdfAnomalyFlags = m.anomaly_flags;
+        } catch (e) {
+          logger.warn({ err: e }, 'pdf-metadata-extraction-failed');
+        }
+      }
+
       // IPFS pin
       const kubo = kuboCreate({ url: this.ipfsApiUrl });
       const added = await kubo.add(buf, { pin: true, cidVersion: 1 });
@@ -129,7 +154,10 @@ class DocumentWorker extends WorkerBase<DocPayload> {
         text_extract_chars: textChars,
         pinned_at_ipfs: true,
         mirrored_to_synology: false, // rclone hourly job picks it up
-        metadata: {},
+        metadata:
+          documentMetadata !== null
+            ? { pdf: documentMetadata, anomaly_flags: pdfAnomalyFlags }
+            : {},
       };
 
       await this.sourceRepo.insertDocument({
@@ -148,8 +176,34 @@ class DocumentWorker extends WorkerBase<DocPayload> {
         text_extract_chars: textChars,
         pinned_at_ipfs: true,
         mirrored_to_synology: false,
-        metadata: {},
+        metadata: doc.metadata,
       });
+
+      // Merge document_metadata + effective_date onto the source event
+      // payload so the patterns (P-G-001, P-G-003, P-H-001) read them.
+      if (documentMetadata !== null && env.payload.source_event_id) {
+        try {
+          const additions: Record<string, unknown> = {
+            document_metadata: documentMetadata,
+            document_anomaly_flags: pdfAnomalyFlags,
+          };
+          // creation_date doubles as a default effective_date for documents
+          // that don't carry an explicit one in their content.
+          if (documentMetadata['creation_date']) {
+            const cd = documentMetadata['creation_date'] as string;
+            const datePart = cd.slice(0, 10); // YYYY-MM-DD
+            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+              additions['effective_date'] = datePart;
+            }
+          }
+          await this.sourceRepo.mergeEventPayload(env.payload.source_event_id, additions);
+        } catch (e) {
+          logger.warn(
+            { err: e, source_event_id: env.payload.source_event_id },
+            'merge-document-metadata-failed',
+          );
+        }
+      }
 
       // Downstream — entity resolution + pattern engine
       await this.config.client.publish(
