@@ -3,9 +3,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
 import { StaticKeyResolver, type KeyResolver } from '@vigil/federation-stream';
+import { federationKeysLoaded, type Logger } from '@vigil/observability';
 import { request } from 'undici';
-
-import type { Logger } from '@vigil/observability';
 
 /**
  * DirectoryKeyResolver — boot-time scan of a directory of PEM files.
@@ -34,7 +33,14 @@ export class DirectoryKeyResolver implements KeyResolver {
   ) {}
 
   async load(): Promise<number> {
-    const entries = await readdir(this.directory).catch(() => [] as string[]);
+    // AUDIT-013 — surface a directory-read failure as a warn log AND as
+    // a gauge=0 sample so an alert can fire if the receiver ever ends up
+    // running with zero peer keys. The previous swallow-and-continue
+    // path silently rejected every federation message.
+    const entries = await readdir(this.directory).catch((err: unknown) => {
+      this.logger.warn({ err, directory: this.directory }, 'federation-key-directory-unreadable');
+      return [] as string[];
+    });
     let loaded = 0;
     for (const name of entries) {
       if (!name.endsWith('.pem')) continue;
@@ -43,6 +49,7 @@ export class DirectoryKeyResolver implements KeyResolver {
       this.inner.register(keyId, pem);
       loaded += 1;
     }
+    federationKeysLoaded.labels({ directory: this.directory }).set(loaded);
     this.logger.info({ directory: this.directory, loaded }, 'federation-key-resolver-loaded');
     return loaded;
   }

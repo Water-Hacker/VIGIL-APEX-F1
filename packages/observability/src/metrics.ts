@@ -178,6 +178,37 @@ export const patternEvalDurationMs = new Histogram({
 });
 
 /**
+ * Number of federation peer keys currently loaded from the on-disk
+ * key directory (AUDIT-013). When the directory becomes unreadable
+ * mid-flight, the receiver silently rejects every federation message
+ * thinking no peer is authorised. Setting this to 0 (with the
+ * `directory` label) gives oncall an alertable signal:
+ *   `vigil_federation_keys_loaded{directory!=""} == 0`
+ */
+export const federationKeysLoaded = new Gauge({
+  name: 'vigil_federation_keys_loaded',
+  help: 'Number of federation peer keys loaded from the directory resolver',
+  labelNames: ['directory'] as const,
+  registers: [registry],
+});
+
+/**
+ * Turnstile verify outcome counter (AUDIT-015). Distinguishes
+ *   outcome=accepted        — Cloudflare returned success:true
+ *   outcome=rejected        — Cloudflare returned success:false
+ *   outcome=outage          — fetch threw / non-2xx response / timeout
+ *   outcome=misconfigured   — TURNSTILE_SECRET_KEY unset at request time
+ * so a runbook can distinguish "Turnstile is down" from "users are
+ * bots" — both fail closed today, but trigger different responses.
+ */
+export const tipTurnstileVerifyTotal = new Counter({
+  name: 'vigil_tip_turnstile_verify_total',
+  help: 'Tip-submit Turnstile verification outcomes',
+  labelNames: ['outcome'] as const,
+  registers: [registry],
+});
+
+/**
  * Posterior at the moment scoring writes it. The /findings dashboard
  * uses the histogram's percentiles to track calibration drift.
  */

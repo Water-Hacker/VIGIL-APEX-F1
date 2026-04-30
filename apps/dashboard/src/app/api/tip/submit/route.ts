@@ -1,4 +1,5 @@
 import { TipRepo, getDb } from '@vigil/db-postgres';
+import { tipTurnstileVerifyTotal } from '@vigil/observability';
 import { Schemas, TipSanitise } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -31,6 +32,7 @@ async function verifyTurnstile(token: string, remoteIp: string | null): Promise<
   if (!secret) {
     // Fail closed — never accept a tip when Turnstile is misconfigured.
     console.error('[tip/submit] TURNSTILE_SECRET_KEY not set; rejecting');
+    tipTurnstileVerifyTotal.labels({ outcome: 'misconfigured' }).inc();
     return false;
   }
   const params = new URLSearchParams();
@@ -44,14 +46,24 @@ async function verifyTurnstile(token: string, remoteIp: string | null): Promise<
       // 8 s upper bound — the public form blocks until this resolves.
       signal: AbortSignal.timeout(8_000),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      // AUDIT-015 — non-2xx is an outage signal (Cloudflare 5xx, gateway
+      // 502, etc.), not a user-was-a-bot signal.
+      tipTurnstileVerifyTotal.labels({ outcome: 'outage' }).inc();
+      return false;
+    }
     const json = (await res.json()) as TurnstileVerifyResponse;
     if (!json.success) {
       console.warn('[tip/submit] turnstile rejected', json['error-codes']);
+      tipTurnstileVerifyTotal.labels({ outcome: 'rejected' }).inc();
+      return false;
     }
-    return json.success === true;
+    tipTurnstileVerifyTotal.labels({ outcome: 'accepted' }).inc();
+    return true;
   } catch (e) {
+    // AUDIT-015 — fetch threw (timeout, DNS, TLS). Same outage bucket.
     console.error('[tip/submit] turnstile verify error', e);
+    tipTurnstileVerifyTotal.labels({ outcome: 'outage' }).inc();
     return false;
   }
 }

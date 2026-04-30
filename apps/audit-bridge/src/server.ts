@@ -96,10 +96,15 @@ export async function createAuditBridgeServer(
     },
     async stop() {
       await app.close();
+      // AUDIT-014 — log the unlink failure at info level instead of
+      // swallowing silently. Permission errors / stale-socket cleanup
+      // races are uncommon enough that they should leave a trail; an
+      // operator restarting the bridge should be able to see why a
+      // subsequent start might fail with EADDRINUSE.
       try {
         if (existsSync(opts.socketPath)) await unlink(opts.socketPath);
-      } catch {
-        // ignore
+      } catch (err) {
+        opts.logger.info({ err, socketPath: opts.socketPath }, 'audit-bridge-socket-unlink-failed');
       }
     },
   };
