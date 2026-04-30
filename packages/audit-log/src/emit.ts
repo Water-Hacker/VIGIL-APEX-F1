@@ -1,13 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
 import { HashChain } from '@vigil/audit-chain';
-import {
-  UserActionEventRepo,
-  type UserActionEventInsert,
-} from '@vigil/db-postgres';
+import { UserActionEventRepo, type UserActionEventInsert } from '@vigil/db-postgres';
 import { type Logger } from '@vigil/observability';
-import { Schemas } from '@vigil/shared';
-
+import { Schemas, Time } from '@vigil/shared';
 
 import { computeRecordHash } from './hash.js';
 import { type AuditSigner, NoopSigner } from './signer.js';
@@ -59,6 +55,12 @@ export interface EmitDependencies {
   readonly chain: HashChain;
   readonly signer?: AuditSigner;
   readonly logger?: Logger;
+  /**
+   * AUDIT-046: optional Clock for deterministic tests. Defaults to
+   * `Time.systemClock`. Per-call `input.nowIso` still wins for the
+   * narrow case where a caller wants to backdate one event.
+   */
+  readonly clock?: Time.Clock;
 }
 
 export interface EmitResult {
@@ -98,20 +100,22 @@ const ACTION_BY_CATEGORY: Record<Schemas.AuditCategory, string> = {
   K: 'audit.chain_verified',
 };
 
-export async function emitAudit(
-  deps: EmitDependencies,
-  input: EmitInput,
-): Promise<EmitResult> {
+export async function emitAudit(deps: EmitDependencies, input: EmitInput): Promise<EmitResult> {
   const generate = input.generateId ?? randomUUID;
-  const nowIso = input.nowIso ?? new Date().toISOString();
+  // AUDIT-046: prefer the per-call override, then deps.clock.isoNow(),
+  // then the system clock — so tests can pin time via either path
+  // without touching production callers.
+  const clock = deps.clock ?? Time.systemClock;
+  const nowIso = input.nowIso ?? clock.isoNow();
   const signer = deps.signer ?? new NoopSigner();
   const eventType = input.eventType;
   const category = Schemas.categoryOf(eventType);
   if (category === null) {
-    throw new Error(`audit-log: unknown event_type '${eventType}' has no resolvable TAL-PA category`);
+    throw new Error(
+      `audit-log: unknown event_type '${eventType}' has no resolvable TAL-PA category`,
+    );
   }
-  const highSignificance =
-    input.highSignificanceOverride ?? Schemas.isHighSignificance(eventType);
+  const highSignificance = input.highSignificanceOverride ?? Schemas.isHighSignificance(eventType);
 
   // 1. Per-actor chain head
   const head = await deps.userActionRepo.latestForActor(input.actor.actor_id);
@@ -188,7 +192,10 @@ export async function emitAudit(
     await deps.userActionRepo.insertAndAdvanceChain(row);
   } catch (err) {
     // Halt-on-failure: rethrow. Callers MUST propagate.
-    deps.logger?.error({ err, event_type: eventType, actor: input.actor.actor_id }, 'audit-emit-failed');
+    deps.logger?.error(
+      { err, event_type: eventType, actor: input.actor.actor_id },
+      'audit-emit-failed',
+    );
     throw err;
   }
   return { eventId, globalAuditId, recordHash, highSignificance };
