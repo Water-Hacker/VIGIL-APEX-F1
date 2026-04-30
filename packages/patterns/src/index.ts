@@ -8,4 +8,5 @@
 export * from './types.js';
 export * from './registry.js';
 export * from './bayesian.js';
+export * from './calibration.js';
 export * from './dispatch.js';
