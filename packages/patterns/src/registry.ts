@@ -46,6 +46,10 @@ class Registry {
     return (this.bySubjectKind.get(subject.kind) ?? []).filter((p) => p.status !== 'deprecated');
   }
 
+  applicableTo(kind: SubjectInput['kind']): readonly PatternDef[] {
+    return (this.bySubjectKind.get(kind) ?? []).filter((p) => p.status !== 'deprecated');
+  }
+
   count(): number {
     return this.byId.size;
   }
