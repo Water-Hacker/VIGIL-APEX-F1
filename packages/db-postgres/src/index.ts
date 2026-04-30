@@ -17,3 +17,4 @@ export * from './repos/tip.js';
 export * from './repos/calibration.js';
 export * from './repos/certainty.js';
 export * from './repos/audit-log.js';
+export * from './repos/benchmark-price.js';

@@ -13,7 +13,9 @@ import path from 'node:path';
 import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
 import { Neo4jClient } from '@vigil/db-neo4j';
 import {
+  BenchmarkPriceRepo,
   CalibrationAuditRepo,
+  CalibrationRepo,
   CallRecordRepo,
   EntityRepo,
   PublicExportRepo,
@@ -42,6 +44,7 @@ import { registerAllAdapters } from './adapters/_register.js';
 import { runOne } from './run-one.js';
 import { currentQuarterWindow, runCalibrationAudit } from './triggers/calibration-audit-runner.js';
 import { runGraphMetricTrigger } from './triggers/graph-metric-runner.js';
+import { runPatternCohort } from './triggers/pattern-cohort-runner.js';
 import { runQuarterlyAuditExport } from './triggers/quarterly-audit-export.js';
 import { defaultProviderChain, runSatelliteTrigger } from './triggers/satellite-trigger.js';
 import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
@@ -218,6 +221,36 @@ async function main(): Promise<void> {
           logger.info({ cron }, 'graph-metric-scheduled');
         } else {
           logger.error({ cron }, 'invalid-graph-metric-cron; runner disabled');
+        }
+      }
+
+      // Stage 4 + 7 — pattern cohort runner. Refreshes the benchmark-price
+      // bucket snapshot and computes the per-decile / per-pattern
+      // calibration report. Each pass isolated; failures logged but
+      // never abort the other.
+      const cohortEnabled =
+        (process.env.PATTERN_COHORT_ENABLED ?? 'true').toLowerCase() !== 'false';
+      if (cohortEnabled) {
+        const cron = process.env.PATTERN_COHORT_CRON ?? '30 3 * * *'; // 03:30 daily
+        if (validate(cron)) {
+          const benchmarkRepo = new BenchmarkPriceRepo(db);
+          const calibrationRepo = new CalibrationRepo(db);
+          const cohortTask = schedule(
+            cron,
+            () => {
+              void runPatternCohort({
+                db,
+                benchmarkRepo,
+                calibrationRepo,
+                logger,
+              }).catch((err) => logger.error({ err }, 'pattern-cohort-failed'));
+            },
+            { timezone: 'Africa/Douala', scheduled: true },
+          );
+          tasks.push(cohortTask);
+          logger.info({ cron }, 'pattern-cohort-scheduled');
+        } else {
+          logger.error({ cron }, 'invalid-pattern-cohort-cron; runner disabled');
         }
       }
 

@@ -30,7 +30,7 @@
  * uses a deterministic dedup_key so duplicates fold.
  */
 
-import { CallRecordRepo, SourceRepo, getDb } from '@vigil/db-postgres';
+import { BenchmarkPriceRepo, CallRecordRepo, SourceRepo, getDb } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter } from '@vigil/llm';
 import {
   createLogger,
@@ -90,6 +90,7 @@ class ExtractorWorker extends WorkerBase<AdapterOutPayload> {
   constructor(
     private readonly sourceRepo: SourceRepo,
     private readonly extractor: ProcurementExtractor,
+    private readonly benchmarkRepo: BenchmarkPriceRepo,
     queue: QueueClient,
   ) {
     super({
@@ -149,6 +150,35 @@ class ExtractorWorker extends WorkerBase<AdapterOutPayload> {
       if (v !== null && v !== undefined) merge[k] = v;
     }
     merge['_extraction_provenance'] = result.provenance;
+
+    // Stage 4 — benchmark-price service. When we have enough context to
+    // build the (procurement_method, region, year) bucket key, look up
+    // the moving median of comparable awards and stamp it onto the
+    // payload. P-C-001 (price-above-benchmark) reads this directly.
+    // Returns null silently when bucket sample < MIN_BUCKET_SAMPLE; the
+    // pattern then short-circuits without firing.
+    if (result.fields.procurement_method && result.fields.region) {
+      try {
+        const year = ev.observed_at
+          ? new Date(ev.observed_at).getUTCFullYear()
+          : new Date().getUTCFullYear();
+        const benchmark = await this.benchmarkRepo.lookup({
+          procurementMethod: result.fields.procurement_method,
+          region: result.fields.region,
+          year,
+          excludeEventId: ev.id,
+        });
+        if (benchmark !== null) {
+          merge['benchmark_amount_xaf'] = benchmark.medianXaf;
+          merge['benchmark_p25_xaf'] = benchmark.p25Xaf;
+          merge['benchmark_p75_xaf'] = benchmark.p75Xaf;
+          merge['benchmark_sample_count'] = benchmark.sampleCount;
+          merge['benchmark_bucket_key'] = benchmark.bucketKey;
+        }
+      } catch (e) {
+        logger.warn({ err: e, event_id: ev.id }, 'benchmark-lookup-failed');
+      }
+    }
 
     try {
       const { updated } = await this.sourceRepo.mergeEventPayload(ev.id, merge);
@@ -215,6 +245,7 @@ async function main(): Promise<void> {
   const db = await getDb();
   const sourceRepo = new SourceRepo(db);
   const callRecordRepo = new CallRecordRepo(db);
+  const benchmarkRepo = new BenchmarkPriceRepo(db);
 
   // LLM is optional — when ANTHROPIC_API_KEY is unset or PLACEHOLDER, run
   // deterministic-only. The deterministic layer is sufficient for ARMP /
@@ -273,7 +304,7 @@ async function main(): Promise<void> {
     now: () => new Date(),
   });
 
-  const worker = new ExtractorWorker(sourceRepo, extractor, queue);
+  const worker = new ExtractorWorker(sourceRepo, extractor, benchmarkRepo, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
   logger.info('worker-extractor-ready');
