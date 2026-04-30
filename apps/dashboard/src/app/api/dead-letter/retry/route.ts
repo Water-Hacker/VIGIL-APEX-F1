@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { incrementRetry, markResolved } from '../../../../lib/dead-letter.server';
+import { batchDeadLetterUpdate } from '../../../../lib/dead-letter.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,12 +36,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid', issues: parsed.error.issues }, { status: 400 });
   }
 
-  if (parsed.data.action === 'resolve') {
-    const reason = parsed.data.reason ?? 'manual-resolve';
-    await Promise.all(parsed.data.ids.map((id) => markResolved(id, reason)));
-  } else {
-    await Promise.all(parsed.data.ids.map((id) => incrementRetry(id)));
-  }
+  // AUDIT-004: atomic multi-row UPDATE. Single SQL means partial-failure
+  // is impossible — either the entire batch lands or the entire batch
+  // rolls back at the database level.
+  const result = await batchDeadLetterUpdate(
+    parsed.data.action,
+    parsed.data.ids,
+    parsed.data.reason,
+  );
 
-  return NextResponse.json({ ok: true, count: parsed.data.ids.length });
+  return NextResponse.json({
+    ok: true,
+    count: result.affected.length,
+    requested: parsed.data.ids.length,
+  });
 }

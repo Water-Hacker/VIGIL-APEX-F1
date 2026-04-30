@@ -42,19 +42,54 @@ export async function listDeadLetter(opts: {
 }
 
 export async function markResolved(id: string, reason: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(sql`
-    UPDATE source.dead_letter
-       SET resolved_at = NOW(), resolved_reason = ${reason}
-     WHERE id = ${id}::uuid
-  `);
+  await batchDeadLetterUpdate('resolve', [id], reason);
 }
 
 export async function incrementRetry(id: string): Promise<void> {
+  await batchDeadLetterUpdate('retry', [id]);
+}
+
+/**
+ * AUDIT-004: atomic multi-row dead-letter update.
+ *
+ * The earlier route layer issued `Promise.all(ids.map(markResolved))` —
+ * N parallel UPDATEs without a transaction. A partial failure (e.g.,
+ * one of the N rows hit a serialization conflict) left the table in
+ * mixed state while the route still returned 200 OK with `count: N`.
+ *
+ * The new contract: a single `UPDATE ... WHERE id = ANY($1::uuid[])
+ * RETURNING id`. Atomic by definition, one round-trip, returns the
+ * exact set of IDs the database actually touched (used by the route
+ * to surface row-count mismatches — AUDIT-005).
+ */
+export async function batchDeadLetterUpdate(
+  action: 'resolve' | 'retry',
+  ids: ReadonlyArray<string>,
+  reason?: string,
+): Promise<{ affected: ReadonlyArray<string> }> {
+  if (ids.length === 0) {
+    throw new Error('batchDeadLetterUpdate: ids must be non-empty');
+  }
   const db = await getDb();
-  await db.execute(sql`
-    UPDATE source.dead_letter
-       SET retry_count = retry_count + 1, last_attempt = NOW()
-     WHERE id = ${id}::uuid
-  `);
+  const idsArray = sql`ARRAY[${sql.join(
+    ids.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  )}]`;
+  const r =
+    action === 'resolve'
+      ? await db.execute(sql`
+          UPDATE source.dead_letter
+             SET resolved_at = NOW(),
+                 resolved_reason = ${reason ?? 'manual-resolve'}
+           WHERE id = ANY(${idsArray})
+         RETURNING id::text
+        `)
+      : await db.execute(sql`
+          UPDATE source.dead_letter
+             SET retry_count = retry_count + 1,
+                 last_attempt = NOW()
+           WHERE id = ANY(${idsArray})
+         RETURNING id::text
+        `);
+  return { affected: r.rows.map((row) => String((row as Record<string, unknown>)['id'])) };
 }
