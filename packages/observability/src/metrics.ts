@@ -81,6 +81,30 @@ export const llmCallsTotal = new Counter({
   registers: [registry],
 });
 
+// AUDIT-056 — federation-stream client visibility.
+export const federationFlushLagMs = new Histogram({
+  name: 'vigil_federation_flush_lag_seconds',
+  help: 'Wall-clock latency from envelope enqueue to ack returned by the core peer',
+  labelNames: ['region'] as const,
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+  registers: [registry],
+});
+
+export const federationPendingEnvelopes = new Gauge({
+  name: 'vigil_federation_pending_envelopes',
+  help: 'Envelopes currently held in the in-process pendingBatch awaiting flush',
+  labelNames: ['region'] as const,
+  registers: [registry],
+});
+
+// AUDIT-058 — Vault token renewal visibility.
+export const vaultTokenRenewFailedTotal = new Counter({
+  name: 'vigil_vault_token_renew_failed_total',
+  help: 'Vault token renewal attempts that returned non-2xx or threw',
+  labelNames: ['service'] as const,
+  registers: [registry],
+});
+
 export const llmCostUsd = new Counter({
   name: 'vigil_llm_cost_usd_total',
   help: 'Cumulative LLM USD cost',
@@ -225,7 +249,9 @@ export interface MetricsServer {
   readonly url: string;
 }
 
-export async function startMetricsServer(port = Number(process.env.PROMETHEUS_PORT ?? 9100)): Promise<MetricsServer> {
+export async function startMetricsServer(
+  port = Number(process.env.PROMETHEUS_PORT ?? 9100),
+): Promise<MetricsServer> {
   const server = http.createServer((req, res) => {
     if (req.url === '/metrics' && req.method === 'GET') {
       void registry
