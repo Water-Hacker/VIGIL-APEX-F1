@@ -51,6 +51,22 @@ export async function createPool(opts: DbClientOptions = {}): Promise<Pool> {
     if (!root) throw new Error('POSTGRES_SSLROOTCERT required for verify-full');
     ssl = { ca: await readFile(root, 'utf8'), rejectUnauthorized: true };
   } else if (mode === 'require') {
+    // AUDIT-028: encrypted-but-unauthenticated TLS is a MitM-trivial
+    // posture. Refuse it unless the operator has explicitly opted in
+    // by setting POSTGRES_REQUIRE_INSECURE_OK=1 (or =true). Production
+    // should always be 'verify-full'.
+    const optIn = (process.env.POSTGRES_REQUIRE_INSECURE_OK ?? '').toLowerCase();
+    if (optIn !== '1' && optIn !== 'true') {
+      throw new Error(
+        'POSTGRES_SSLMODE=require produces encrypted-but-unauthenticated TLS ' +
+          '(rejectUnauthorized: false). Production must use verify-full. To use ' +
+          'require mode in dev/staging, set POSTGRES_REQUIRE_INSECURE_OK=1.',
+      );
+    }
+    logger.warn(
+      { sslMode: 'require' },
+      'postgres-tls-insecure-require-mode-active (POSTGRES_REQUIRE_INSECURE_OK opt-in honoured; this is unsafe in production)',
+    );
     ssl = { rejectUnauthorized: false };
   }
 
@@ -69,7 +85,8 @@ export async function createPool(opts: DbClientOptions = {}): Promise<Pool> {
     // configured at 200 in postgresql.conf; 40 across processes leaves
     // ample budget for replication / pg_dump / pg_basebackup.
     max: opts.poolMax ?? Number(process.env.POSTGRES_POOL_MAX ?? 40),
-    statement_timeout: opts.statementTimeoutMs ?? Number(process.env.POSTGRES_STATEMENT_TIMEOUT_MS ?? 30_000),
+    statement_timeout:
+      opts.statementTimeoutMs ?? Number(process.env.POSTGRES_STATEMENT_TIMEOUT_MS ?? 30_000),
     query_timeout: opts.statementTimeoutMs ?? 30_000,
     idleTimeoutMillis: Number(process.env.POSTGRES_POOL_IDLE_TIMEOUT_MS ?? 60_000),
     application_name: 'vigil-apex',
