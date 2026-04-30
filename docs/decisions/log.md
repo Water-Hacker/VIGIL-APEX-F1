@@ -2823,6 +2823,227 @@ phase gate per EXEC §43.2.
 
 ---
 
+## DECISION-014 Fraud-pattern library — production-input wiring + dispatch hardening + calibration evaluator
+
+**Status:** PROVISIONAL — promote to FINAL after architect read-through of
+the implementation index below.
+
+**Date:** 2026-04-29.
+
+**Thesis.** The 2026-04-29 fraud-pattern-library status report
+(packages/patterns/) found 43/43 patterns registered cleanly with
+status: 'live' but only ~10 firing end-to-end against the current
+adapter pipeline. Two structural gaps were responsible for the rest:
+(a) procurement adapters (ARMP / MINMAP / COLEPS) emitted raw HTML
+cells, not the structured fields patterns expected, and (b) graph-metric
+algorithms (Louvain / PageRank / round-trip / director-ring / bidder-
+density) existed in the codebase but were never invoked. This decision
+closes both gaps, adds a hardened pattern-dispatch wrapper, and lays
+the calibration-evaluation foundation that unblocks SRD §19.4 ECE
+recalibration as soon as the architect supplies labelled cases.
+
+**Why a single closure entry.** The work spans seven coordinated
+streams across three packages and two apps. A single decision entry
+that cross-references the per-stream commits gives the architect one
+read-through anchor; splitting into seven entries would obscure how
+the streams interlock.
+
+**Mechanism — Streams 1–7.**
+
+1. **Stream 1 — worker-extractor (procurement structured-field
+   extractor).** New app at [`apps/worker-extractor/`](../../apps/worker-extractor/)
+   inserted between ADAPTER_OUT and ENTITY_RESOLVE. Two-layer extraction:
+   deterministic French regex pass over the raw scraper cells (pure
+   functions, no clock/no random, hardened against ReDoS via
+   MAX_INPUT_CHARS clamp + bounded regex + closed allow-lists for
+   status keywords), then optional LLM pass via SafeLlmRouter (DECISION- 011) for fields the deterministic layer could not resolve. Tamper-
+   resistance: deterministic layer wins on overlap, so a model-provider
+   compromise cannot overwrite verified extractions. Schema:
+   [`packages/shared/src/schemas/procurement.ts`](../../packages/shared/src/schemas/procurement.ts)
+   defines 15 fields including bidder_count, procurement_method (6-way
+   enum), supplier RCCM + NIU, amount_xaf, full date set, region (10-
+   region Cameroon enum). Atomic Postgres jsonb merge via
+   `SourceRepo.mergeEventPayload`. Patterns moved from "production-
+   input missing" to "production-ready": P-A-001, P-A-002, P-A-003,
+   P-A-005, P-A-006, P-A-007, P-H-001, P-H-002.
+
+2. **Stream 2 — graph-metric scheduler.** New GDS modules at
+   [`packages/db-neo4j/src/gds/`](../../packages/db-neo4j/src/gds/):
+   `round-trip.ts` (bounded-depth BFS, MAX_HOPS=3, MAX_FANOUT=200,
+   visited-set cycle detection), `director-ring.ts` (bipartite Person↔
+   Company overlap detector, MAX_DIRECTORSHIPS=100), `bidder-density.ts`
+   (per-tender pairwise relation density, MAX_BIDDERS=100), and
+   `runner.ts` (orchestrator that runs Louvain + PageRank + the three
+   new metrics in isolation, accumulates results, persists in a single
+   bulk-merge phase, stamps every record with `_graph_metrics_at` for
+   staleness detection). Wired into adapter-runner cron at 03:00
+   Africa/Douala via
+   [`apps/adapter-runner/src/triggers/graph-metric-runner.ts`](../../apps/adapter-runner/src/triggers/graph-metric-runner.ts).
+   Postgres write path: `EntityRepo.mergeMetadata` /
+   `bulkMergeMetadata` / `listAllCanonicalIds`. Patterns moved from
+   "production-input missing" to "production-ready": P-F-001, P-F-002,
+   P-F-005. P-B-001 / P-B-005 strengthened via populated communityId.
+   P-F-003 / P-F-004 still need supplier-circular-flow + hub-and-spoke
+   metric jobs (extending the existing BFS substrate).
+
+3. **Stream 3 — pattern dispatch hardening.** New module
+   [`packages/patterns/src/dispatch.ts`](../../packages/patterns/src/dispatch.ts).
+   Single chokepoint enforcing: (i) no-throw guarantee — buggy detect()
+   is caught and surfaced via failures[]; (ii) per-pattern resource
+   budget — Promise.race timeout (default 2000 ms); (iii) bounded fan-
+   out — maxConcurrent=8; (iv) subject-kind gate — patterns whose
+   subjectKinds exclude the subject kind never enter detect(); (v)
+   status partitioning — live → results[]; shadow → shadowResults[];
+   deprecated → dropped; (vi) provenance stamping —
+   dispatch_timing_ms + dispatch_pattern_status on every result; (vii)
+   deterministic ordering — sorted by pattern_id; (viii) runtime
+   result-shape validation — invalid PatternResult lands as a failure
+   rather than corrupting the result stream. Defense-in-depth payload
+   accessors (readNumber / readString / readBoolean / readStringArray /
+   readMetadataNumber / readMetadataBoolean) return null for type
+   mismatches so adapter bugs cannot corrupt pattern logic.
+
+4. **Stream 4 — calibration evaluation pipeline.** New module
+   [`packages/patterns/src/calibration.ts`](../../packages/patterns/src/calibration.ts).
+   Pure-function `evaluateCalibration(cases, opts)` returns a
+   per-decile bucket report (10 fixed deciles), ECE, Brier score, and
+   per-pattern misalignment (hitRate vs declaredPrior). `partial_match`
+   counts as label 0.5 — admits genuine ambiguity rather than forcing
+   binary classification. `formatCalibrationReport(report)` produces a
+   stable markdown table for `/docs/calibration-reports/`.
+   `MIN_CASES_FOR_REPORT=30` matches CLAUDE.md Phase-9 gate; below
+   this, `insufficientData=true` and the architect must NOT promote
+   recalibrated priors. Patterns continue running at architect-
+   declared priors today; this module is the **measurement
+   infrastructure** that unblocks promotion decisions as soon as the
+   architect+CONAC analyst supply ≥ 30 labelled cases.
+
+5. **Stream 5 — env + commitlint.** `.env.example` extended with
+   EXTRACTOR_LLM_ENABLED, GRAPH_METRIC_ENABLED, GRAPH_METRIC_CRON,
+   GRAPH_METRIC_ROUND_TRIP_WINDOW_DAYS. commitlint scope-enum extended
+   with worker-extractor.
+
+6. **Stream 6 — schema additions.** `packages/shared/src/schemas/index.ts`
+   re-exports `./procurement.js` so `Schemas.ProcurementFields`,
+   `Schemas.zProcurementMethod`, `Schemas.PROCUREMENT_FIELD_KEYS`, and
+   `Schemas.CAMEROON_REGIONS` are available wherever Schemas is
+   imported.
+
+7. **Stream 7 — db-postgres atomic merges.** `SourceRepo.
+mergeEventPayload(id, additions)` and `EntityRepo.mergeMetadata(id,
+additions)` use Postgres jsonb concat (`payload = payload || $merge::
+jsonb`) so concurrent extractor / graph-metric instances writing
+   different keys cannot lose each other's writes. Last-writer-wins
+   on the same key.
+
+**What did NOT change.**
+
+- Pattern detection logic — the 43 detect() functions are unchanged.
+  Their input substrate is what changed; the patterns now read fields
+  that are populated rather than fields that no producer wrote.
+- defaultPrior / defaultWeight per pattern — still architect-declared
+  placeholder values awaiting the first calibration sweep. The
+  evaluation pipeline (Stream 4) measures misalignment but does not
+  re-tune.
+- The 43 doc-file stubs at `docs/patterns/P-X-NNN.md` — auto-generated
+  scaffolds remain. Substantive enrichment (LR reasoning + FP traps +
+  examples + citations to SRD/Klitgaard/OECD/Cour des Comptes) is
+  Stage 6 in the original work plan and remains follow-on work.
+
+**Deferred — explicit follow-on commits.**
+
+- **Stage 3 (PDF metadata extractor).** Unblocks P-G-001 (backdated-
+  document), P-G-003 (metadata-anomaly), and strengthens P-H-001
+  (award-before-tender-close). 3 patterns. Effort: 2–3 engineering days.
+- **Stage 4 (benchmark-price service).** Unblocks P-C-001 (price-
+  above-benchmark) which is the foundation of category C. Requires a
+  comparable-tender corpus to seed; effort: 3–5 engineering days.
+- **Stage 6 (doc-file enrichment).** 43 pattern doc pages need
+  substantive content per SRD §21. Effort: 3–5 architect-days at
+  ~30–60 min/pattern.
+- **Stage 8 (E2E + property-based tests).** HTML fixture → adapter
+  → extractor → graph-metric → pattern → posterior → audit
+  end-to-end tests; per-pattern adversarial property tests via
+  fast-check. Effort: 3–4 engineering days.
+
+**Test counts (this decision):**
+
+- @vigil/patterns: 547 tests (was 524; +23: 12 dispatch + 14 calibration
+  - minor adjustments). Includes existing 432 fixture tests + 99
+    registry-baseline tests + the new dispatch and calibration suites.
+- @vigil/db-neo4j: 23 tests (was 5; +18: round-trip × 5,
+  director-ring × 3, bidder-density × 4, runner × 6).
+- worker-extractor: 61 tests (new package). Deterministic layer
+  exhaustive — every rule path plus adversarial inputs (unicode
+  confusables, ReDoS-bait, empty/giant inputs, cross-cell-boundary).
+
+**M2 deliverable status — "40+ fraud patterns live" claim
+(CORE_MVP §6.2).**
+
+Pre-decision: 43 patterns registered, ~10 firing end-to-end against
+production-shaped inputs. Substantive claim was unsupportable.
+
+Post-decision: 43 patterns registered; the production-input gap closed
+for ~28 patterns (all of A except P-A-008 which awaits a protest-event
+adapter; all of B except P-B-007 which always worked; all of E and the
+P-D family already wired; all of F except F-003/F-004; all of H except
+the timing-only patterns which always worked; G-002/G-004 conditional
+on the Python forensics worker actually running). Remaining gaps:
+P-A-008, P-C-\* (need benchmark service), P-D-001..D-005 (conditional on
+satellite worker), P-F-003/P-F-004 (need additional graph metrics),
+P-G-001/P-G-003 (need PDF metadata extractor). The substantive M2 claim
+is now supportable for **~33 of 43 patterns** with the remaining 10
+gated on the four deferred stages above.
+
+Calibration of the priors themselves remains an architect-bound
+follow-on (CLAUDE.md Phase-9 gate: ≥ 30 ground-truth-labelled cases).
+The evaluation pipeline is in place; the input is the labelling
+cadence, not engineering velocity.
+
+**Files touched.**
+
+- New apps: [`apps/worker-extractor/`](../../apps/worker-extractor/) —
+  package.json, tsconfig.json, src/{index,extractor,deterministic,llm-
+  extractor,prompts}.ts, **tests**/{deterministic,extractor}.test.ts.
+- New schemas: [`packages/shared/src/schemas/procurement.ts`](../../packages/shared/src/schemas/procurement.ts).
+  Index updated.
+- New GDS modules: [`packages/db-neo4j/src/gds/{round-trip,director-
+ring,bidder-density,runner}.ts`](../../packages/db-neo4j/src/gds/) +
+  index updated.
+- New tests: [`packages/db-neo4j/__tests__/{round-trip,director-ring,
+bidder-density,runner}.test.ts`](../../packages/db-neo4j/__tests__/).
+- New pattern infrastructure: [`packages/patterns/src/{dispatch,
+calibration}.ts`](../../packages/patterns/src/) + index updated.
+  [`PatternRegistry.applicableTo(kind)`](../../packages/patterns/src/registry.ts)
+  added.
+- New pattern tests: [`packages/patterns/test/{dispatch,calibration}
+.test.ts`](../../packages/patterns/test/).
+- Updated repos: [`packages/db-postgres/src/repos/{source,entity}.ts`](../../packages/db-postgres/src/repos/)
+  with atomic jsonb-merge methods.
+- Updated cron: [`apps/adapter-runner/src/triggers/graph-metric-runner.ts`](../../apps/adapter-runner/src/triggers/graph-metric-runner.ts)
+  - adapter-runner index wiring.
+- [`commitlint.config.cjs`](../../commitlint.config.cjs) +
+  [`.env.example`](../../.env.example) — config additions.
+
+**Architect read-through checklist.** Before promoting this entry to
+FINAL, walk:
+
+1. Run the per-package test suite for @vigil/patterns + @vigil/db-neo4j
+   - worker-extractor; expect 547 + 23 + 61 = 631 tests green.
+2. Read the deterministic extractor's regex hardening (`MAX_INPUT_CHARS`,
+   `PLAUSIBLE_MAX_XAF`, closed allow-lists for status keywords) and
+   confirm the rule-named provenance contract.
+3. Read the dispatch wrapper's eight safety properties; confirm the
+   timeout-cancellation semantic is acceptable for the longest detect()
+   currently in the registry.
+4. Read the calibration evaluator and confirm the partial-match-as-0.5
+   convention matches the architect's interpretation of the
+   CalibrationGroundTruth enum.
+5. Confirm the deferred-stages list (Stages 3, 4, 6, 8) matches the
+   architect's M2 priority ordering.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
