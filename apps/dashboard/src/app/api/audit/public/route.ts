@@ -3,6 +3,21 @@ import { UserActionEventRepo, getDb } from '@vigil/db-postgres';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import { AUDIT_PUBLIC_RATE_LIMIT, createPerKeyRateLimiter } from '../../../../lib/rate-limit';
+
+// AUDIT-037: in-process per-IP rate limit. The Caddy edge also limits;
+// this is defence-in-depth + a sane default before the operator-facing
+// audit query route lands. 60 s / 200 burst per key.
+const limiter = createPerKeyRateLimiter(AUDIT_PUBLIC_RATE_LIMIT);
+
+function clientKey(req: NextRequest): string {
+  return (
+    req.headers.get('cf-connecting-ip') ??
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    'unknown'
+  );
+}
+
 // AUDIT-034: strict RFC-3339 ISO-8601 at the route boundary. Date.parse
 // is lenient (accepts '2026-04-30' date-only, 'April 30 2026' US-format,
 // etc.) and would reach repo.listPublic where Postgres ::timestamptz
@@ -30,6 +45,9 @@ export const dynamic = 'force-dynamic';
 const VALID_CATEGORIES = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']);
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (limiter.exceeded(clientKey(req))) {
+    return NextResponse.json({ error: 'rate-limited' }, { status: 429 });
+  }
   const url = req.nextUrl;
   const since =
     url.searchParams.get('since') ?? new Date(Date.now() - 24 * 3_600_000).toISOString();

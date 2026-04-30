@@ -91,13 +91,22 @@ vi.mock('@vigil/db-postgres', async () => {
   };
 });
 
+let reqCounter = 0;
 function makeReq(url: string) {
   // The route uses `req.nextUrl.searchParams`; the Node-side NextRequest
   // shim from 'next/server' would require a heavier setup. We construct
   // the minimum surface the route actually touches.
+  // AUDIT-037: route now applies a per-IP rate limit. Vary the
+  // x-forwarded-for header per test invocation so the limiter doesn't
+  // pile across the suite.
   const u = new URL(url);
+  reqCounter += 1;
+  const headers = new Map<string, string>([
+    ['x-forwarded-for', `203.0.113.${(reqCounter % 254) + 1}`],
+  ]);
   return {
     nextUrl: u,
+    headers: { get: (k: string) => headers.get(k.toLowerCase()) ?? null },
   } as unknown as Parameters<typeof GET>[0];
 }
 
@@ -157,6 +166,29 @@ describe('GET /api/audit/public — redaction contract', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { category?: string };
     expect(body.category).toBeUndefined();
+  });
+});
+
+describe('AUDIT-037 — public audit route is per-IP rate-limited', () => {
+  it('returns 429 once the per-IP burst (200 req/min) is exceeded', async () => {
+    const fixedIp = '198.51.100.123';
+    const fixedReq = () => {
+      const u = new URL('http://localhost/api/audit/public');
+      const h = new Map<string, string>([['x-forwarded-for', fixedIp]]);
+      return {
+        nextUrl: u,
+        headers: { get: (k: string) => h.get(k.toLowerCase()) ?? null },
+      } as unknown as Parameters<typeof GET>[0];
+    };
+    let last200 = 0;
+    let firstReject = 0;
+    for (let i = 0; i < 220; i++) {
+      const res = await GET(fixedReq());
+      if (res.status === 200) last200 = i;
+      if (res.status === 429 && firstReject === 0) firstReject = i;
+    }
+    expect(last200).toBeGreaterThanOrEqual(199);
+    expect(firstReject).toBeGreaterThanOrEqual(200);
   });
 });
 
