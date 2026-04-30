@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
 
+import { createLogger, type Logger } from '@vigil/observability';
 import { Routing } from '@vigil/shared';
 import { AlignmentType, Document, HeadingLevel, ImageRun, Packer, Paragraph, TextRun } from 'docx';
 
 import { generateQrPng } from './qr.js';
 
 import type { DossierInput, DossierRenderResult } from './types.js';
+
+// AUDIT-055: SDK-level emits so dossier-pipeline failures don't rely
+// on the worker to log them.
+const defaultLogger = (): Logger => createLogger({ service: 'dossier-render' });
 
 /**
  * Render a dossier to .docx bytes (deterministic).
@@ -17,10 +22,23 @@ import type { DossierInput, DossierRenderResult } from './types.js';
  *   - Map iteration order is preserved by docx-js
  *   - QR code is deterministic for identical payload
  */
-export async function renderDossierDocx(input: DossierInput): Promise<DossierRenderResult> {
+export async function renderDossierDocx(
+  input: DossierInput,
+  opts: { logger?: Logger } = {},
+): Promise<DossierRenderResult> {
+  const logger = opts.logger ?? defaultLogger();
   const t = input.language === 'fr' ? FR : EN;
 
-  const qrPng = await generateQrPng(input.publicLedgerCheckpointUrl);
+  let qrPng: Buffer;
+  try {
+    qrPng = await generateQrPng(input.publicLedgerCheckpointUrl);
+  } catch (err) {
+    logger.error(
+      { err, ref: input.ref, url: input.publicLedgerCheckpointUrl },
+      'dossier-render-qr-failed',
+    );
+    throw err;
+  }
 
   const headers = Routing.recipientBodyHeaders(input.recipientBody);
   const recipientHeader = input.language === 'fr' ? headers.fr : headers.en;
@@ -208,7 +226,13 @@ export async function renderDossierDocx(input: DossierInput): Promise<DossierRen
     ],
   });
 
-  const docxBytes = await Packer.toBuffer(doc);
+  let docxBytes: Buffer;
+  try {
+    docxBytes = await Packer.toBuffer(doc);
+  } catch (err) {
+    logger.error({ err, ref: input.ref }, 'dossier-render-pack-failed');
+    throw err;
+  }
   // Hash a canonical model (input + qr) so reproducibility test works.
   // We canonicalise recursively with sorted keys at every depth — passing
   // an array of top-level keys to JSON.stringify's replacer would silently

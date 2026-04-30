@@ -7,7 +7,7 @@
  * routing covers all three values, and that varying any input field
  * produces a different contentHash (template integrity).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { renderDossierDocx } from '../src/render.js';
 
@@ -159,6 +159,28 @@ describe('AUDIT-063 — recipient body routing on the cover page', () => {
     const a = await renderDossierDocx(makeInput({ recipientBody: 'CONAC' }));
     const b = await renderDossierDocx(makeInput({ recipientBody: 'MINFI' }));
     expect(a.contentHash).not.toBe(b.contentHash);
+  });
+});
+
+describe('AUDIT-055 — renderDossierDocx accepts a logger and emits on failure', () => {
+  function fakeLogger() {
+    return {
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      fatal: vi.fn(),
+      silent: vi.fn(),
+      level: 'info',
+      child: vi.fn(),
+    };
+  }
+
+  it('accepts an injected logger; happy path does NOT emit error', async () => {
+    const logger = fakeLogger();
+    await renderDossierDocx(makeInput(), { logger: logger as never });
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });
 
