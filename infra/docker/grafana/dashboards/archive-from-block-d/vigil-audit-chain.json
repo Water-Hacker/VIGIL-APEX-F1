@@ -22,7 +22,16 @@
     {
       "type": "stat",
       "title": "Polygon failures (last 24h)",
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
       "targets": [{ "expr": "sum(increase(vigil_polygon_anchor_total{outcome=\"failed\"}[24h]))" }],
       "gridPos": { "x": 16, "y": 0, "w": 8, "h": 4 }
     },

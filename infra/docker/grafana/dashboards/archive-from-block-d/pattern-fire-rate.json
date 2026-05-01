@@ -1,12 +1,8 @@
 {
-  "uid": "vigil-council",
-  "title": "Council vote latency",
-  "description": "Time-to-quorum and per-pillar response cadence (DECISION-008 C5).",
-  "tags": [
-    "vigil",
-    "council",
-    "governance"
-  ],
+  "uid": "vigil-patterns",
+  "title": "Pattern fire-rate by category",
+  "description": "Each P-X-NNN match-count in 24h + strength distribution.",
+  "tags": ["vigil", "patterns"],
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",
@@ -19,7 +15,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Votes by choice (5m)",
+      "title": "Pattern strength p50 / p95",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -33,7 +29,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (choice) (rate(vigil_council_vote_total[5m]))"
+          "expr": "histogram_quantile(0.5, sum by (le, pattern_id) (rate(vigil_pattern_strength_bucket[1h])))"
         }
       ],
       "fieldConfig": {
@@ -51,7 +47,7 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Votes by pillar",
+      "title": "Match counts by category",
       "gridPos": {
         "x": 0,
         "y": 8,
@@ -65,7 +61,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (pillar) (increase(vigil_council_vote_total[24h]))"
+          "expr": "sum by (category) (increase(vigil_pattern_strength_count[1h]))"
         }
       ],
       "fieldConfig": {

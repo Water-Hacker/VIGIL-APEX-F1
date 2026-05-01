@@ -2,11 +2,7 @@
   "uid": "vigil-llm-cost",
   "title": "LLM cost per finding",
   "description": "Per-finding LLM dollar cost + canary/schema failure rate.",
-  "tags": [
-    "vigil",
-    "llm",
-    "cost"
-  ],
+  "tags": ["vigil", "llm", "cost"],
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",

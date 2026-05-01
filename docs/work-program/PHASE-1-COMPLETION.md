@@ -314,13 +314,25 @@ Stack:
   - `TorOnionDown` — `vigil_tor_onion_up == 0` for 30m → warning.
   - `TorOnionStale` — `absent(vigil_tor_onion_up)` for 2h → warning (catches sentinel-cron-itself-down distinct from onion-down).
 
-### C4. Grafana dashboards (JSON)
+### C4. Grafana dashboards — 🟩
 
-Phase 1 dashboards: ingestion-throughput, pattern-fire-rate,
-calibration-bands, audit-chain-tail, polygon-anchor-cost,
-council-vote-lag, tip-volume, llm-cost-per-finding.
+Block-D D.4a + D.4b + D.4c shipped the architect's 6 spec'd
+dashboards (option (c) map+add+archive). Canonical set under
+`infra/docker/grafana/dashboards/`:
 
-- 8 dashboards under [infra/observability/grafana/dashboards/](infra/observability/grafana/dashboards/)
+1. [vigil-data-plane.json](../../infra/docker/grafana/dashboards/vigil-data-plane.json) — Postgres + Neo4j + Redis + IPFS health/saturation.
+2. [vigil-workers.json](../../infra/docker/grafana/dashboards/vigil-workers.json) — per-worker queue lag, throughput, error rates (templated by `$worker`).
+3. [vigil-llm.json](../../infra/docker/grafana/dashboards/vigil-llm.json) — daily cost, calls, hallucination rate, provider tier, schema-validation failure rate.
+4. [vigil-findings-pipeline.json](../../infra/docker/grafana/dashboards/vigil-findings-pipeline.json) — detection rate, scoring tier, counter-evidence hold, action-queue depth, posterior + pattern-strength distributions.
+5. [vigil-governance.json](../../infra/docker/grafana/dashboards/vigil-governance.json) — proposal lifecycle, vote distribution, pillar activity, recusal rate.
+6. [vigil-operator-overview.json](../../infra/docker/grafana/dashboards/vigil-operator-overview.json) — KPIs across the 5 detail dashboards with deep-link panels.
+
+The previous 14 dashboards moved to
+[infra/docker/grafana/dashboards/archive-from-block-d/](../../infra/docker/grafana/dashboards/archive-from-block-d/)
+with [README.md](../../infra/docker/grafana/dashboards/archive-from-block-d/README.md)
+listing per-file justification (superseded / out-of-scope-for-MVP /
+Phase-2-only). Architect-required single source of truth for "why
+isn't there a dashboard for X?" questions.
 
 ### C5. Falco rules
 

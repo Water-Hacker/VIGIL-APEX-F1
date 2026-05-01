@@ -11,13 +11,17 @@
     {
       "type": "stat",
       "title": "Adapter runs (last 1h)",
-      "targets": [{ "expr": "sum(increase(vigil_adapter_runs_total[1h]))", "legendFormat": "runs" }],
+      "targets": [
+        { "expr": "sum(increase(vigil_adapter_runs_total[1h]))", "legendFormat": "runs" }
+      ],
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
     },
     {
       "type": "stat",
       "title": "Findings detected (last 1h)",
-      "targets": [{ "expr": "sum(increase(vigil_events_emitted_total{stream=\"vigil:pattern:detect\"}[1h]))" }],
+      "targets": [
+        { "expr": "sum(increase(vigil_events_emitted_total{stream=\"vigil:pattern:detect\"}[1h]))" }
+      ],
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
     },
     {

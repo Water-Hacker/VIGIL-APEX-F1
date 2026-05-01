@@ -2,10 +2,7 @@
   "uid": "vigil-tips",
   "title": "Tip portal volume",
   "description": "Submissions/day + decryption-queue depth (W-09 Tor onion v3).",
-  "tags": [
-    "vigil",
-    "tip"
-  ],
+  "tags": ["vigil", "tip"],
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",

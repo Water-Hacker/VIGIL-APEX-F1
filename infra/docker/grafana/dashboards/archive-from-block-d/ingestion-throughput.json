@@ -2,10 +2,7 @@
   "uid": "vigil-ingestion",
   "title": "Adapter ingestion throughput",
   "description": "Phase 1 source-adapter health: rows/min by source, failure rate, rate-limit headroom.",
-  "tags": [
-    "vigil",
-    "ingestion"
-  ],
+  "tags": ["vigil", "ingestion"],
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",

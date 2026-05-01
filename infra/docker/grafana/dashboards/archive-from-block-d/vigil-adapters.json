@@ -22,15 +22,39 @@
     {
       "type": "stat",
       "title": "Sources blocked",
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
-      "targets": [{ "expr": "count(count by (source) (increase(vigil_adapter_runs_total{outcome=\"blocked\"}[1h])))" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "count(count by (source) (increase(vigil_adapter_runs_total{outcome=\"blocked\"}[1h])))"
+        }
+      ],
       "gridPos": { "x": 16, "y": 0, "w": 8, "h": 5 }
     },
     {
       "type": "stat",
       "title": "First-contact failures",
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 1 }] } } },
-      "targets": [{ "expr": "sum(increase(vigil_adapter_runs_total{outcome=\"first_contact_failed\"}[24h]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "sum(increase(vigil_adapter_runs_total{outcome=\"first_contact_failed\"}[24h]))" }
+      ],
       "gridPos": { "x": 16, "y": 5, "w": 8, "h": 5 }
     },
     {

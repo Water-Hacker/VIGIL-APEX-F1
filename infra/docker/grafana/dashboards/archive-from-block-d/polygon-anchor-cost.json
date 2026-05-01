@@ -1,11 +1,8 @@
 {
-  "uid": "vigil-patterns",
-  "title": "Pattern fire-rate by category",
-  "description": "Each P-X-NNN match-count in 24h + strength distribution.",
-  "tags": [
-    "vigil",
-    "patterns"
-  ],
+  "uid": "vigil-anchor-cost",
+  "title": "Polygon anchor cost + latency",
+  "description": "Hourly batch + high-sig fast-lane gas spend (USD).",
+  "tags": ["vigil", "anchor", "cost"],
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",
@@ -18,7 +15,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Pattern strength p50 / p95",
+      "title": "Anchor success/failure (5m)",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -32,7 +29,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.5, sum by (le, pattern_id) (rate(vigil_pattern_strength_bucket[1h])))"
+          "expr": "sum by (status) (rate(vigil_polygon_anchor_total[5m]))"
         }
       ],
       "fieldConfig": {
@@ -49,13 +46,13 @@
     },
     {
       "id": 2,
-      "type": "timeseries",
-      "title": "Match counts by category",
+      "type": "stat",
+      "title": "Anchors today",
       "gridPos": {
         "x": 0,
         "y": 8,
-        "w": 12,
-        "h": 8
+        "w": 6,
+        "h": 4
       },
       "datasource": {
         "type": "prometheus",
@@ -64,18 +61,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (category) (increase(vigil_pattern_strength_count[1h]))"
+          "expr": "sum(increase(vigil_polygon_anchor_total[24h]))"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short"
-        }
-      },
-      "options": {
-        "legend": {
-          "showLegend": true,
-          "displayMode": "table"
         }
       }
     }

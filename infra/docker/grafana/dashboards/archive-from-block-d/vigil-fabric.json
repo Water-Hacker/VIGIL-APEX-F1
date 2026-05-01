@@ -16,14 +16,31 @@
     {
       "type": "stat",
       "title": "Commitments / minute",
-      "targets": [{ "expr": "sum(rate(vigil_events_emitted_total{worker=\"worker-fabric-bridge\"}[5m])) * 60" }],
+      "targets": [
+        {
+          "expr": "sum(rate(vigil_events_emitted_total{worker=\"worker-fabric-bridge\"}[5m])) * 60"
+        }
+      ],
       "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
     },
     {
       "type": "stat",
       "title": "Divergences (24h)",
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
-      "targets": [{ "expr": "sum(increase(vigil_errors_total{service=\"worker-fabric-bridge\", code=\"AUDIT_HASH_CHAIN_BROKEN\"}[24h]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_errors_total{service=\"worker-fabric-bridge\", code=\"AUDIT_HASH_CHAIN_BROKEN\"}[24h]))"
+        }
+      ],
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 }
     },
     {
