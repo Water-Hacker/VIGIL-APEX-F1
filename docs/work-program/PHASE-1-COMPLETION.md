@@ -510,12 +510,50 @@ written for). None can be silently extended by the build agent;
 each touches a key the architect controls (Vault root token, GPG
 passphrase) or a paid resource (Hetzner Storage Box).
 
-### C10. Secret-scan baseline
+### C10. Secret-scan baseline — 🟩
 
-`gitleaks` baseline plus pre-commit hook plus CI step. No exceptions.
+`gitleaks` baseline + pre-commit hook + CI workflow. No exceptions.
 
-- File: [.gitleaks.toml](.gitleaks.toml)
-- Hook: [.husky/pre-commit](.husky/pre-commit)
+Status, Block-D D.10 / 2026-05-01:
+
+- C10.1 🟩 [.gitleaks.toml](../../.gitleaks.toml) extends the default
+  ruleset (Anthropic, AWS, GitHub PAT, Stripe, Slack, generic high-
+  entropy) and ships 6 allowlist blocks covering: synthetic IPFS
+  CIDs in the anti-hallucination corpus; deterministic placeholder
+  hashes / hex strings under `**/__tests__/`; PLACEHOLDER markers
+  in `.env.example` + `docs/` + `*.md`; architect / sample emails
+  in docs; **NEW Block-D** EU sanctions list public token (European
+  Commission open-data portal); **NEW Block-D** Vault path
+  references in k8s ExternalSecrets manifests (`key: vigil/...`
+  lines name paths, not secret values); repo-wide path exclusions
+  (`node_modules/`, lockfiles, `dist/`, `build/`, `.next/`,
+  `.turbo/`, `graphify-out/`).
+- C10.2 🟩 [.husky/pre-commit](../../.husky/pre-commit) runs
+  `gitleaks protect --staged --redact -v --no-banner` if the
+  binary is available. Verified end-to-end during D.6/D.7/D.8/D.9
+  commit pre-flight (every staged-files commit logged
+  `[pre-commit] OK` after gitleaks scan).
+- C10.3 🟩 [.github/workflows/secret-scan.yml](../../.github/workflows/secret-scan.yml)
+  runs two scanners on every push + every PR + daily at 03:17 UTC:
+  - `gitleaks/gitleaks-action@v2` against full git history with
+    artifact upload + actor notification
+  - `trufflesecurity/trufflehog@main` with `--only-verified` (live
+    secret check via vendor APIs — very low false-positive rate)
+- C10.4 🟩 False-positive triage:
+  - `apps/adapter-runner/src/adapters/eu-sanctions.ts:21` —
+    `?token=dG9rZW4tMjAxNw` is the EU sanctions list public download
+    token (published in EU open-data documentation; access controlled
+    by IP allowlist + rate limit, not the token). Allowlisted.
+  - `infra/k8s/charts/vigil-apex/templates/externalsecret-workers.yaml:23`
+    — `key: vigil/vault-tokens/worker` is a Vault path identifier,
+    not a secret value (ExternalSecrets resolves the value at runtime).
+    Allowlisted with a path-scoped regex covering all
+    `infra/k8s/charts/**/*.{yaml,yml}` ExternalSecrets manifests.
+
+Verified Block-D D.10 / 2026-05-01:
+`gitleaks detect --no-git --redact -v` → 0 leaks (was 2 before
+the Block-D allowlist extension); pre-commit gitleaks scan green
+on every Block-D commit.
 
 ---
 

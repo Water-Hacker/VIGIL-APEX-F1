@@ -81,6 +81,29 @@ paths = [
   '''CLAUDE\.md''',
 ]
 
+# Block-D D.10 / 2026-05-01 — false-positive triage. Both cases are
+# public references, not secrets, but gitleaks' generic-api-key rule
+# fires on the entropy of the matched substring.
+
+[[allowlists]]
+description = "EU sanctions list public token (European Commission open-data portal — XML download link, IP-allowlisted)"
+regexes = [
+  '''token=dG9rZW4tMjAxNw''',
+]
+paths = [
+  '''apps/adapter-runner/src/adapters/eu-sanctions\.ts''',
+]
+
+[[allowlists]]
+description = "Vault path references in k8s ExternalSecrets manifests (the 'key:' line names a Vault path, not a secret value — value resolves at runtime)"
+regexes = [
+  '''key:\s*vigil/[a-z0-9_/-]+''',
+]
+paths = [
+  '''infra/k8s/charts/.*\.yaml''',
+  '''infra/k8s/charts/.*\.yml''',
+]
+
 # === Repo-wide global path exclusions === ====================================
 # Build artefacts, lockfiles, generated code, third-party vendor dirs.
 
