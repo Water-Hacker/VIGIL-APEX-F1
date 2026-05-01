@@ -136,6 +136,15 @@ without a paired fixture file fails the build.
 - File: [scripts/check-pattern-coverage.ts](scripts/check-pattern-coverage.ts) (new)
 - Wire into `.github/workflows/ci.yml` as a blocking step.
 
+### A11. Test-ratio measurement (HARDEN-#5 / T2.04 — deferred enforcement)
+
+Per the 2026-05-01 architect decision: measure first, threshold later.
+Floor is set on observed state, not aspiration.
+
+- 🟩 [scripts/measure-test-ratio.ts](scripts/measure-test-ratio.ts) — per-workspace `test_files / source_files` and `test_loc / source_loc`. Run as `pnpm tsx scripts/measure-test-ratio.ts | column -t -s $'\t'`. **No CI gate.**
+- ⏳ Floor selection — architect picks a per-tier threshold after reviewing the survey. Tracked here; no automated promotion.
+- 🟦 Notable findings to date (2026-05-01 baseline): 12 workspaces at `file_ratio == 0.000` — apps mirroring the AUDIT-069 zero-test allowlist plus two packages off-allowlist (`packages/federation-stream`, `packages/shared`). Repo total: 361 source files / 125 test files, file_ratio 0.346 / loc_ratio 0.345.
+
 ---
 
 ## TRACK B — Documentation completeness
