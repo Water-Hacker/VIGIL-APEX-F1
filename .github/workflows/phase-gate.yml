@@ -109,3 +109,18 @@ jobs:
         # registry field fails CI rather than silently generating
         # an incomplete catalogue entry."
         run: npx --yes tsx scripts/generate-pattern-catalogue.ts --check
+
+      - name: Run scripts/check-decision-cross-links.ts (Block-C B5 forward contract)
+        # Block-C B5 — every DECISION-N (N >= 7) must carry AT LEAST
+        # ONE AUDIT-NNN reference AND ONE of {W-NN, 7+-char commit
+        # sha, "commit: <sha>" line} anywhere in the entry body.
+        # DECISION-000..006 are LEGACY-EXEMPT (predate the
+        # convention).
+        # Architect signoff 2026-05-01: "Permissive + allowlist
+        # DECISION-000..006. Lint applies from DECISION-007 onward.
+        # Do not retrofit cross-links to predate the convention."
+        # First-run surfaces 10 existing failures (D-009..D-016) per
+        # docs/decisions/cross-link-audit.md; architect resolution
+        # via 4 options listed there. CI will be red on this single
+        # check until the architect resolves.
+        run: npx --yes tsx scripts/check-decision-cross-links.ts
