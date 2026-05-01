@@ -3649,6 +3649,101 @@ tip.tip` raises `restrict_violation`.
 
 ---
 
+## DECISION-017 Legacy forward-only migrations made permanent; round-trip mandate from 0009 onward
+
+**Status:** PROVISIONAL — promote to FINAL after architect read-through.
+
+**Date:** 2026-05-01.
+
+**Thesis.** The eight migrations `0000_bootstrap.sql` through
+`0008_satellite_request_tracking.sql` (excluding `0007_recipient_body`,
+which already ships paired) **predate the round-trip discipline** and
+will not gain inverse `_down.sql` files. Every migration from
+`0009_certainty_engine.sql` onward already pairs forward + down, and
+that discipline becomes mandatory and CI-enforced. The
+[scripts/check-migration-pairs.ts](../../scripts/check-migration-pairs.ts)
+allowlist closes here. The decision is forward-only: future legacy
+allowlist entries are not allowed.
+
+**Why now.** T2.03 in the 2026-05-01 Phase-1 closeout brief asked the
+build agent to backfill `_down.sql` for the legacy seven. The diff
+risk is real:
+
+- `0001_init.sql` is 488 lines of `CREATE` against an empty Postgres.
+  The "inverse" is `DROP SCHEMA … CASCADE` against whatever state the
+  application has accumulated by the time the rollback runs. There is
+  no clean dev-only inverse — a wrong `DROP` cascades into application
+  data.
+- `0002_perf_indexes.sql` (62 lines) and `0003_audit_pipeline.sql`
+  (25 lines) are legitimately invertible (`DROP INDEX` / `DROP TABLE`
+  with named keys), but writing those by hand without a test harness
+  that round-trips through Postgres is precisely the failure mode
+  AUDIT-051 was designed to prevent.
+- `0004..0006`, `0008` add tables and columns; their inverses depend
+  on whether the application is still using the columns at rollback
+  time, which the migration cannot know.
+
+The round-trip discipline exists for _future_ migrations precisely
+because the _past_ migrations cannot be retroactively round-tripped
+without writing handle-with-care SQL that nobody tests — which is
+worse than declaring the pre-discipline state un-rollable and moving
+on.
+
+**The doctrine.**
+
+1. **Closed legacy allowlist.** Migrations `0000_bootstrap`,
+   `0001_init`, `0002_perf_indexes`, `0003_audit_pipeline`,
+   `0004_fabric_witness`, `0005_adapter_repair`,
+   `0006_webauthn_challenge`, `0008_satellite_request_tracking` are
+   permanently exempt from the round-trip requirement. The list of
+   eight is fixed; no migration is ever added to it.
+2. **Round-trip mandate from 0009 onward.** Every migration with
+   number ≥ 0009 ships a paired `NNNN_<slug>_down.sql`. The script
+   `scripts/check-migration-pairs.ts` enforces this in the
+   phase-gate workflow. A future migration that lands forward-only
+   fails CI; the legacy allowlist does not extend to it.
+3. **Rollback semantics for legacy.** The pre-discipline state is
+   "drop the database and re-bootstrap." Operationally: `dropdb` →
+   `createdb` → re-apply forward chain from `0000_bootstrap` through
+   the desired tip number. Use only on dev / staging; production
+   rollback past `0009` requires a point-in-time recovery from
+   pg_basebackup, never a forward-applied inverse.
+4. **Documentation home.** This decision is the binding doctrine.
+   The script header note in `scripts/check-migration-pairs.ts` is
+   normative; the source-of-truth is here.
+
+**What this decision does _not_ do.**
+
+- It does not invalidate or attempt to write inverse migrations for
+  the legacy eight. They stay forward-only by design.
+- It does not remove the existing `LEGACY_FORWARD_ONLY` allowlist
+  in `scripts/check-migration-pairs.ts` — that allowlist becomes
+  closed (no future additions) but stays in place to gate the lint.
+- It does not change the `0007_recipient_body` migration, which
+  already pairs forward + down.
+
+**Test counts.** No code change in this decision. The existing
+`scripts/check-migration-pairs.ts` already enforces the contract:
+running it on main today reports `5 paired migrations, 8 legacy
+forward-only (allow-listed)` — exactly the post-DECISION-017 shape.
+
+**Architect read-through.**
+
+1. Confirm the closed legacy list (eight names) matches your intent.
+   Currently: `0000`, `0001`, `0002`, `0003`, `0004`, `0005`, `0006`,
+   `0008`.
+2. Verify `scripts/check-migration-pairs.ts` exits 0 on main with the
+   reported counts.
+3. Confirm the rollback-semantics paragraph (item 3 above) reflects
+   the operations playbook you want OPERATIONS.md to enforce — if
+   not, suggest replacement wording before promoting to FINAL.
+4. Decide whether the decision should also gate against any future
+   PR that _removes_ a name from the allowlist (i.e., the allowlist
+   shrinks only by promoting a legacy migration to a paired pair —
+   which is also non-trivial). If so, add the corresponding clause.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
