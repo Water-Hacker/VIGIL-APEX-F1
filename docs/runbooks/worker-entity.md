@@ -184,14 +184,33 @@ per canonical.
 
 ---
 
-## R3 — Rotate operator YubiKey
+## R3 — Credential rotation
 
-Per SRD §31.3.
+Per SRD §31.3 + HSK-v1 §6.
 
-`worker-entity` does NOT use a YubiKey directly. It reads
-`anthropic/api_key` from Vault. Operator YubiKey rotation that
-affects Vault unseal cascades through the general Vault runbook;
-no worker-specific action.
+`worker-entity` authenticates to Anthropic via `anthropic/api_key`
+read from Vault on boot. Rotation procedure:
+
+1. Architect rotates the Anthropic API key out-of-band (Anthropic console).
+2. Update Vault: `vault kv put secret/anthropic api_key=<new>`.
+3. Restart the worker so it re-reads the key on boot:
+   ```sh
+   docker compose restart worker-entity
+   ```
+4. Verify the rebuilt `SafeLlmRouter` records the next call into
+   `llm.call_record` (the row's `model_id` should match the
+   default; the call_record table has no key-fingerprint column,
+   but a fresh row after restart confirms the new key is live).
+5. The cost-tracker is in-process; restarting the worker resets
+   the daily-spend counter to zero. Rotation typically lands at
+   off-peak so the reset doesn't mask a legitimate cost-ceiling
+   warning. If the rotation must happen mid-day, watch
+   `vigil_llm_cost_usd_total` for the next 24 h to confirm the
+   pre-rotation rate continues.
+
+`worker-entity` does NOT use a YubiKey. Operator YubiKey rotation
+that affects Vault unseal cascades through the general Vault
+runbook ([vault.md](./vault.md) R3); no worker-specific action.
 
 ---
 
