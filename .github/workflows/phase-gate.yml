@@ -88,3 +88,12 @@ jobs:
         # fails here. Resolution is an architect call — see
         # docs/work-program/BLOCK-A-RECONCILIATION.md §2.A.9.
         run: npx --yes tsx scripts/check-source-count.ts
+
+      - name: Run scripts/check-llm-pricing.ts (Block-A §2.A.4 / §2.A.5 drift lint)
+        # Every default Anthropic model_id in packages/llm/src/providers/
+        # anthropic.ts must have a pricing entry in infra/llm/pricing.json.
+        # The cost-tracker daily/monthly ceilings depend on accurate
+        # per-call cost; a missing entry would surface as a fatal
+        # LlmPricingNotConfiguredError at runtime. The lint surfaces
+        # the gap BEFORE deploy.
+        run: npx --yes tsx scripts/check-llm-pricing.ts

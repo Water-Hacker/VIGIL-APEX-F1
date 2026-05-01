@@ -4,6 +4,7 @@ import { expose, type Secret } from '@vigil/security';
 import { Errors } from '@vigil/shared';
 
 import { CircuitBreaker } from '../circuit.js';
+import { anthropicCostUsd } from '../pricing.js';
 import {
   TASK_TEMPERATURE,
   type LlmCallOptions,
@@ -122,8 +123,11 @@ export class AnthropicProvider implements ProviderClient {
       const outputTokens = usage.output_tokens;
       const cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
       const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
-      const cost = computeCostUsd(
-        modelClass,
+      // Block-A reconciliation §2.A.4 — pricing keyed by model_id
+      // (NOT modelClass). Throws LlmPricingNotConfiguredError if the
+      // entry is missing — no silent zero-cost fallback.
+      const cost = anthropicCostUsd(
+        model,
         inputTokens,
         outputTokens,
         cacheCreationTokens,
@@ -242,8 +246,9 @@ export class AnthropicProvider implements ProviderClient {
     const usage = message.usage;
     const inputTokens = usage.input_tokens;
     const outputTokens = usage.output_tokens;
-    // Batch billing — half of standard.
-    const cost = computeCostUsd(modelClass, inputTokens, outputTokens) * 0.5;
+    // Batch billing — half of standard. Block-A reconciliation §2.A.4
+    // — keyed by model_id (NOT modelClass).
+    const cost = anthropicCostUsd(model, inputTokens, outputTokens) * 0.5;
 
     this.circuit.recordSuccess();
     return {
@@ -268,27 +273,8 @@ export class AnthropicProvider implements ProviderClient {
   }
 }
 
-function computeCostUsd(
-  modelClass: LlmModelClass,
-  inTok: number,
-  outTok: number,
-  cacheCreationTok = 0,
-  cacheReadTok = 0,
-): number {
-  // Anthropic published rates (USD per 1M tokens). Cache creation is billed
-  // at 1.25× normal input; cache reads bill at 0.10× normal input — this is
-  // where the 80% savings on the system-prompt segment come from.
-  const p = {
-    opus: { input: 5.0, output: 25.0 },
-    sonnet: { input: 3.0, output: 15.0 },
-    haiku: { input: 1.0, output: 5.0 },
-  }[modelClass];
-  return (
-    (inTok * p.input) / 1_000_000 +
-    (outTok * p.output) / 1_000_000 +
-    (cacheCreationTok * p.input * 1.25) / 1_000_000 +
-    (cacheReadTok * p.input * 0.1) / 1_000_000
-  );
-}
+// `computeCostUsd` removed — Block-A reconciliation §2.A.4 moved
+// pricing into `infra/llm/pricing.json`, keyed by exact model_id.
+// `anthropicCostUsd` from ../pricing.js is the canonical entry point.
 
 export type { LlmTaskClass };

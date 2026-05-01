@@ -140,6 +140,25 @@ export class LlmCostCeilingError extends LlmError {
   }
 }
 
+/**
+ * Block-A reconciliation §2.A.4 / §2.A.5 — thrown when the LLM cost
+ * accounting cannot find a pricing entry for the requested model_id.
+ * No default fallback is allowed: a missing entry means the
+ * cost-tracker would report 0 for that call, leaving the daily and
+ * monthly ceilings effectively inert.
+ */
+export class LlmPricingNotConfiguredError extends LlmError {
+  constructor(modelId: string, provider: string) {
+    super({
+      code: 'LLM_PRICING_NOT_CONFIGURED',
+      message: `No pricing entry for ${provider}/${modelId} in infra/llm/pricing.json. Refusing to use a fallback price; the daily and monthly ceilings would otherwise be inert.`,
+      retryable: false,
+      severity: 'fatal',
+      context: { modelId, provider },
+    });
+  }
+}
+
 export class LlmHallucinationDetectedError extends LlmError {
   constructor(layer: string, ctx: JsonObject = {}) {
     super({

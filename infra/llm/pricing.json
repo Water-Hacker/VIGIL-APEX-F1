@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-01T00:00:00.000Z",
+  "_note": "Block-A reconciliation §2.A.4 + §2.A.5 — LLM pricing keyed by exact model_id. All prices are USD per 1M tokens. The aws_bedrock_premium_multiplier converts the Anthropic list price into the Bedrock-billed price (Bedrock charges a per-request surcharge over the underlying Anthropic rate; the multiplier is applied per-call when the Bedrock provider returns the call). Last refreshed against Anthropic's published rate card on the generated_at timestamp; any change to the rate card (and any swap of the default model_id env var) MUST refresh this file or the cost ceiling becomes inert. CI lint check-llm-pricing.ts asserts every default model_id has an entry.",
+  "models": {
+    "claude-opus-4-7": {
+      "provider": "anthropic",
+      "model_class": "opus",
+      "input_per_mtok_usd": 5.0,
+      "output_per_mtok_usd": 25.0,
+      "cache_creation_multiplier": 1.25,
+      "cache_read_multiplier": 0.1,
+      "aws_bedrock_premium_multiplier": 1.0,
+      "effective_date": "2026-05-01",
+      "_note": "Anthropic Opus 4.7 list price."
+    },
+    "claude-sonnet-4-6": {
+      "provider": "anthropic",
+      "model_class": "sonnet",
+      "input_per_mtok_usd": 3.0,
+      "output_per_mtok_usd": 15.0,
+      "cache_creation_multiplier": 1.25,
+      "cache_read_multiplier": 0.1,
+      "aws_bedrock_premium_multiplier": 1.0,
+      "effective_date": "2026-05-01",
+      "_note": "Anthropic Sonnet 4.6 list price."
+    },
+    "claude-haiku-4-5-20251001": {
+      "provider": "anthropic",
+      "model_class": "haiku",
+      "input_per_mtok_usd": 1.0,
+      "output_per_mtok_usd": 5.0,
+      "cache_creation_multiplier": 1.25,
+      "cache_read_multiplier": 0.1,
+      "aws_bedrock_premium_multiplier": 1.0,
+      "effective_date": "2026-05-01",
+      "_note": "Anthropic Haiku 4.5 (snapshot 20251001) list price."
+    }
+  }
+}
