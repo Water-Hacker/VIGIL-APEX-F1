@@ -153,12 +153,29 @@ Both files exist and the audit-coverage doc is shipped:
 NO enumerated tests; only §30.8 has named tests (CT-01..CT-06).
 The fixture covers what it can within a 5-second synthetic run.
 
-**A8 follow-up (Block D scope, architect-confirmed 2026-05-01).**
-The agent drafts the SRD §30.1–§30.7 enumeration in Block D based
-on the inferred mapping in
-[E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping).
-Architect reviews and edits in place. Until then the fixture
-operates against the inferred list.
+**A8 follow-up (Block D scope, architect-confirmed 2026-05-01) — 🟩
+draft shipped.**
+
+Block-D D.11 / 2026-05-01: agent drafted the SRD §30.1–§30.7
+enumeration at
+[docs/source/SRD-30-enumeration-draft.md](../source/SRD-30-enumeration-draft.md).
+Per architect signoff option (b) "detailed draft" with [INFERRED]
+markers vs citation separation: every test entry tagged exactly
+one of `[CITED Table N]` (verbatim from SRD-v3 Tables 186-192),
+`[INFERRED §29.X]` (agent inference from milestone narrative), or
+`[INFERRED — agent recommendation]` (industry-standard milestone-
+gate practice).
+
+Counts: §30.1=4 CITED + 5 INFERRED; §30.2=4+4; §30.3=7+4;
+§30.4=6+2; §30.5=8+0 (Table 190 renumbered); §30.6=2+3; §30.7=2+2;
+§30.8=6+0 (unchanged). Total: 39 CITED + 20 INFERRED = 59 if all
+accepted. Architect may accept all / partial / reject INFERRED.
+
+Until architect resolution, the fixture operates against the
+inferred list in
+[E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping)
+which the draft's 20 `[INFERRED]` entries supersede with explicit
+naming.
 
 ### A9. Production-placeholder sweep
 
