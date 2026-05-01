@@ -233,6 +233,18 @@ class EntityWorker extends WorkerBase<Payload> {
       return { kind: 'dead-letter', reason: 'missing-source-event-id' };
     }
 
+    // Block-A reconciliation §5 (original A.3) — track the canonical
+    // ids whose alias rows we successfully wrote in this handler call.
+    // The PATTERN_DETECT publish at the bottom uses this set so we
+    // emit one envelope PER canonical (with the real id and the
+    // event_id), and ONLY for canonicals that actually persisted.
+    // The previous implementation published one hardcoded
+    // {canonical_id: null, subject_kind: 'Tender', event_ids: []}
+    // envelope from a `finally` block — which fired even on retry,
+    // routed an empty subject to worker-pattern, and discarded every
+    // resolved canonical. Both bugs are fixed here.
+    const dispatchedCanonicalIds = new Set<string>();
+
     try {
       // ─── Step 1: rule-pass ───────────────────────────────────
       const { resolved, nameOnlyCandidates, unresolved } = await this.rulePass(aliases);
@@ -263,6 +275,7 @@ class EntityWorker extends WorkerBase<Payload> {
           language: detectLanguage(m.alias),
           first_seen: now,
         });
+        dispatchedCanonicalIds.add(m.canonicalId);
       }
 
       // For each name-only candidate that did NOT corroborate via
@@ -297,6 +310,7 @@ class EntityWorker extends WorkerBase<Payload> {
 
       // ─── Step 2: LLM-pass (unresolved only) ──────────────────
       if (unresolved.length === 0) {
+        await this.dispatchPatterns(dispatchedCanonicalIds, sourceId, env);
         return { kind: 'ack' };
       }
       const rendered = Safety.globalPromptRegistry.latest('entity.resolve-aliases');
@@ -351,6 +365,7 @@ class EntityWorker extends WorkerBase<Payload> {
             },
             aliases: aliasRows,
           });
+          dispatchedCanonicalIds.add(id);
         } catch (e) {
           logger.error(
             { err: e, canonical: cluster.canonical, aliases: cluster.aliases },
@@ -419,21 +434,59 @@ class EntityWorker extends WorkerBase<Payload> {
           await this.entityRepo.markNeo4jFailed(id);
         }
       }
+      // Block-A reconciliation §5 (original A.3) — pattern dispatch
+      // ONLY on the success path, with the real canonical ids and
+      // the source event in event_ids.
+      await this.dispatchPatterns(dispatchedCanonicalIds, sourceId, env);
       return { kind: 'ack' };
     } catch (e) {
+      // No PATTERN_DETECT publish on failure — the previous
+      // implementation published from a `finally` block and routed
+      // empty-subject envelopes downstream on every retry.
       logger.error({ err: e }, 'er-failed');
       return { kind: 'retry', reason: 'er-error', delay_ms: 30_000 };
-    } finally {
-      // Trigger pattern detection downstream. Per SRD §15.1 this
-      // happens AFTER the Postgres commit (the publish runs in the
-      // finally block, which executes after the try/catch handlers
-      // have completed their state writes).
+    }
+  }
+
+  /**
+   * Block-A reconciliation §5 (original A.3) — emit one
+   * PATTERN_DETECT envelope per resolved canonical id with the real
+   * subject_kind (loaded from the canonical row), the source event
+   * in `event_ids`, and a per-canonical dedup key. Called once on
+   * the success path. No-op when the set is empty.
+   *
+   * subject_kind mapping (canonical.kind → worker-pattern enum):
+   *   - 'person'      → 'Person'
+   *   - 'company'     → 'Company'
+   *   - 'public_body' → 'Company'   (closest semantic; public bodies
+   *                                  bid on tenders + receive payments
+   *                                  the same way companies do)
+   *   - anything else → 'Company'   (fallback; legal-entity default)
+   */
+  private async dispatchPatterns(
+    canonicalIds: ReadonlySet<string>,
+    sourceEventId: string,
+    env: Envelope<Payload>,
+  ): Promise<void> {
+    if (canonicalIds.size === 0) return;
+    const ids = Array.from(canonicalIds);
+    const rows = await this.entityRepo.getCanonicalMany(ids);
+    const kindById = new Map<string, string>();
+    for (const r of rows) kindById.set(r.id, r.kind);
+    for (const id of ids) {
+      const k = kindById.get(id);
+      const subject_kind = k === 'person' ? 'Person' : 'Company';
       await this.config.client.publish(
         STREAMS.PATTERN_DETECT,
         newEnvelope(
           'worker-entity',
-          { subject_kind: 'Tender', canonical_id: null, related_ids: [], event_ids: [] },
-          `${env.id}|pattern`,
+          {
+            subject_kind,
+            canonical_id: id,
+            related_ids: [],
+            event_ids: [sourceEventId],
+          },
+          `${env.id}|pattern|${id}`,
           env.correlation_id,
         ),
       );
