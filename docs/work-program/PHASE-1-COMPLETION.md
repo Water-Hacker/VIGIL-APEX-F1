@@ -264,13 +264,32 @@ cross-reference completeness on top of link-validity.)
 
 ## TRACK C — Operational readiness
 
-### C1. Compose stack smoke test
+### C1. Compose stack smoke test — 🟩
 
-`docker compose up -d && wait-for-healthy.sh && smoke-tests.sh`. Verifies
-every container reaches healthy and the dashboard returns 200 on
-`/api/health`.
+Block-D D.1 ships [scripts/smoke-stack.sh](../../scripts/smoke-stack.sh).
+Brings the stack up via `infra/docker/docker-compose.yaml`, waits
+up to 5 minutes (`--timeout-s` overridable) for every
+healthcheck-declaring container to report `healthy`, then probes
+five dashboard edge surfaces:
 
-- File: [scripts/smoke-stack.sh](scripts/smoke-stack.sh)
+- `GET /api/health` → 200
+- `GET /api/audit/public?limit=5` → 200
+- `GET /public/audit` → 200
+- `GET /tip` → 200
+- `GET /verify` → 200
+
+Soft pre-flight warning when Tier-1 critical env vars
+(`GPG_FINGERPRINT`, `TIP_OPERATOR_TEAM_PUBKEY`,
+`AUDIT_PUBLIC_EXPORT_SALT`, `POLYGON_ANCHOR_CONTRACT`) are
+PLACEHOLDER — affected workers refuse to boot per Block-A A9 /
+Block-B B.2, so the script flags the cause-of-failure before the
+healthcheck stage.
+
+Modes: default = full bring-up + verify + leave running for inspection.
+`--no-up` = verify only against an already-running stack.
+`--down` = teardown on success.
+Failure mode: prints last 50 log lines per unhealthy container
+so CI-log walking surfaces the cause immediately.
 
 ### C2. Vault Shamir initialization
 
