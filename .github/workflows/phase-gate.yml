@@ -97,3 +97,30 @@ jobs:
         # LlmPricingNotConfiguredError at runtime. The lint surfaces
         # the gap BEFORE deploy.
         run: npx --yes tsx scripts/check-llm-pricing.ts
+
+      - name: Run scripts/generate-pattern-catalogue.ts --check (Block-C B1 freshness gate)
+        # Block-C B1 — every pattern source MUST declare title_fr,
+        # title_en, description_fr, description_en, defaultPrior,
+        # defaultWeight, status AND ship a paired fixture-test file.
+        # The check fails the job if any pattern is missing a field
+        # OR if the committed catalogue.md / index.md drift from
+        # what the generator would produce. Architect signoff
+        # 2026-05-01: "Wire into turbo run build so a missing
+        # registry field fails CI rather than silently generating
+        # an incomplete catalogue entry."
+        run: npx --yes tsx scripts/generate-pattern-catalogue.ts --check
+
+      - name: Run scripts/check-decision-cross-links.ts (Block-C B5 forward contract)
+        # Block-C B5 — every DECISION-N (N >= 7) must carry AT LEAST
+        # ONE AUDIT-NNN reference AND ONE of {W-NN, 7+-char commit
+        # sha, "commit: <sha>" line} anywhere in the entry body.
+        # DECISION-000..006 are LEGACY-EXEMPT (predate the
+        # convention).
+        # Architect signoff 2026-05-01: "Permissive + allowlist
+        # DECISION-000..006. Lint applies from DECISION-007 onward.
+        # Do not retrofit cross-links to predate the convention."
+        # First-run surfaces 10 existing failures (D-009..D-016) per
+        # docs/decisions/cross-link-audit.md; architect resolution
+        # via 4 options listed there. CI will be red on this single
+        # check until the architect resolves.
+        run: npx --yes tsx scripts/check-decision-cross-links.ts

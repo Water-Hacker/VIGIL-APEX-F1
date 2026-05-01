@@ -14,3 +14,12 @@ contracts/artifacts
 contracts/cache
 contracts/typechain-types
 infra/docker/grafana/dashboards/*.json
+
+# Block-C B1 — auto-generated pattern catalogue. The
+# scripts/generate-pattern-catalogue.ts --check gate compares the
+# committed file against the generator output byte-for-byte;
+# prettier reflowing tables breaks that check. The generator emits
+# canonical formatting on its own.
+docs/patterns/catalogue.md
+docs/patterns/index.md
+docs/patterns/P-*.md

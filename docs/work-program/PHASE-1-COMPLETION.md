@@ -100,22 +100,34 @@ prior pass.
 - A5.1 🟩 — postgres:16.2-alpine service in `.github/workflows/ci.yml:84-96`.
 - A5.2 🟩 — `pnpm --filter @vigil/db-postgres run migrate` step at line 116-119.
 - A5.3 🟩 — `INTEGRATION_DB_URL` exported to the test job at line 129+134.
-- A5.4 🟩 — Block-B regression pin (commit `<filled at commit time>`):
+- A5.4 🟩 — Block-B regression pin (commit `04175f9`):
   new CI step "audit-log CAS race regression must execute (not skip)"
   re-runs the CAS test with `--reporter=verbose` and greps for the
   test name; fails the job if the test doesn't appear in the output
   OR appears with a skip marker.
 
-### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; architect-action remaining
+**A5 deferred follow-up (Block E scope, architect-confirmed 2026-05-01).**
+Salt-collision CI alert: when two consecutive
+`audit.public_export.salt_fingerprint` values match, the operator
+forgot the quarterly rotation. The
+[`audit.public_export_salt_collisions`](../../packages/db-postgres/drizzle/0012_audit_export_salt_fingerprint.sql)
+view exists; the CI alert that fires on a non-empty result is
+**deferred-not-dropped**, target Block E. No urgency — quarterly
+cron only, 90-day detection window before the next export.
+
+### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; A6.5 🟦 architect-blocked
 
 Block-B B.6 ships A6.1 + A6.3 + A6.4 in
 [docs/decisions/decision-012-promotion-prep.md](../decisions/decision-012-promotion-prep.md).
 
 - A6.1 🟩 Cross-reference audit: 29 doctrine paths verified resolved 2026-05-01.
-- A6.2 🟩 Architect read-through checklist already exists at [docs/decisions/decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md) (architect-action when ready).
+- A6.2 🟩 Architect read-through checklist already exists at [docs/decisions/decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md).
 - A6.3 🟩 Schema side-by-side: `audit.user_action_event` + `audit.user_action_chain` vs doctrine §3 / SRD §17 — no discrepancies.
 - A6.4 🟩 Salt rotation operations: format, custody, cadence, runbook, DR procedure, failure modes.
-- A6.5 🟦 **Architect action.** Promote PROVISIONAL → FINAL in [docs/decisions/log.md](../decisions/log.md). Per architect operating posture, the agent does NOT perform this autonomously.
+- **A6.5 🟦 architect-blocked.** Architect committed 2026-05-01 to
+  the read-through "this week". Tracked here; no agent action.
+  Promotion procedure documented in
+  [decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md).
 
 ### A7. Stale TODOs sweep — 🟩
 
@@ -129,7 +141,7 @@ Both files re-checked 2026-05-01:
 
 Closed during a prior pass.
 
-### A8. End-to-end fixture script — 🟩 (with deferred SRD §30 follow-up)
+### A8. End-to-end fixture script — 🟩 (with SRD §30 enumeration deferred to Block D)
 
 Both files exist and the audit-coverage doc is shipped:
 
@@ -139,10 +151,14 @@ Both files exist and the audit-coverage doc is shipped:
 
 **Key audit finding.** SRD §30.1–§30.7 carry milestone titles but
 NO enumerated tests; only §30.8 has named tests (CT-01..CT-06).
-The fixture covers what it can within a 5-second synthetic run;
-gap-fills against an authoritative SRD §30 list need the
-architect to fill in §30.1–§30.7 first. Audit found 0 fixture
-commits warranted within the architect's 3-commit cap.
+The fixture covers what it can within a 5-second synthetic run.
+
+**A8 follow-up (Block D scope, architect-confirmed 2026-05-01).**
+The agent drafts the SRD §30.1–§30.7 enumeration in Block D based
+on the inferred mapping in
+[E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping).
+Architect reviews and edits in place. Until then the fixture
+operates against the inferred list.
 
 ### A9. Production-placeholder sweep
 
@@ -166,54 +182,83 @@ exits 0. Closed during a prior pass.
 
 ## TRACK B — Documentation completeness
 
-### B1. Pattern catalogue
+### B1. Pattern catalogue — 🟩
 
-One-page-per-pattern docs under `docs/patterns/P-X-NNN.md` with: signal
-description, LR (likelihood ratio) reasoning, golden-fixture references,
-known FP traps, calibration band history.
+Block-C C.1 (architect signoff 2026-05-01: option (a) generator):
+[scripts/generate-pattern-catalogue.ts](../../scripts/generate-pattern-catalogue.ts)
+ships strict-fail registry-field validation + a `--check` mode
+wired into [phase-gate.yml](../../.github/workflows/phase-gate.yml).
 
-- 43 docs to produce. Auto-generate skeletons from the pattern definitions
-  (each `PatternDef` in `packages/patterns/src/category-*/p-*-*.ts`).
+Outputs (43 patterns, all priced + fixtures paired):
 
-### B2. Worker runbooks
+- [docs/patterns/catalogue.md](../patterns/catalogue.md) — rolled-up single-page catalogue with description_fr/en, prior, weight, fixture link, calibration link per entry.
+- [docs/patterns/index.md](../patterns/index.md) — TOC table.
+- [docs/patterns/P-X-NNN.md](../patterns/) × 43 — per-pattern docs (auto-generated header + architect-prose tail preserved across regenerations).
 
-Bilingual (FR + EN) runbook per worker in `docs/runbooks/`:
-adapter-runner, worker-anchor, worker-audit-watch, worker-document,
-worker-dossier, worker-extract, worker-counter-evidence, worker-pattern,
-worker-score, worker-governance, worker-conac-sftp, worker-tip-decrypt,
-worker-fabric-bridge, worker-federation-agent, worker-federation-receiver,
-worker-adapter-repair, worker-satellite, audit-bridge, dashboard.
+Strict contract enforced: every `PatternDef` MUST declare title_fr,
+title_en, description_fr, description_en, defaultPrior, defaultWeight,
+status AND ship a paired fixture-test in
+`packages/patterns/test/category-X/`. CI fails with a clear field-list
+error on any missing registry field.
 
-19 workers/services × 2 languages = 38 docs. Skeleton template + per-worker fill-in.
+### B2. Worker runbooks — 🟩
 
-### B3. Disaster-recovery rehearsal script
+Block-C C.2 (template + 4 staged group commits) shipped 23
+runbooks at `docs/runbooks/<service>.md`, one per service. Hybrid
+bilingual layout (P-3): single file per service, FR + EN narrative
+sub-blocks; language-neutral content single-source.
 
-Per OPERATIONS §10 "Emergency Repo Access" + SRD §27 DR plan. A
-playbook the backup architect can execute during the quarterly drill.
+Plus two canonical R-runbooks for system-wide ceremonies:
 
-- File: [docs/runbooks/dr-rehearsal.md](docs/runbooks/dr-rehearsal.md)
-- Companion: [scripts/dr-restore-test.sh](scripts/dr-restore-test.sh)
+- [R4-council-rotation.md](../runbooks/R4-council-rotation.md) — pillar rotation procedure.
+- [R6-dr-rehearsal.md](../runbooks/R6-dr-rehearsal.md) — DR rehearsal (script in C.3).
 
-### B4. TRUTH.md reconciliation
+R-procedure structure per service: R1 routine deploy, R2 restore
+from backup, R3 credential rotation (per-service flavor:
+YubiKey / Vault password / API-key / mTLS / N/A), R5 incident
+response (P0–P3 tailored per service). R4 only on services that
+touch council state (worker-governance, dashboard); else points
+at canonical. R6 always points at canonical.
 
-Re-read TRUTH §A–§L; bump "Last updated" header to 2026-04-29 and
-flip any "proposed" status to "committed" if the underlying code shipped.
+### B3. Disaster-recovery rehearsal script — 🟩
 
-- B4.1 §A "Build duration" — proposed → committed
-- B4.2 §E "Deep-cold backup" — proposed → committed (or 🟦 if architect not done)
-- B4.3 §F "Tip portal Tor presence" — proposed → committed (W-09 is 🟩)
-- B4.4 §G "Plan B recipient" — proposed → committed (DECISION-010 routes by body)
-- B4.5 §G "Public verification" — proposed → committed (W-15 is 🟩)
-- B4.6 §E "Council vote signing" — proposed → committed (W-10 partial; flag the libykcs11 deferred bit)
+Block-C C.3:
 
-### B5. Decision log cross-link audit
+- [scripts/dr-rehearsal.ts](../../scripts/dr-rehearsal.ts) — 10-step
+  simulation; pre-flight refuses without dr-rehearsal compose
+  profile + /mnt/nas-dr-test mount + Shamir fixture; --dry-run for
+  pre-flight validation; --report for JSON timing emit.
+- [docs/runbooks/R6-dr-rehearsal.md](../runbooks/R6-dr-rehearsal.md) — operator runbook.
+- SLA: RTO ≤ 6 h, RPO ≤ 5 min, audit-chain clean post-restore.
 
-Every "see DECISION-XXX" reference resolves; every "see SRD §YY"
-reference resolves; every code path the log claims to have shipped
-exists.
+### B4. TRUTH.md reconciliation — 🟩
 
-- File: [scripts/audit-decision-log.ts](scripts/audit-decision-log.ts) (new)
-- CI step: blocking on broken refs.
+Block-C C.4 (selective scope per architect's "5 highest-
+architectural-weight" default):
+
+1. Source-count: 26 → 29 (commit `19e29ca`, Block-A reconciliation §2.A.9).
+2. LLM tier 0: pricing keyed by model_id (commit `9b4b274`, Block-A §2.A.4).
+3. LLM tier 1: Bedrock cost accounting (commit `2db2271`, Block-A §2.A.5).
+4. LLM doctrine chokepoint (NEW row): SafeLlmRouter universal coverage (Block-B A2 / commit `10dac28`).
+5. Neo4j mirror state (NEW row): column + Prometheus gauge (Block-A §5.b / commit `3bc1250`).
+6. Audit-export salt custody (NEW row): Vault path + rotation cadence (DECISION-012).
+
+Out of scope per the selectivity bar: operational hardenings (POLYGON_ANCHOR_CONTRACT regex, A9 PLACEHOLDER sweep details) live in PHASE-1-COMPLETION.md + per-worker runbooks.
+
+### B5. Decision log cross-link audit — 🟩 (with surfaced architect-action)
+
+Block-C C.5:
+
+- [scripts/check-decision-cross-links.ts](../../scripts/check-decision-cross-links.ts) — permissive contract; LEGACY_EXEMPT = D-000..D-006; D-007+ must satisfy AT LEAST ONE AUDIT-NNN AND ONE of {W-NN, 7+-char commit-sha, "commit:" line}.
+- [docs/decisions/cross-link-audit.md](../decisions/cross-link-audit.md) — first-run audit doc.
+- Wired into phase-gate.yml.
+
+**Surfaced architect-action.** First run reports 10 of 19 entries failing (D-009..D-016). Per architect's "do not retrofit" the agent does NOT backfill. CI red on this single check until architect picks resolution option (a)/(b)/(c)/(d) per the audit doc.
+
+(B5 follow-up note: a separate orthogonal lint at
+[scripts/audit-decision-log.ts](../../scripts/audit-decision-log.ts)
+already verifies markdown link resolution; the new lint adds
+cross-reference completeness on top of link-validity.)
 
 ---
 
