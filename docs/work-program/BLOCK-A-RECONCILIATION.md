@@ -1,11 +1,11 @@
 # BLOCK A — reconciliation between original prompt and shipped scope
 
-> **Status:** awaiting architect counter-signature.
+> **Status:** COUNTER-SIGNED 2026-05-01. Implementation in progress.
 > **Date:** 2026-05-01.
 > **Author:** build agent (Claude).
 >
-> Gates further work on Blocks A.3+ → E. The agent does NOT proceed
-> until the architect's signature appears at §4 below.
+> All four hold-points in §6 are signed. Revised running order in §4
+> reflects architect-approved ordering (§5.b migration first).
 
 ---
 
@@ -278,27 +278,39 @@ follow-up. Lower priority than the correctness bugs above.
 
 ---
 
-## 4. Revised Block A — proposed running order
+## 4. Revised Block A — running order (architect-approved 2026-05-01)
 
-Pending architect counter-sign on this section.
+The architect approved with one ordering change: §5.b Neo4j-mirror-
+state migration moves to FIRST. Rationale: the migration adds
+observability that benefits every subsequent block and lands cleanly
+before the more invasive finally-block change.
 
-| Item  | Source             | Priority | Scope                                                                                     |
-| ----- | ------------------ | -------- | ----------------------------------------------------------------------------------------- |
-| A.1   | original (DONE)    | done     | worker-entity Postgres-first commit (`bdfd850`)                                           |
-| A.2   | original (DONE)    | done     | worker-entity rule-pass before LLM (`bdfd850`)                                            |
-| A.3   | original           | high     | worker-entity finally-block emit — fix the unconditional PATTERN_DETECT publish           |
-| A.4   | original           | TBD      | Anthropic pricing — needs architect clarification (§2.A.4)                                |
-| A.5   | original           | TBD      | Bedrock cost — needs architect clarification (§2.A.5)                                     |
-| A.6   | original           | high     | worker-score dead query + backdated-signal clause                                         |
-| A.7   | original           | high     | alias trgm index → expression B-tree index for the rule-pass exact-match lookup           |
-| A.8   | original           | high     | source-count lint (was A.9 in the original; renumbered to A.8 since pgvector is deferred) |
-| A.9   | (was A.7 in agent) | medium   | dossier render byte-identity                                                              |
-| A.10  | (was A.3 in agent) | medium   | Neo4j-mirror retry policy + reconcile worker                                              |
-| (gap) | original A.8       | DEFERRED | pgvector — Phase-2 / new track                                                            |
-| (gap) | agent A.4          | DEFERRED | worker-pattern dispatch tier audit — Block C                                              |
-| (gap) | agent A.6          | DROPPED  | adapter-runner robots.txt 7-window counter — preventative, not corrective                 |
+| Item  | Source             | Priority | Scope                                                                                  |
+| ----- | ------------------ | -------- | -------------------------------------------------------------------------------------- |
+| A.1   | original (DONE)    | done     | worker-entity Postgres-first commit (`bdfd850`)                                        |
+| A.2   | original (DONE)    | done     | worker-entity rule-pass before LLM (`bdfd850`)                                         |
+| A.3   | §5.b verification  | high     | Neo4j-mirror-state column + metric (one column, one metric, one migration)             |
+| A.4   | original A.3       | high     | worker-entity finally-block emit — fix the unconditional PATTERN_DETECT publish        |
+| A.5   | original A.6       | high     | worker-score dead query + backdated-signal clause                                      |
+| A.6   | original A.7       | high     | alias trgm index → expression B-tree index for the rule-pass exact-match lookup        |
+| A.7   | original A.9       | high     | source-count coherence lint                                                            |
+| A.8   | original A.4       | high     | Anthropic pricing table — dated JSON keyed by exact `model_id` under `infra/llm/`      |
+| A.9   | original A.5       | high     | Bedrock cost accounting — same per-`model_id` table + `aws_bedrock_premium_multiplier` |
+| (gap) | original A.8       | DEFERRED | pgvector — Phase-2 / new track                                                         |
+| (gap) | agent original A.3 | DEFERRED | Neo4j-mirror retry queue (state column lands now; reconcile worker later)              |
+| (gap) | agent A.4          | DEFERRED | worker-pattern dispatch tier audit — Block C                                           |
+| (gap) | agent A.6          | DROPPED  | adapter-runner robots.txt 7-window counter — preventative, not corrective              |
+| (gap) | agent A.7          | DEFERRED | dossier render byte-identity — Block D follow-up                                       |
 
-**Architect signature on the proposed order:** ****\_\_\_\_****
+**Architect signature on the running order:** APPROVED 2026-05-01 (with §5.b moved to A.3 / first).
+
+### Procedural rule going forward
+
+Per architect instruction 2026-05-01: when the agent hits hold-points
+in a block, batch ALL clarifications into a single list and halt
+once. Do not present hold-points incrementally. Record each
+architect countersignature back into the relevant reconciliation
+document.
 
 ---
 
@@ -317,41 +329,37 @@ atomicity holds.
 
 ### 5.b Neo4j-mirror failure visibility
 
-**FIX PENDING.** Two real gaps:
+**APPROVED SHAPE (architect-signed 2026-05-01).** Two real gaps:
 
 1. `Cypher.addAlias` ([`packages/db-neo4j/src/queries.ts:13-18`](../../packages/db-neo4j/src/queries.ts#L13-L18))
    begins with `MATCH (e:Entity {id: $entity_id})`. If the Entity
    node does NOT exist (because a prior mirror failed), the MATCH
    yields zero rows, the subsequent MERGE on the alias never fires,
-   and the call is a silent no-op. The architect was correct to
-   flag this.
-2. There is no `vigil_neo4j_mirror_pending_total` metric and no
+   and the call is a silent no-op.
+2. There is no `vigil_neo4j_mirror_state_total{state}` metric and no
    `neo4j_mirror_state` column on `entity.canonical` to surface
    the gap.
 
-**Plan (if architect approves before A.3 retry-queue work).**
+**Approved migration shape (architect 2026-05-01).** One column on
+`entity.canonical`:
 
-- Change `Cypher.addAlias` to start with `MERGE (e:Entity {id:
-$entity_id})` so the entity is created if missing. Add a Cypher
-  comment explaining the lazy create is safe because the canonical
-  Postgres row has the authoritative props; the Neo4j Entity node's
-  `display_name`/`kind` get filled by the next `upsertEntity` call
-  (which uses MERGE + SET).
-- New migration `00NN_canonical_neo4j_mirror_state.sql` adding
-  `neo4j_mirror_state text NOT NULL DEFAULT 'pending'` with a CHECK
-  constraint on `{synced, pending, failed}`. Paired `_down.sql`.
-- `EntityRepo.upsertCluster` writes `pending`. After successful
-  Neo4j mirror, worker-entity calls `EntityRepo.markNeo4jSynced(id)`.
-  On Neo4j failure, calls `EntityRepo.markNeo4jFailed(id, error)`.
-- Prometheus gauge `vigil_neo4j_mirror_pending_total` derived from
-  `SELECT count(*) FROM entity.canonical WHERE neo4j_mirror_state =
-'pending'`.
-- Alert rule in `infra/docker/prometheus/alerts/vigil.yml`:
-  `vigil_neo4j_mirror_pending_total > 100 for 30m → warning`.
+- `neo4j_mirror_state` enum-style text with `CHECK IN ('synced',
+'pending', 'failed')`, default `'pending'`.
+- Set to `'synced'` on successful Cypher write.
+- Set to `'failed'` after N retries (N configurable, default 3).
+- Emit Prometheus gauge `vigil_neo4j_mirror_state_total{state}`
+  derived from `SELECT neo4j_mirror_state, count(*) FROM
+entity.canonical GROUP BY neo4j_mirror_state`.
+- Reconciliation logic (background worker that retries pending /
+  resets failed) is OUT OF SCOPE for this migration — that lands in
+  the deferred Neo4j retry queue (not Block A).
+- One migration file, one column, one metric.
 
-**Why "PENDING".** The migration touches `entity.canonical` (a
-core table); the architect should see the schema change before it
-lands. Do not commit until the reconciliation is signed.
+Also fix the `Cypher.addAlias` silent-no-op by changing `MATCH` to
+`MERGE` on the entity node — the lazy create is safe because the
+canonical Postgres row has authoritative props; the Neo4j Entity
+node's `display_name`/`kind` get filled by the next `upsertEntity`
+call (which uses MERGE + SET).
 
 ### 5.c Rule-pass auto-merge policy
 
@@ -440,26 +448,58 @@ under `'unknown'`, losing the second's history.
 
 ---
 
-## 6. Hold-points
+## 6. Hold-points — COUNTER-SIGNED 2026-05-01
 
-The agent does not proceed past this document until the architect:
+- [x] **§4 revised running order — APPROVED** with one ordering
+      change. §5.b Neo4j-mirror-state migration moves to FIRST
+      (before the original-A.3 finally-block fix). Rationale: the
+      migration adds observability that benefits every subsequent
+      block and lands cleanly before the more invasive
+      finally-block change.
 
-1. Confirms (or revises) the revised running order in §4.
-2. Specifies what "Anthropic pricing" (A.4) and "Bedrock cost"
-   (A.5) refer to.
-3. Approves the schema-change migration plan in §5.b before the
-   Neo4j-mirror-state column lands. (The migration itself is held
-   in a follow-up commit on this branch and does NOT ship until
-   the architect signs.)
-4. Counter-signs the §5.c, §5.d, §5.e, §5.f follow-up commits
-   (each lands as its own commit on this branch).
+- [x] **§2.A.4 Anthropic pricing — APPROVED full original-prompt
+      scope.** The bug is the combination of (i) keying by
+      `modelClass` not `model_id`, (ii) values not matching the
+      TRUTH §C model versions, and (iii) no CI check for missing
+      entries. Fix: dated JSON keyed by exact `model_id` under
+      `infra/llm/`, throw `LlmPricingNotConfiguredError` on missing
+      entry, no default fallback, CI test asserting every model in
+      `TASK_MODEL` has an entry.
 
-When all four checkboxes are signed below, the agent advances to
-A.3 (finally-block emit fix).
+- [x] **§2.A.5 Bedrock cost — APPROVED full original-prompt scope.**
+      The bug is `costUsd: 0` returned from the Bedrock provider,
+      making the daily and monthly ceilings inert on failover. Fix:
+      same per-`model_id` pricing table, `aws_bedrock_premium_multiplier`
+      field per model, use response token counts, no estimation
+      fallback unless a count is genuinely missing.
 
-- [ ] §4 revised running order approved
-- [ ] §2.A.4 Anthropic pricing scope clarified
-- [ ] §2.A.5 Bedrock cost scope clarified
-- [ ] §5.b Neo4j-mirror-state migration plan approved (or revised)
+- [x] **§5.b Neo4j-mirror-state migration — APPROVED.** Shape per
+      §5.b above: one column `neo4j_mirror_state` with CHECK
+      `('synced','pending','failed')` default `'pending'`, set to
+      `synced` on successful Cypher write, `failed` after N retries
+      (N configurable, default 3). Prometheus gauge
+      `vigil_neo4j_mirror_state_total{state}`. Reconciliation
+      logic out of scope (deferred to Neo4j retry queue track).
 
-**Architect signature:** ****************\_**************** **Date:** ****\_\_\_\_****
+**Architect signature:** APPROVED 2026-05-01.
+
+**Going-forward procedural rule.** When the agent hits hold-points
+in a block, batch all clarifications into a single list and halt
+once. Do not present hold-points incrementally. Record each
+architect countersignature back into the relevant reconciliation
+document.
+
+**Implementation order (per architect 2026-05-01):**
+
+1. §5.b migration (one commit) — Neo4j-mirror-state column + metric
+2. Original A.3 finally-block emit (one commit)
+3. Original A.6 worker-score dead query (one commit)
+4. Original A.7 alias expression B-tree index (one commit)
+5. Original A.9 source-count coherence lint (one commit)
+6. Original A.4 Anthropic pricing table (one commit)
+7. Original A.5 Bedrock cost accounting (one commit)
+
+Stop after each commit if any test or lint fails. Otherwise proceed
+to the next item without further architect input until Block A is
+fully closed, at which point produce a Block A completion summary
+and stop for review before opening Block B.
