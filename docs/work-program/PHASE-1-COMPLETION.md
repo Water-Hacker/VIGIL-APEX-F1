@@ -100,22 +100,34 @@ prior pass.
 - A5.1 🟩 — postgres:16.2-alpine service in `.github/workflows/ci.yml:84-96`.
 - A5.2 🟩 — `pnpm --filter @vigil/db-postgres run migrate` step at line 116-119.
 - A5.3 🟩 — `INTEGRATION_DB_URL` exported to the test job at line 129+134.
-- A5.4 🟩 — Block-B regression pin (commit `<filled at commit time>`):
+- A5.4 🟩 — Block-B regression pin (commit `04175f9`):
   new CI step "audit-log CAS race regression must execute (not skip)"
   re-runs the CAS test with `--reporter=verbose` and greps for the
   test name; fails the job if the test doesn't appear in the output
   OR appears with a skip marker.
 
-### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; architect-action remaining
+**A5 deferred follow-up (Block E scope, architect-confirmed 2026-05-01).**
+Salt-collision CI alert: when two consecutive
+`audit.public_export.salt_fingerprint` values match, the operator
+forgot the quarterly rotation. The
+[`audit.public_export_salt_collisions`](../../packages/db-postgres/drizzle/0012_audit_export_salt_fingerprint.sql)
+view exists; the CI alert that fires on a non-empty result is
+**deferred-not-dropped**, target Block E. No urgency — quarterly
+cron only, 90-day detection window before the next export.
+
+### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; A6.5 🟦 architect-blocked
 
 Block-B B.6 ships A6.1 + A6.3 + A6.4 in
 [docs/decisions/decision-012-promotion-prep.md](../decisions/decision-012-promotion-prep.md).
 
 - A6.1 🟩 Cross-reference audit: 29 doctrine paths verified resolved 2026-05-01.
-- A6.2 🟩 Architect read-through checklist already exists at [docs/decisions/decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md) (architect-action when ready).
+- A6.2 🟩 Architect read-through checklist already exists at [docs/decisions/decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md).
 - A6.3 🟩 Schema side-by-side: `audit.user_action_event` + `audit.user_action_chain` vs doctrine §3 / SRD §17 — no discrepancies.
 - A6.4 🟩 Salt rotation operations: format, custody, cadence, runbook, DR procedure, failure modes.
-- A6.5 🟦 **Architect action.** Promote PROVISIONAL → FINAL in [docs/decisions/log.md](../decisions/log.md). Per architect operating posture, the agent does NOT perform this autonomously.
+- **A6.5 🟦 architect-blocked.** Architect committed 2026-05-01 to
+  the read-through "this week". Tracked here; no agent action.
+  Promotion procedure documented in
+  [decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md).
 
 ### A7. Stale TODOs sweep — 🟩
 
@@ -129,7 +141,7 @@ Both files re-checked 2026-05-01:
 
 Closed during a prior pass.
 
-### A8. End-to-end fixture script — 🟩 (with deferred SRD §30 follow-up)
+### A8. End-to-end fixture script — 🟩 (with SRD §30 enumeration deferred to Block D)
 
 Both files exist and the audit-coverage doc is shipped:
 
@@ -139,10 +151,14 @@ Both files exist and the audit-coverage doc is shipped:
 
 **Key audit finding.** SRD §30.1–§30.7 carry milestone titles but
 NO enumerated tests; only §30.8 has named tests (CT-01..CT-06).
-The fixture covers what it can within a 5-second synthetic run;
-gap-fills against an authoritative SRD §30 list need the
-architect to fill in §30.1–§30.7 first. Audit found 0 fixture
-commits warranted within the architect's 3-commit cap.
+The fixture covers what it can within a 5-second synthetic run.
+
+**A8 follow-up (Block D scope, architect-confirmed 2026-05-01).**
+The agent drafts the SRD §30.1–§30.7 enumeration in Block D based
+on the inferred mapping in
+[E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping).
+Architect reviews and edits in place. Until then the fixture
+operates against the inferred list.
 
 ### A9. Production-placeholder sweep
 
