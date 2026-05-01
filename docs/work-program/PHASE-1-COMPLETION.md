@@ -106,15 +106,16 @@ prior pass.
   test name; fails the job if the test doesn't appear in the output
   OR appears with a skip marker.
 
-### A6. DECISION-012 PROVISIONAL → FINAL
+### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; architect-action remaining
 
-The TAL-PA doctrine + DECISION-012 entry is committed. Promotion needs:
+Block-B B.6 ships A6.1 + A6.3 + A6.4 in
+[docs/decisions/decision-012-promotion-prep.md](../decisions/decision-012-promotion-prep.md).
 
-- A6.1 Cross-reference audit: every file the doctrine mentions exists at the cited path.
-- A6.2 Architect read-through checklist (`docs/decisions/decision-012-readthrough-checklist.md`).
-- A6.3 Side-by-side: current `audit.user_action_event` schema vs SRD §17 expectations.
-- A6.4 Rotate `AUDIT_PUBLIC_EXPORT_SALT` documentation (key custody, rotation cadence).
-- A6.5 Update [docs/decisions/log.md](docs/decisions/log.md) to FINAL once architect signs.
+- A6.1 🟩 Cross-reference audit: 29 doctrine paths verified resolved 2026-05-01.
+- A6.2 🟩 Architect read-through checklist already exists at [docs/decisions/decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md) (architect-action when ready).
+- A6.3 🟩 Schema side-by-side: `audit.user_action_event` + `audit.user_action_chain` vs doctrine §3 / SRD §17 — no discrepancies.
+- A6.4 🟩 Salt rotation operations: format, custody, cadence, runbook, DR procedure, failure modes.
+- A6.5 🟦 **Architect action.** Promote PROVISIONAL → FINAL in [docs/decisions/log.md](../decisions/log.md). Per architect operating posture, the agent does NOT perform this autonomously.
 
 ### A7. Stale TODOs sweep — 🟩
 
