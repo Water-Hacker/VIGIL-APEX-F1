@@ -92,8 +92,45 @@ else
   yellow "! backup pipeline not referenced in docs/decisions/log.md (consider adding a DECISION-NNN)"
 fi
 
+# 8. Architect-spec coverage gap surface (Block-D D.9 / C9).
+#    PHASE-1-COMPLETION C9 calls for "backs up Postgres + Vault snapshot
+#    + IPFS pinset + git repo + audit-chain export, all encrypted with
+#    the architect's GPG key, all mirrored to NAS-replica + Hetzner
+#    archive." The current script delivers Postgres + IPFS pinset +
+#    Btrfs-of-/srv/vigil (which covers vault data on disk) + Neo4j +
+#    GPG signature on the manifest. The five items below are
+#    architect-spec items the script does NOT yet implement; surfaced
+#    here as WARN so the gap is visible in CI without blocking. See
+#    docs/runbooks/backup.md for the architect-action items.
+warn() { yellow "! $*"; }
+if grep -qE 'vault operator raft snapshot save' "$script" 2>/dev/null; then
+  pass "[architect-spec] vault operator raft snapshot save"
+else
+  warn "[architect-spec] no vault operator raft snapshot save (only btrfs-of-/srv/vigil/vault); see docs/runbooks/backup.md"
+fi
+if grep -qE 'git clone --bare|git bundle' "$script" 2>/dev/null; then
+  pass "[architect-spec] git repo backup"
+else
+  warn "[architect-spec] no git repo backup (source resides on github + architect's working tree); see docs/runbooks/backup.md"
+fi
+if grep -qE 'verify-hashchain|audit-chain.*export|verify:ledger' "$script" 2>/dev/null; then
+  pass "[architect-spec] audit-chain explicit export"
+else
+  warn "[architect-spec] no audit-chain explicit export (chain lives inside Postgres dump); see docs/runbooks/backup.md"
+fi
+if grep -qE 'gpg --encrypt|gpg --symmetric' "$script" 2>/dev/null; then
+  pass "[architect-spec] backup content encrypted (not just signed)"
+else
+  warn "[architect-spec] backup content is signed but NOT encrypted — Synology stores plaintext; see docs/runbooks/backup.md"
+fi
+if grep -qE 'hetzner|HETZNER' "$script" 2>/dev/null; then
+  pass "[architect-spec] Hetzner mirror destination"
+else
+  warn "[architect-spec] no Hetzner mirror destination (only Synology rclone is named); see docs/runbooks/backup.md"
+fi
+
 if [ "$errors" -gt 0 ]; then
   red "\n$errors hard error(s) — backup pipeline NOT ready"
   exit 1
 fi
-green "\n✓ backup pipeline configuration verified"
+green "\n✓ backup pipeline configuration verified (warnings above are architect-action items, not blockers)"

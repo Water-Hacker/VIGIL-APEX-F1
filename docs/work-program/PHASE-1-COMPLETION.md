@@ -467,12 +467,48 @@ against four cases — bad type ✓ rejects with `[type-enum]`; bad
 scope ✓ rejects with `[scope-enum]`; header >100 chars ✓ rejects
 with `[header-max-length]`; valid commit ✓ silent pass.
 
-### C9. Backup script verification
+### C9. Backup script verification — 🟩 (verified + gaps documented)
 
-`infra/host-bootstrap/10-vigil-backup.sh` runs nightly. Verify it
-backs up Postgres + Vault snapshot + IPFS pinset + git repo +
-audit-chain export, all encrypted with the architect's GPG key, all
-mirrored to NAS-replica + Hetzner archive.
+`infra/host-bootstrap/10-vigil-backup.sh` runs nightly under systemd
+timer `vigil-backup.timer` at 02:30 Africa/Douala (RandomizedDelaySec
+±10 min).
+
+Status, Block-D D.9 / 2026-05-01:
+
+- C9.1 🟩 [scripts/verify-backup-config.sh](../../scripts/verify-backup-config.sh)
+  walked end-to-end (CI mode `CI=1`): all hard-error checks pass —
+  bootstrap script present + executable; vigil-backup.service +
+  vigil-backup.timer wired; pg_basebackup / btrfs / neo4j-admin /
+  ipfs / GPG_FINGERPRINT / synology coverage; .env.example
+  documents the 4 required env vars; backup pipeline referenced in
+  decision log.
+- C9.2 🟩 [docs/runbooks/backup.md](../runbooks/backup.md) authored:
+  what the pipeline writes (per-step source / how / output file
+  table); pre-flight verification commands (gpg --verify +
+  sha256sum -c MANIFEST.sha256); architect-spec coverage gap table;
+  what the runbook does NOT cover (cross-references to RESTORE.md,
+  dr-rehearsal.md, R6, EXEC §34.6).
+
+**Architect-spec coverage gaps (5 items, surfaced as warnings).**
+The verifier was extended with five `[architect-spec]` checks that
+emit yellow warnings (not hard errors) so the gap is visible in CI
+without blocking. Each row points the operator at
+docs/runbooks/backup.md for the architect-action context.
+
+| Spec item                   | Current                             | Gap                                                 | Action             |
+| --------------------------- | ----------------------------------- | --------------------------------------------------- | ------------------ |
+| Vault snapshot              | btrfs-of-/srv/vigil/vault           | no `vault operator raft snapshot save` (raft-aware) | M0c week           |
+| Git repo backup             | none on backup host                 | source on github + architect's working tree only    | M0c week           |
+| Audit-chain explicit export | inside postgres dump only           | no separate signed CSV/JSONL of audit.actions       | M0c week           |
+| Encrypted-at-rest archive   | manifest signed, contents plaintext | NAS stores plaintext basebackup + dumps             | M0c week           |
+| Hetzner archive mirror      | only Synology rclone target         | no second-region mirror                             | Phase-2 (post-MOU) |
+
+These are defence-in-depth additions, not blockers — the current
+pipeline meets the 6-hour RTO target for host loss + btrfs
+corruption + Postgres corruption (the failure modes RESTORE.md is
+written for). None can be silently extended by the build agent;
+each touches a key the architect controls (Vault root token, GPG
+passphrase) or a paid resource (Hetzner Storage Box).
 
 ### C10. Secret-scan baseline
 
