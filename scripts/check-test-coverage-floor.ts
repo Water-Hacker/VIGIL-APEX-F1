@@ -10,7 +10,7 @@
  * removes itself from the allowlist (by adding tests) it cannot
  * regress. Removing an app from the allowlist is a one-line PR.
  *
- * Currently allow-listed (zero-test apps as of 2026-04-30):
+ * Currently allow-listed (zero-test apps as of 2026-05-01):
  *   - audit-verifier
  *   - worker-audit-watch
  *   - worker-conac-sftp
@@ -19,8 +19,10 @@
  *   - worker-entity
  *   - worker-governance
  *   - worker-minfi-api
- *   - worker-score
  *   - worker-tip-triage
+ *
+ * Graduated 2026-05-01: worker-score (ships __tests__/contract.test.ts
+ * pinning DECISION-011 + STREAMS.SCORE_COMPUTE wiring; HARDEN-#3 / T1.12).
  *
  * Mirrors the existing scripts/check-migration-pairs.ts pattern.
  *
@@ -45,7 +47,7 @@ const LEGACY_ZERO_TEST = new Set([
   'worker-entity',
   'worker-governance',
   'worker-minfi-api',
-  'worker-score',
+  // worker-score graduated 2026-05-01 (HARDEN-#3 / T1.12)
   'worker-tip-triage',
 ]);
 
