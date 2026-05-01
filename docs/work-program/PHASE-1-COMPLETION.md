@@ -182,14 +182,24 @@ exits 0. Closed during a prior pass.
 
 ## TRACK B — Documentation completeness
 
-### B1. Pattern catalogue
+### B1. Pattern catalogue — 🟩
 
-One-page-per-pattern docs under `docs/patterns/P-X-NNN.md` with: signal
-description, LR (likelihood ratio) reasoning, golden-fixture references,
-known FP traps, calibration band history.
+Block-C C.1 (architect signoff 2026-05-01: option (a) generator):
+[scripts/generate-pattern-catalogue.ts](../../scripts/generate-pattern-catalogue.ts)
+ships strict-fail registry-field validation + a `--check` mode
+wired into [phase-gate.yml](../../.github/workflows/phase-gate.yml).
 
-- 43 docs to produce. Auto-generate skeletons from the pattern definitions
-  (each `PatternDef` in `packages/patterns/src/category-*/p-*-*.ts`).
+Outputs (43 patterns, all priced + fixtures paired):
+
+- [docs/patterns/catalogue.md](../patterns/catalogue.md) — rolled-up single-page catalogue with description_fr/en, prior, weight, fixture link, calibration link per entry.
+- [docs/patterns/index.md](../patterns/index.md) — TOC table.
+- [docs/patterns/P-X-NNN.md](../patterns/) × 43 — per-pattern docs (auto-generated header + architect-prose tail preserved across regenerations).
+
+Strict contract enforced: every `PatternDef` MUST declare title_fr,
+title_en, description_fr, description_en, defaultPrior, defaultWeight,
+status AND ship a paired fixture-test in
+`packages/patterns/test/category-X/`. CI fails with a clear field-list
+error on any missing registry field.
 
 ### B2. Worker runbooks
 
