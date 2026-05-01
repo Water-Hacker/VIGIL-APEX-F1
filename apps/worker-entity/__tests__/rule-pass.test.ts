@@ -70,6 +70,55 @@ describe('worker-entity — NIU_RE shape detector', () => {
   });
 });
 
+describe('worker-entity — adversarial regex (Block-A reconciliation §5.e)', () => {
+  it('RCCM with sequence too few — only one digit (regex requires 1-6, so this passes)', () => {
+    // The regex's lower-bound is 1 digit; "RC/YDE/2024/B/1" is the
+    // minimum legal form. We pin the boundary: `RC/YDE/2024/B/`
+    // (zero digits) MUST be rejected.
+    expect(RCCM_RE.exec('RC/YDE/2024/B/')).toBeNull();
+  });
+
+  it('RCCM with sequence too many — seven digits MUST be rejected', () => {
+    // Cameroonian RCCM sequence is bounded at 6 digits. Seven-digit
+    // shapes are either a typo or a foreign-jurisdiction format
+    // we should not match against the local table.
+    expect(RCCM_RE.exec('Acme RC/YDE/2024/B/1234567 attributaire')).toBeNull();
+  });
+
+  it('NIU with transposed character class — letter where digit belongs', () => {
+    // Position 2 must be a digit, not a letter. `PA1500001234X` has
+    // an A at position 2 and MUST be rejected.
+    expect(NIU_RE.exec('PA1500001234X')).toBeNull();
+  });
+
+  it('Foreign-jurisdiction RCCM-shape — Gabonese form passes the regex but lookup fails', () => {
+    // Gabonese RCCM uses RC-G-YYYY-categ-seq. The regex's centre
+    // group `[A-Z]{2,4}` accepts G-prefixed centres because Gabonese
+    // codes are 1-letter (G, GAB) — but the regex requires 2-4
+    // letters in the centre slot, so a single "G" fails the centre
+    // group. We pin both: the multi-letter form like "GAB" passes
+    // (and the LOOKUP downstream rejects it because "RC/GAB/..." is
+    // not in our Cameroonian table); the bare "G" form fails the
+    // regex outright.
+    const m1 = RCCM_RE.exec('Foo SARL RC/GAB/2024/B/01234');
+    expect(m1).not.toBeNull(); // regex shape passes
+    expect(m1![0]).toBe('RC/GAB/2024/B/01234');
+
+    expect(RCCM_RE.exec('Foo SARL RC/G/2024/B/01234')).toBeNull(); // single-letter centre fails
+  });
+
+  it('whitespace + zero-width characters embedded in a valid RCCM MUST NOT match', () => {
+    // U+200B ZERO WIDTH SPACE is inserted between characters by
+    // some web scrapers; the regex MUST treat the result as
+    // distinct from a clean RCCM. We do not want to silently
+    // accept obfuscated input.
+    const obfuscated = 'RC/Y​DE/2024/B/01234';
+    expect(RCCM_RE.exec(obfuscated)).toBeNull();
+    const obfuscated2 = 'RC﻿/YDE/2024/B/01234';
+    expect(RCCM_RE.exec(obfuscated2)).toBeNull();
+  });
+});
+
 describe('worker-entity — canonicalRccm normaliser', () => {
   it('collapses dashes to slashes and uppercases', () => {
     expect(canonicalRccm('rc-yde-2024-b-1234')).toBe('RC/YDE/2024/B/1234');

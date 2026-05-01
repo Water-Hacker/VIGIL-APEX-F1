@@ -303,6 +303,21 @@ export const ipfsPinsTotal = new Counter({
   registers: [registry],
 });
 
+/**
+ * Block-A reconciliation §5.b — count of entity.canonical rows
+ * grouped by neo4j_mirror_state. worker-entity pushes this gauge on
+ * a periodic tick (default every 60s) by calling
+ * EntityRepo.neo4jMirrorStateCounts(). Alertable signals:
+ *   vigil_neo4j_mirror_state_total{state="failed"} > 0   — page oncall
+ *   vigil_neo4j_mirror_state_total{state="pending"} > 100 for 30m — warn
+ */
+export const neo4jMirrorStateTotal = new Gauge({
+  name: 'vigil_neo4j_mirror_state_total',
+  help: 'Count of entity.canonical rows grouped by neo4j_mirror_state',
+  labelNames: ['state'] as const,
+  registers: [registry],
+});
+
 export type Labels<T extends string> = LabelValues<T>;
 
 /** Start a tiny HTTP server that serves /metrics. */

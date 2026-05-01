@@ -26,20 +26,30 @@ export const canonical = entitySchema.table(
     eth_address: text('eth_address'),
     is_pep: boolean('is_pep').notNull().default(false),
     is_sanctioned: boolean('is_sanctioned').notNull().default(false),
-    sanctioned_lists: text('sanctioned_lists').array().notNull().default(sql`ARRAY[]::text[]`),
+    sanctioned_lists: text('sanctioned_lists')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
     first_seen: timestamp('first_seen', { withTimezone: true }).notNull(),
     last_seen: timestamp('last_seen', { withTimezone: true }).notNull(),
     resolution_confidence: doublePrecision('resolution_confidence').notNull(),
     resolved_by: text('resolved_by').notNull(),
-    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    metadata: jsonb('metadata')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    // Block-A reconciliation §5.b — Neo4j-mirror state. Default
+    // 'pending'; worker-entity flips to 'synced' on a successful
+    // Cypher write or 'failed' after N retries (env
+    // NEO4J_MIRROR_MAX_RETRIES, default 3). The Prometheus gauge
+    // vigil_neo4j_mirror_state_total{state} is derived by GROUP BY
+    // on this column.
+    neo4j_mirror_state: text('neo4j_mirror_state').notNull().default('pending'),
   },
   (t) => ({
     rccmIdx: index('canonical_rccm_idx').on(t.rccm_number),
     pepIdx: index('canonical_pep_idx').on(t.is_pep, t.is_sanctioned),
-    nameIdx: index('canonical_name_trgm').using(
-      'gin',
-      sql`${t.display_name} gin_trgm_ops`,
-    ),
+    nameIdx: index('canonical_name_trgm').using('gin', sql`${t.display_name} gin_trgm_ops`),
+    neo4jMirrorStateIdx: index('canonical_neo4j_mirror_state_idx').on(t.neo4j_mirror_state),
   }),
 );
 
@@ -71,7 +81,9 @@ export const relationship = entitySchema.table(
     source_event_ids: uuid('source_event_ids').array().notNull(),
     first_seen: timestamp('first_seen', { withTimezone: true }).notNull(),
     last_seen: timestamp('last_seen', { withTimezone: true }).notNull(),
-    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    metadata: jsonb('metadata')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
   },
   (t) => ({
     fromIdx: index('relationship_from_idx').on(t.from_canonical_id),

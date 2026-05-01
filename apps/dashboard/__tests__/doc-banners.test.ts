@@ -72,9 +72,15 @@ describe('AUDIT-072 — SRD §10.2 erratum cross-references TRUTH.md', () => {
     expect(text).toMatch(/DECISION-008/);
   });
 
-  it('TRUTH.md §C still records 27 sources (the canonical count)', () => {
+  it('TRUTH.md §C records 29 sources (the canonical count after Block-A reconciliation §2.A.9)', () => {
+    // Path A taken on 2026-05-01 — TRUTH §C and SRD §10.2 phrasing
+    // aligned to the 29 entries in infra/sources.json (architect call;
+    // see commit 19e29ca + docs/work-program/BLOCK-A-RECONCILIATION.md
+    // §2.A.9). The lint scripts/check-source-count.ts now enforces
+    // coherence; if the canonical count moves again, BOTH that lint
+    // and this test must update together.
     const text = readFileSync(docPath('TRUTH.md'), 'utf8');
-    expect(text).toMatch(/Source count[^\n]*27/);
+    expect(text).toMatch(/Source count[^\n]*29/);
   });
 });
 

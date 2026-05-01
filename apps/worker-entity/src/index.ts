@@ -8,6 +8,7 @@ import {
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  neo4jMirrorStateTotal,
 } from '@vigil/observability';
 import {
   QueueClient,
@@ -86,7 +87,12 @@ const zErResp = z.object({
 interface RuleMatch {
   readonly alias: string;
   readonly canonicalId: string;
-  readonly via: 'rccm' | 'niu' | 'normalised_name';
+  readonly via: 'rccm' | 'niu' | 'normalised_name_corroborated';
+}
+
+interface NameOnlyCandidate {
+  readonly alias: string;
+  readonly matchedCanonicalId: string;
 }
 
 class EntityWorker extends WorkerBase<Payload> {
@@ -108,20 +114,40 @@ class EntityWorker extends WorkerBase<Payload> {
   }
 
   /**
-   * Rule-pass — deterministic deduplication. For each alias attempt
-   * RCCM / NIU / normalised-name lookup; on any hit, return a
-   * `RuleMatch`. Aliases that do not hit are returned in
-   * `unresolved` for the LLM pass to handle.
+   * Rule-pass — deterministic deduplication. Three buckets:
    *
-   * Pure I/O (Postgres reads only); does NOT mutate state. The
-   * caller is responsible for writing aliases attached to
-   * rule-resolved canonicals.
+   *   - `resolved`           — RCCM or NIU exact match. Auto-merge:
+   *                            attach the alias to the existing
+   *                            canonical. The unique-id corroborates
+   *                            the resolution; auto-merge is safe.
+   *   - `nameOnlyCandidates` — normalised-name exact match WITHOUT
+   *                            an RCCM/NIU corroborator in the same
+   *                            alias batch. Held aside for the
+   *                            corroboration check below; if no
+   *                            RCCM/NIU points to the same canonical,
+   *                            the alias goes to `entity.er_review_queue`
+   *                            (NOT auto-merged — Block-A reconciliation
+   *                            §5.c). Two real distinct companies can
+   *                            share a display name; merging on name
+   *                            alone is silent corruption.
+   *   - `unresolved`         — no rule-pass hit. Sent to the LLM pass.
+   *
+   * The corroboration step runs AFTER all aliases are tagged so the
+   * "in the same batch" semantics are preserved across the whole
+   * envelope. After corroboration, name-only candidates either
+   * promote to `resolved` (with via='normalised_name_corroborated')
+   * or fall through to the review queue.
    */
-  protected async rulePass(
-    aliases: ReadonlyArray<string>,
-  ): Promise<{ resolved: RuleMatch[]; unresolved: string[] }> {
+  protected async rulePass(aliases: ReadonlyArray<string>): Promise<{
+    resolved: RuleMatch[];
+    nameOnlyCandidates: NameOnlyCandidate[];
+    unresolved: string[];
+  }> {
     const resolved: RuleMatch[] = [];
+    const nameOnlyCandidates: NameOnlyCandidate[] = [];
     const unresolved: string[] = [];
+
+    // First pass: classify each alias.
     for (const raw of aliases) {
       const alias = raw.trim();
       if (alias === '') continue;
@@ -148,38 +174,98 @@ class EntityWorker extends WorkerBase<Payload> {
         }
       }
 
-      // (c) Normalised name — case-folded + accent-folded equality.
+      // (c) Normalised name — held as a candidate, NOT auto-merged.
       const normalised = normalizeName(alias);
       if (normalised !== '') {
         const hit = await this.entityRepo.findCanonicalByNormalizedName(alias);
         if (hit) {
-          resolved.push({ alias, canonicalId: hit.id, via: 'normalised_name' });
+          nameOnlyCandidates.push({ alias, matchedCanonicalId: hit.id });
           continue;
         }
       }
 
       unresolved.push(alias);
     }
-    return { resolved, unresolved };
+
+    // Second pass: corroborate name-only candidates against the
+    // RCCM/NIU resolutions we just collected. If any RCCM/NIU match
+    // in this batch points to the same canonical, the name-only
+    // alias is corroborated and promotes to `resolved`. Otherwise
+    // it stays in `nameOnlyCandidates` for the caller to route to
+    // the review queue.
+    const corroborated: RuleMatch[] = [];
+    const stillUncorroborated: NameOnlyCandidate[] = [];
+    const idsWithStrongMatch = new Set(resolved.map((r) => r.canonicalId));
+    for (const c of nameOnlyCandidates) {
+      if (idsWithStrongMatch.has(c.matchedCanonicalId)) {
+        corroborated.push({
+          alias: c.alias,
+          canonicalId: c.matchedCanonicalId,
+          via: 'normalised_name_corroborated',
+        });
+      } else {
+        stillUncorroborated.push(c);
+      }
+    }
+    return {
+      resolved: [...resolved, ...corroborated],
+      nameOnlyCandidates: stillUncorroborated,
+      unresolved,
+    };
   }
 
   protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
     const aliases = env.payload.raw_aliases ?? [];
     if (aliases.length === 0) return { kind: 'ack' };
 
+    // Block-A reconciliation §5.d — `source_id` cannot fall back to
+    // a sentinel string. The unique constraint on `entity.alias`
+    // includes `source_id`; collapsing every missing source to
+    // `'unknown'` deduplicates aliases that should remain distinct.
+    // We require the field on the envelope and dead-letter when
+    // missing. The operator alert is the existing dead-letter path.
+    const sourceId = env.payload.source_event_id;
+    if (sourceId === undefined || sourceId === '') {
+      logger.error(
+        { document_cid: env.payload.document_cid, alias_count: aliases.length },
+        'er-rejected-missing-source-event-id',
+      );
+      return { kind: 'dead-letter', reason: 'missing-source-event-id' };
+    }
+
+    // Block-A reconciliation §5 (original A.3) — track the canonical
+    // ids whose alias rows we successfully wrote in this handler call.
+    // The PATTERN_DETECT publish at the bottom uses this set so we
+    // emit one envelope PER canonical (with the real id and the
+    // event_id), and ONLY for canonicals that actually persisted.
+    // The previous implementation published one hardcoded
+    // {canonical_id: null, subject_kind: 'Tender', event_ids: []}
+    // envelope from a `finally` block — which fired even on retry,
+    // routed an empty subject to worker-pattern, and discarded every
+    // resolved canonical. Both bugs are fixed here.
+    const dispatchedCanonicalIds = new Set<string>();
+
     try {
       // ─── Step 1: rule-pass ───────────────────────────────────
-      const { resolved, unresolved } = await this.rulePass(aliases);
+      const { resolved, nameOnlyCandidates, unresolved } = await this.rulePass(aliases);
       logger.info(
-        { resolved: resolved.length, unresolved: unresolved.length, total: aliases.length },
+        {
+          resolved: resolved.length,
+          name_only_held: nameOnlyCandidates.length,
+          unresolved: unresolved.length,
+          total: aliases.length,
+        },
         'rule-pass-complete',
       );
 
+      const now = new Date();
+
       // For each rule-pass match, attach the alias to the existing
       // canonical (Postgres only — no Neo4j mirror needed because
-      // the canonical already exists in Neo4j).
-      const sourceId = env.payload.source_event_id ?? 'unknown';
-      const now = new Date();
+      // the canonical already exists in Neo4j; the gap with
+      // previously-failed Neo4j mirrors is the subject of Block-A
+      // reconciliation §5.b, addressed when the architect signs the
+      // schema-change plan).
       for (const m of resolved) {
         await this.entityRepo.addAlias({
           id: Ids.newEntityId() as string,
@@ -189,10 +275,42 @@ class EntityWorker extends WorkerBase<Payload> {
           language: detectLanguage(m.alias),
           first_seen: now,
         });
+        dispatchedCanonicalIds.add(m.canonicalId);
+      }
+
+      // For each name-only candidate that did NOT corroborate via
+      // RCCM/NIU in this batch, write to entity.er_review_queue.
+      // Block-A reconciliation §5.c — the alias is NOT attached to
+      // any canonical in entity.alias; the operator's review-queue
+      // decision is what triggers a subsequent attach (or refuse-to-
+      // merge). Until a human decides, the alias is held.
+      for (const c of nameOnlyCandidates) {
+        const placeholderId = Ids.newEntityId() as string;
+        await this.entityRepo.addReviewQueueRow({
+          candidateExistingId: c.matchedCanonicalId,
+          candidatePlaceholderId: placeholderId,
+          similarity: 1.0,
+          proposedAction: 'merge',
+          rationale: {
+            alias: c.alias,
+            source_event_id: sourceId,
+            reason:
+              'normalised-name exact match without RCCM/NIU corroboration; ambiguity requires human review per Block-A reconciliation §5.c',
+          },
+        });
+        logger.warn(
+          {
+            existing_canonical_id: c.matchedCanonicalId,
+            alias: c.alias,
+            source_event_id: sourceId,
+          },
+          'name-only-match-routed-to-review-queue',
+        );
       }
 
       // ─── Step 2: LLM-pass (unresolved only) ──────────────────
       if (unresolved.length === 0) {
+        await this.dispatchPatterns(dispatchedCanonicalIds, sourceId, env);
         return { kind: 'ack' };
       }
       const rendered = Safety.globalPromptRegistry.latest('entity.resolve-aliases');
@@ -247,6 +365,7 @@ class EntityWorker extends WorkerBase<Payload> {
             },
             aliases: aliasRows,
           });
+          dispatchedCanonicalIds.add(id);
         } catch (e) {
           logger.error(
             { err: e, canonical: cluster.canonical, aliases: cluster.aliases },
@@ -259,54 +378,115 @@ class EntityWorker extends WorkerBase<Payload> {
           throw e;
         }
 
-        // (b) Neo4j SECOND — best-effort mirror. On failure log and
-        // continue; the Postgres canonical row stands. A future
-        // worker-fabric-bridge / cross-witness pass reconciles
-        // Neo4j.
-        try {
-          await this.neo4j.run(Cypher.upsertEntity, {
-            id,
-            props: {
-              display_name: cluster.canonical,
-              kind: cluster.kind,
-              resolution_confidence: cluster.confidence,
-              resolved_by: 'llm',
-            },
-          });
-          for (const alias of cluster.aliases) {
-            await this.neo4j.run(Cypher.addAlias, {
-              entity_id: id,
-              alias,
-              source_id: sourceId,
-              language: detectLanguage(alias),
-              first_seen: now.toISOString(),
+        // (b) Neo4j SECOND — best-effort mirror with bounded inline
+        // retries. Block-A reconciliation §5.b: try up to N times
+        // (default 3, env NEO4J_MIRROR_MAX_RETRIES). On final failure
+        // the canonical row's neo4j_mirror_state flips to 'failed';
+        // on success it flips to 'synced'. Either way the Postgres
+        // canonical row stands (SRD §15.1 invariant). The reconcile
+        // worker that picks up `failed` rows is OUT OF SCOPE for
+        // Block A.
+        const maxRetries = Number.parseInt(process.env.NEO4J_MIRROR_MAX_RETRIES ?? '3', 10);
+        let attempt = 0;
+        let mirrorOk = false;
+        let lastErr: unknown = null;
+        while (attempt < Math.max(1, maxRetries)) {
+          attempt += 1;
+          try {
+            await this.neo4j.run(Cypher.upsertEntity, {
+              id,
+              props: {
+                display_name: cluster.canonical,
+                kind: cluster.kind,
+                resolution_confidence: cluster.confidence,
+                resolved_by: 'llm',
+              },
             });
+            for (const alias of cluster.aliases) {
+              await this.neo4j.run(Cypher.addAlias, {
+                entity_id: id,
+                alias,
+                source_id: sourceId,
+                language: detectLanguage(alias),
+                first_seen: now.toISOString(),
+              });
+            }
+            mirrorOk = true;
+            break;
+          } catch (e) {
+            lastErr = e;
+            logger.warn(
+              { err: e, canonical_id: id, attempt, max_retries: maxRetries },
+              'neo4j-mirror-attempt-failed',
+            );
           }
-        } catch (e) {
-          // Postgres canonical row stands; Neo4j mirror is degraded.
-          // Operator alert via the existing AdapterFailing /
-          // WorkerLoopStalled rules; we do not retry here.
-          logger.warn(
-            { err: e, canonical_id: id },
-            'neo4j-mirror-failed; postgres canonical stands',
+        }
+        if (mirrorOk) {
+          await this.entityRepo.markNeo4jSynced(id);
+        } else {
+          // Postgres canonical row stands; the Neo4j mirror is now
+          // recorded as 'failed' so oncall (and the deferred
+          // reconcile worker) can find it.
+          logger.error(
+            { err: lastErr, canonical_id: id, attempts: attempt },
+            'neo4j-mirror-failed; postgres canonical stands; state=failed',
           );
+          await this.entityRepo.markNeo4jFailed(id);
         }
       }
+      // Block-A reconciliation §5 (original A.3) — pattern dispatch
+      // ONLY on the success path, with the real canonical ids and
+      // the source event in event_ids.
+      await this.dispatchPatterns(dispatchedCanonicalIds, sourceId, env);
       return { kind: 'ack' };
     } catch (e) {
+      // No PATTERN_DETECT publish on failure — the previous
+      // implementation published from a `finally` block and routed
+      // empty-subject envelopes downstream on every retry.
       logger.error({ err: e }, 'er-failed');
       return { kind: 'retry', reason: 'er-error', delay_ms: 30_000 };
-    } finally {
-      // Trigger pattern detection downstream. Per SRD §15.1 this
-      // happens AFTER the Postgres commit (the publish runs in the
-      // finally block, which executes after the try/catch handlers
-      // have completed their state writes).
+    }
+  }
+
+  /**
+   * Block-A reconciliation §5 (original A.3) — emit one
+   * PATTERN_DETECT envelope per resolved canonical id with the real
+   * subject_kind (loaded from the canonical row), the source event
+   * in `event_ids`, and a per-canonical dedup key. Called once on
+   * the success path. No-op when the set is empty.
+   *
+   * subject_kind mapping (canonical.kind → worker-pattern enum):
+   *   - 'person'      → 'Person'
+   *   - 'company'     → 'Company'
+   *   - 'public_body' → 'Company'   (closest semantic; public bodies
+   *                                  bid on tenders + receive payments
+   *                                  the same way companies do)
+   *   - anything else → 'Company'   (fallback; legal-entity default)
+   */
+  private async dispatchPatterns(
+    canonicalIds: ReadonlySet<string>,
+    sourceEventId: string,
+    env: Envelope<Payload>,
+  ): Promise<void> {
+    if (canonicalIds.size === 0) return;
+    const ids = Array.from(canonicalIds);
+    const rows = await this.entityRepo.getCanonicalMany(ids);
+    const kindById = new Map<string, string>();
+    for (const r of rows) kindById.set(r.id, r.kind);
+    for (const id of ids) {
+      const k = kindById.get(id);
+      const subject_kind = k === 'person' ? 'Person' : 'Company';
       await this.config.client.publish(
         STREAMS.PATTERN_DETECT,
         newEnvelope(
           'worker-entity',
-          { subject_kind: 'Tender', canonical_id: null, related_ids: [], event_ids: [] },
-          `${env.id}|pattern`,
+          {
+            subject_kind,
+            canonical_id: id,
+            related_ids: [],
+            event_ids: [sourceEventId],
+          },
+          `${env.id}|pattern|${id}`,
           env.correlation_id,
         ),
       );
@@ -362,6 +542,34 @@ async function main(): Promise<void> {
   const worker = new EntityWorker(entityRepo, neo4j, safe, modelId, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  // Block-A reconciliation §5.b — periodic mirror-state gauge tick.
+  // The gauge is a derived count grouped by neo4j_mirror_state; we
+  // recompute on a 60s interval (env NEO4J_MIRROR_GAUGE_INTERVAL_MS).
+  // Cheap query thanks to the index added in 0013.
+  const gaugeIntervalMs = Number.parseInt(
+    process.env.NEO4J_MIRROR_GAUGE_INTERVAL_MS ?? '60000',
+    10,
+  );
+  const gaugeTick = async (): Promise<void> => {
+    try {
+      const counts = await entityRepo.neo4jMirrorStateCounts();
+      neo4jMirrorStateTotal.set({ state: 'synced' }, counts.synced);
+      neo4jMirrorStateTotal.set({ state: 'pending' }, counts.pending);
+      neo4jMirrorStateTotal.set({ state: 'failed' }, counts.failed);
+    } catch (e) {
+      logger.warn({ err: e }, 'neo4j-mirror-gauge-tick-failed');
+    }
+  };
+  await gaugeTick();
+  const gaugeTimer = setInterval(() => {
+    void gaugeTick();
+  }, gaugeIntervalMs);
+  registerShutdown('mirror-gauge', () => {
+    clearInterval(gaugeTimer);
+    return Promise.resolve();
+  });
+
   logger.info({ modelId }, 'worker-entity-ready');
 }
 

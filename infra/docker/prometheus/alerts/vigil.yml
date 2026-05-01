@@ -105,3 +105,27 @@ groups:
         annotations:
           summary: 'Worker {{ $labels.worker }} consume-loop stalled (no tick in >1h)'
           description: "WorkerBase.loopReadGroup has not iterated for over an hour. The worker is likely stuck in a degraded state long before /healthz returns red. Investigate the worker's logs and Redis stream consumption."
+
+      # Block-A reconciliation §5.b — Neo4j mirror-state visibility.
+      # The worker-entity flips canonical rows to 'failed' after the
+      # bounded retry budget is exhausted. Any row in 'failed' is an
+      # operator-actionable mirror gap; the deferred reconcile worker
+      # picks them up but pages oncall in the meantime.
+      - alert: Neo4jMirrorFailedRows
+        expr: vigil_neo4j_mirror_state_total{state="failed"} > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'entity.canonical rows with neo4j_mirror_state=failed (count: {{ $value }})'
+          description: 'worker-entity exhausted its retry budget on at least one Neo4j mirror. The Postgres canonical row stands; the Neo4j twin is missing. Check worker-entity logs for `neo4j-mirror-failed`.'
+
+      # Persistent backlog of canonicals waiting on Neo4j mirror.
+      # 'pending' rows are normal between Postgres commit and Cypher
+      # write; a sustained backlog indicates the Neo4j path is wedged.
+      - alert: Neo4jMirrorPendingBacklog
+        expr: vigil_neo4j_mirror_state_total{state="pending"} > 100
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: 'entity.canonical pending Neo4j mirror backlog ({{ $value }} rows for >30m)'
+          description: 'Sustained pending-mirror backlog. Either Neo4j is unreachable or the worker-entity mirror retry path is throttled. Check Neo4j connectivity and worker-entity logs.'

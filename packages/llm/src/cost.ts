@@ -1,5 +1,7 @@
 import { createLogger, llmCostUsd, llmTokens, type Logger } from '@vigil/observability';
-import { Constants, Errors } from '@vigil/shared';
+import { Errors } from '@vigil/shared';
+
+import { anthropicCostUsd } from './pricing.js';
 
 /**
  * Cost tracker — enforces daily soft / hard ceilings (SRD §18.4).
@@ -89,10 +91,13 @@ export class CostTracker {
     return { allow: true };
   }
 
-  /** Compute USD cost given a model class + token counts. */
-  computeCost(modelClass: 'opus' | 'sonnet' | 'haiku', inputTokens: number, outputTokens: number): number {
-    const p = Constants.ANTHROPIC_PRICING_USD_PER_MTOK[modelClass];
-    return (inputTokens * p.input) / 1_000_000 + (outputTokens * p.output) / 1_000_000;
+  /**
+   * Compute USD cost given an exact model_id + token counts.
+   * Block-A reconciliation §2.A.4 — keyed by model_id, not modelClass.
+   * Throws LlmPricingNotConfiguredError on missing entry.
+   */
+  computeCost(modelId: string, inputTokens: number, outputTokens: number): number {
+    return anthropicCostUsd(modelId, inputTokens, outputTokens);
   }
 
   record(r: UsageRecord): void {
@@ -103,8 +108,12 @@ export class CostTracker {
       this.history.shift();
     }
     llmCostUsd.labels({ provider: 'anthropic', model: r.model }).inc(r.costUsd);
-    llmTokens.labels({ provider: 'anthropic', model: r.model, direction: 'input' }).inc(r.inputTokens);
-    llmTokens.labels({ provider: 'anthropic', model: r.model, direction: 'output' }).inc(r.outputTokens);
+    llmTokens
+      .labels({ provider: 'anthropic', model: r.model, direction: 'input' })
+      .inc(r.inputTokens);
+    llmTokens
+      .labels({ provider: 'anthropic', model: r.model, direction: 'output' })
+      .inc(r.outputTokens);
   }
 
   /** Total USD spent in the last 24h. */

@@ -8,11 +8,7 @@ import {
   loadRegistries,
   type RawSignal,
 } from '@vigil/certainty-engine';
-import {
-  CertaintyRepo,
-  FindingRepo,
-  getDb,
-} from '@vigil/db-postgres';
+import { CertaintyRepo, FindingRepo, getDb } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -61,11 +57,18 @@ class ScoreWorker extends WorkerBase<Payload> {
 
   protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
     const { finding_id } = env.payload;
-    // Pull all signals on this finding (with provenance + source attribution).
+    // Block-A reconciliation §2.A.6 — filter backdated/future-timed
+    // signals. `contributed_at` defaults to NOW() at insert time, but
+    // a misbehaving adapter (or a code path that overrides the
+    // default) can write a future timestamp. Without the bound below,
+    // the certainty engine accepts the future-timed row as evidence
+    // and trips the posterior. Rows with `contributed_at > NOW()` are
+    // never legitimate; drop them at read time.
     const r = await this.db.execute(sql`
       SELECT id, pattern_id, source, prior, strength, weight, evidence_event_ids, evidence_document_cids, metadata
         FROM finding.signal
        WHERE finding_id = ${finding_id}
+         AND contributed_at <= NOW()
     `);
     type Row = {
       id: string;
@@ -200,18 +203,21 @@ class ScoreWorker extends WorkerBase<Payload> {
         patternCategory: parsed?.category ?? 'A',
         severity,
       });
-      await this.findingRepo.setRecommendedRecipientBody(
-        finding_id,
-        recommended,
-        primaryPatternId,
-      );
+      await this.findingRepo.setRecommendedRecipientBody(finding_id, recommended, primaryPatternId);
     }
     return { kind: 'ack' };
   }
 
   /** Walks the signal's evidence_event_ids back to the originating source
    *  events — the primary-source roots that drive the 5-source minimum
-   *  rule. Returns a map from signal_id → roots[]. */
+   *  rule. Returns a map from signal_id → roots[].
+   *
+   *  Block-A reconciliation §2.A.6 — the previous implementation
+   *  built and executed an `IN (...)` query with manual placeholders,
+   *  immediately discarded the result with `void r`, then ran the
+   *  same lookup via `= ANY($1::uuid[])`. Two round-trips, only the
+   *  second was used. The dead query is removed; only the
+   *  parameter-array form remains. */
   private async lookupProvenance(
     rows: ReadonlyArray<{ id: string; evidence_event_ids: string[] }>,
   ): Promise<Map<string, string[]>> {
@@ -221,20 +227,11 @@ class ScoreWorker extends WorkerBase<Payload> {
     for (const r of rows) for (const e of r.evidence_event_ids) allEventIds.add(e);
     if (allEventIds.size === 0) return map;
     const ids = Array.from(allEventIds);
-    const placeholders = ids.map((_, i) => `$${i + 1}::uuid`).join(',');
-    if (placeholders.length === 0) return map;
     const r = await this.db.execute(
-      sql`SELECT id, source_id FROM source.events WHERE id IN ${sql.raw('(' + placeholders + ')')}`.append(
-        sql.empty(),
-      ),
-    );
-    void r;
-    // Drizzle's parameter substitution makes the ANY(...) query simpler:
-    const r2 = await this.db.execute(
       sql`SELECT id, source_id FROM source.events WHERE id = ANY(${ids}::uuid[])`,
     );
     type EventRow = { id: string; source_id: string };
-    const eventRows = r2.rows as EventRow[];
+    const eventRows = r.rows as EventRow[];
     const eventToSource = new Map<string, string>();
     for (const er of eventRows) eventToSource.set(er.id, er.source_id);
     for (const row of rows) {
@@ -290,8 +287,7 @@ async function main(): Promise<void> {
   const certaintyRepo = new CertaintyRepo(db);
 
   const registryDir =
-    process.env.VIGIL_CERTAINTY_REGISTRY_DIR ??
-    path.resolve(process.cwd(), 'infra', 'certainty');
+    process.env.VIGIL_CERTAINTY_REGISTRY_DIR ?? path.resolve(process.cwd(), 'infra', 'certainty');
   const registries = await loadRegistries(registryDir);
   const lr = new LikelihoodRatioLookup(registries.likelihoodRatios);
   const indep = new IndependenceLookup(registries.independence);

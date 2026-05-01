@@ -10,8 +10,16 @@ export const Cypher = {
     SET e += $props
     RETURN e
   `,
+  // Block-A reconciliation §5.b — was MATCH, which silently no-op'd
+  // when the Entity node was missing (e.g., a previous mirror failed).
+  // Now MERGE so the Entity is lazily created if absent. Safe because
+  // the canonical Postgres row is the source-of-truth for entity
+  // properties; the Neo4j Entity node's display_name/kind are filled
+  // by the next upsertEntity call (which itself uses MERGE + SET).
+  // Without this fix, addAlias on a missing Entity ran zero rows and
+  // returned success, producing a silent gap in the Neo4j mirror.
   addAlias: `
-    MATCH (e:Entity {id: $entity_id})
+    MERGE (e:Entity {id: $entity_id})
     MERGE (a:Alias {value: $alias, source: $source_id})
     SET a.language = $language, a.first_seen = coalesce(a.first_seen, $first_seen)
     MERGE (e)-[:HAS_ALIAS]->(a)

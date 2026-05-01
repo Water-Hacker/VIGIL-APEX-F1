@@ -72,7 +72,7 @@ export const POSTERIOR_COUNTER_EVIDENCE_THRESHOLD = 0.85;
  * ===========================================================================*/
 
 export const ECE_TARGET = 0.05;
-export const ECE_ALARM = 0.10;
+export const ECE_ALARM = 0.1;
 export const CALIBRATION_SEED_FLOOR = 30;
 export const CALIBRATION_BIN_DENSITY_TARGET = 50;
 export const CALIBRATION_PER_PATTERN_TARGET = 200;
@@ -109,12 +109,13 @@ export const LLM_TEMPERATURE = {
   DEVILS_ADVOCATE: 0.6,
 } as const;
 
-/** Anthropic pricing reference (USD per 1M tokens) — for sanity checks only. */
-export const ANTHROPIC_PRICING_USD_PER_MTOK = {
-  opus: { input: 5.0, output: 25.0 },
-  sonnet: { input: 3.0, output: 15.0 },
-  haiku: { input: 1.0, output: 5.0 },
-} as const;
+/**
+ * Block-A reconciliation §2.A.4 — pricing moved to `infra/llm/pricing.json`,
+ * keyed by EXACT `model_id`. Use `anthropicCostUsd` from `@vigil/llm`
+ * (or `getModelPricing(modelId)` for raw access). Keeping this module
+ * pricing-free means the rate card cannot drift relative to the
+ * model_id that's actually called at runtime.
+ */
 
 /* =============================================================================
  * Anchoring — SRD §22, W-11 fix

@@ -80,3 +80,20 @@ jobs:
         # A closed allowlist exempts 10 legacy zero-test workers; the
         # allowlist can only shrink as workers graduate.
         run: npx --yes tsx scripts/check-test-coverage-floor.ts
+
+      - name: Run scripts/check-source-count.ts (Block-A §2.A.9 drift lint)
+        # The source-catalogue count must agree across infra/sources.json,
+        # TRUTH.md, and docs/source/SRD-v3.md. A PR that adds, removes,
+        # or disables a source without updating the binding-doc phrasing
+        # fails here. Resolution is an architect call — see
+        # docs/work-program/BLOCK-A-RECONCILIATION.md §2.A.9.
+        run: npx --yes tsx scripts/check-source-count.ts
+
+      - name: Run scripts/check-llm-pricing.ts (Block-A §2.A.4 / §2.A.5 drift lint)
+        # Every default Anthropic model_id in packages/llm/src/providers/
+        # anthropic.ts must have a pricing entry in infra/llm/pricing.json.
+        # The cost-tracker daily/monthly ceilings depend on accurate
+        # per-call cost; a missing entry would surface as a fatal
+        # LlmPricingNotConfiguredError at runtime. The lint surfaces
+        # the gap BEFORE deploy.
+        run: npx --yes tsx scripts/check-llm-pricing.ts

@@ -3,6 +3,7 @@ import { createLogger, type Logger } from '@vigil/observability';
 import { Errors } from '@vigil/shared';
 
 import { CircuitBreaker } from '../circuit.js';
+import { bedrockCostUsd } from '../pricing.js';
 import {
   TASK_TEMPERATURE,
   type LlmCallOptions,
@@ -17,7 +18,26 @@ import {
  * Activated automatically by the LlmRouter when Tier 0's circuit breaker is
  * open. Same model identity, different serving infrastructure. Per MVP §03.4
  * cost is $0 baseline; only billed on activation.
+ *
+ * Block-A reconciliation §2.A.5 — the previous implementation returned
+ * `costUsd: 0` from every Bedrock call. On a Tier-0 → Tier-1 failover,
+ * the cost-tracker therefore saw a zero-cost stream and the daily/monthly
+ * ceilings stayed inert. Now we resolve the model_id against the
+ * pricing table and apply the `aws_bedrock_premium_multiplier`
+ * field. AWS bills Claude on Bedrock at parity with Anthropic-direct
+ * rates today (multiplier = 1.0); the field exists so a per-request
+ * surcharge or rate divergence surfaces as a one-line config change.
+ *
+ * Bedrock SKUs are namespaced with an `anthropic.` prefix
+ * (`anthropic.claude-opus-4-7`); pricing.json uses the bare Anthropic
+ * model_id. We strip the prefix at lookup time so the table stays
+ * single-keyed.
  */
+function stripBedrockNamespace(bedrockModelId: string): string {
+  return bedrockModelId.startsWith('anthropic.')
+    ? bedrockModelId.slice('anthropic.'.length)
+    : bedrockModelId;
+}
 
 export interface BedrockProviderOptions {
   readonly region?: string;
@@ -83,14 +103,24 @@ export class BedrockProvider implements ProviderClient {
         .filter((b) => b.type === 'text')
         .map((b) => (b as { type: 'text'; text: string }).text)
         .join('\n');
+      // Block-A reconciliation §2.A.5 — actual cost accounting on the
+      // Tier-1 failover path. Strip the `anthropic.` Bedrock namespace
+      // so the pricing-table lookup uses the same key as the
+      // Anthropic-direct provider, then apply the per-model
+      // aws_bedrock_premium_multiplier. Throws
+      // LlmPricingNotConfiguredError when the model_id has no entry
+      // — we will not silently zero-cost the call.
+      const inputTokens = res.usage.input_tokens;
+      const outputTokens = res.usage.output_tokens;
+      const cost = bedrockCostUsd(stripBedrockNamespace(model), inputTokens, outputTokens);
       return {
         tier: 1,
         provider: this.name,
         model,
         content,
-        inputTokens: res.usage.input_tokens,
-        outputTokens: res.usage.output_tokens,
-        costUsd: 0, // priced like Anthropic; MVP defers exact accounting
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
         latencyMs: Date.now() - start,
         degraded: false,
       };
