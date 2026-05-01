@@ -291,13 +291,18 @@ Modes: default = full bring-up + verify + leave running for inspection.
 Failure mode: prints last 50 log lines per unhealthy container
 so CI-log walking surfaces the cause immediately.
 
-### C2. Vault Shamir initialization
+### C2. Vault Shamir initialization — 🟩 (with M0c-action items)
 
-The `infra/host-bootstrap/03-vault-shamir-init.sh` script exists; verify
-it works end-to-end against a dev Vault. Document the architect's
-execution checklist.
+[docs/runbooks/vault-shamir-init.md](../runbooks/vault-shamir-init.md)
+exists. Block-D D.2 added a "Verification status" section
+documenting:
 
-- File: [docs/runbooks/vault-shamir-init.md](docs/runbooks/vault-shamir-init.md)
+- Static walk only — EE verification deferred to architect-driven M0c ceremony per EXEC §43.2.
+- **Drift identified**: runbook describes `--recipient` flags the live `03-vault-shamir-init.sh` doesn't accept. Architect picks (A) match runbook to script OR (B) extend script to match runbook during M0c walk-through.
+- Other observations: age-plugin-yubikey version pin, DECISION-013 reuse warning, audit-bridge event-type registration check.
+
+Architect-action items captured at the end of the runbook for the
+M0c ceremony.
 
 ### C3. Tor onion service health monitor
 
