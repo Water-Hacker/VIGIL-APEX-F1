@@ -356,13 +356,40 @@ testable; 9 require host-side bind mounts / privileged Falco /
 real network egress allowlist — production-only verification per
 architect spec, walked during M0c hardening week.
 
-### C6. Sentinel quorum check
+### C6. Sentinel quorum check — 🟩
 
 3 VPS (Helsinki, Tokyo, NYC), 2-of-3 quorum for outage attestation.
-Verify the existing `apps/sentinel-monitor/` actually wires this and
-emit a `sentinel.quorum_outage` audit row when 2-of-3 say down.
 
-- Integration test gated on three sentinel ports.
+Status, Block-D D.6 / 2026-05-01:
+
+- The wiring is via systemd timer, not an `apps/` workspace —
+  `infra/host-bootstrap/systemd/vigil-sentinel-quorum.{service,timer}`
+  fires `scripts/sentinel-quorum.ts` every 5 min (offset 47s from the
+  wall-clock minute boundary so it doesn't collide with the high-sig
+  anchor's 5s tick). No `apps/sentinel-monitor/` is needed.
+- The orchestration moved from `scripts/sentinel-quorum.ts` into
+  [packages/observability/src/sentinel-quorum.ts](../../packages/observability/src/sentinel-quorum.ts)
+  so the integration test can drive `runSentinelQuorum` against
+  localhost mocks without spawning a subprocess. The script becomes
+  a thin CLI shim. Pure `quorumDecide` already lived in the package
+  (9 unit tests).
+- Integration test:
+  [packages/observability/\_\_tests\_\_/sentinel-quorum-integration.test.ts](../../packages/observability/__tests__/sentinel-quorum-integration.test.ts)
+  spins up 3 ephemeral-port HTTP servers (sentinel mocks) + 1 UDS
+  socket (audit-bridge mock) and runs 6 cases:
+  - 3-of-3 down → emits `system.health_degraded` to UDS
+  - 2-of-3 down → emits, attesting_sites = [helsinki, tokyo]
+  - 2-of-3 up → no emit
+  - 1 up + 1 down + 1 unknown → inconclusive, no emit
+  - sentinel returns 503 → mapped to `unknown`
+  - skip-suite guard if any of the 4 binds fail (sandboxed CI runners)
+
+Architect-spec drift acknowledged: the spec said
+`sentinel.quorum_outage` but the live action enum
+([packages/shared/src/schemas/audit.ts:18](../../packages/shared/src/schemas/audit.ts#L18))
+has `system.health_degraded`. Block-D commits the live name; if the
+architect prefers the spec name, the rename is a one-enum-add + one
+script-change in a follow-up.
 
 ### C7. Phase-gate CI workflow validation
 
