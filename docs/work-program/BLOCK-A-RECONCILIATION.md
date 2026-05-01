@@ -285,24 +285,28 @@ state migration moves to FIRST. Rationale: the migration adds
 observability that benefits every subsequent block and lands cleanly
 before the more invasive finally-block change.
 
-| Item  | Source             | Priority | Scope                                                                                  |
-| ----- | ------------------ | -------- | -------------------------------------------------------------------------------------- |
-| A.1   | original (DONE)    | done     | worker-entity Postgres-first commit (`bdfd850`)                                        |
-| A.2   | original (DONE)    | done     | worker-entity rule-pass before LLM (`bdfd850`)                                         |
-| A.3   | §5.b verification  | high     | Neo4j-mirror-state column + metric (one column, one metric, one migration)             |
-| A.4   | original A.3       | high     | worker-entity finally-block emit — fix the unconditional PATTERN_DETECT publish        |
-| A.5   | original A.6       | high     | worker-score dead query + backdated-signal clause                                      |
-| A.6   | original A.7       | high     | alias trgm index → expression B-tree index for the rule-pass exact-match lookup        |
-| A.7   | original A.9       | high     | source-count coherence lint                                                            |
-| A.8   | original A.4       | high     | Anthropic pricing table — dated JSON keyed by exact `model_id` under `infra/llm/`      |
-| A.9   | original A.5       | high     | Bedrock cost accounting — same per-`model_id` table + `aws_bedrock_premium_multiplier` |
-| (gap) | original A.8       | DEFERRED | pgvector — Phase-2 / new track                                                         |
-| (gap) | agent original A.3 | DEFERRED | Neo4j-mirror retry queue (state column lands now; reconcile worker later)              |
-| (gap) | agent A.4          | DEFERRED | worker-pattern dispatch tier audit — Block C                                           |
-| (gap) | agent A.6          | DROPPED  | adapter-runner robots.txt 7-window counter — preventative, not corrective              |
-| (gap) | agent A.7          | DEFERRED | dossier render byte-identity — Block D follow-up                                       |
+| Item  | Source             | Priority | Scope                                                                                  | Commit    |
+| ----- | ------------------ | -------- | -------------------------------------------------------------------------------------- | --------- |
+| A.1   | original (DONE)    | done     | worker-entity Postgres-first commit                                                    | `bdfd850` |
+| A.2   | original (DONE)    | done     | worker-entity rule-pass before LLM                                                     | `bdfd850` |
+| A.3   | §5.b verification  | high     | Neo4j-mirror-state column + metric (one column, one metric, one migration)             | `3bc1250` |
+| A.4   | original A.3       | high     | worker-entity finally-block emit — fix the unconditional PATTERN_DETECT publish        | `9236061` |
+| A.5   | original A.6       | high     | worker-score dead query + backdated-signal clause                                      | `c3359b0` |
+| A.6   | original A.7       | high     | alias trgm index → expression B-tree index for the rule-pass exact-match lookup        | `9afd186` |
+| A.7   | original A.9       | high     | source-count coherence lint                                                            | `2e5d3da` |
+| A.8   | original A.4       | high     | Anthropic pricing table — dated JSON keyed by exact `model_id` under `infra/llm/`      | `9b4b274` |
+| A.9   | original A.5       | high     | Bedrock cost accounting — same per-`model_id` table + `aws_bedrock_premium_multiplier` | `2db2271` |
+| (gap) | original A.8       | DEFERRED | pgvector — Phase-2 / new track                                                         |           |
+| (gap) | agent original A.3 | DEFERRED | Neo4j-mirror retry queue (state column lands now; reconcile worker later)              |           |
+| (gap) | agent A.4          | DEFERRED | worker-pattern dispatch tier audit — Block C                                           |           |
+| (gap) | agent A.6          | DROPPED  | adapter-runner robots.txt 7-window counter — preventative, not corrective              |           |
+| (gap) | agent A.7          | DEFERRED | dossier render byte-identity — Block D follow-up                                       |           |
 
 **Architect signature on the running order:** APPROVED 2026-05-01 (with §5.b moved to A.3 / first).
+
+**Block A: CLOSED 2026-05-01.** All seven planned items shipped; full
+workspace sweep green (39 build, 48 test, 56 lint). Block A completion
+summary: see §7 below. Halt for architect review before opening Block B.
 
 ### Procedural rule going forward
 
@@ -503,3 +507,105 @@ Stop after each commit if any test or lint fails. Otherwise proceed
 to the next item without further architect input until Block A is
 fully closed, at which point produce a Block A completion summary
 and stop for review before opening Block B.
+
+---
+
+## 7. Block A — completion summary (2026-05-01)
+
+All seven planned items in §6's implementation order shipped. The
+branch `fix/blockA-worker-entity-postgres-write-and-rulepass` is
+green on every workspace gate. **Halting for architect review
+before opening Block B.**
+
+### Commits
+
+| #   | Item                            | Commit    |
+| --- | ------------------------------- | --------- |
+| 0   | Reconciliation counter-sign     | `df6d826` |
+| A.3 | Neo4j-mirror-state column       | `3bc1250` |
+| A.4 | finally-block emit fix          | `9236061` |
+| A.5 | worker-score dead query + bound | `c3359b0` |
+| A.6 | alias expression B-tree index   | `9afd186` |
+| A.7 | source-count coherence lint     | `2e5d3da` |
+| A.8 | Anthropic pricing table         | `9b4b274` |
+| A.9 | Bedrock cost accounting         | `2db2271` |
+
+(A.1 and A.2 landed earlier on the same branch as `bdfd850`; the
+verification commits 5.c–5.f from the reconciliation pass landed as
+`1bdfa64`.)
+
+### Workspace gate state
+
+- `pnpm exec turbo run build  --continue --force` → **39/39 green**
+- `pnpm exec turbo run test   --continue --force` → **48/48 green**
+- `pnpm exec turbo run lint   --continue --force` → **56/56 green**
+
+### CI lints (phase-gate workflow)
+
+- `scripts/check-llm-pricing.ts` → **PASS** (3 models, 3 defaults all priced)
+- `scripts/check-source-count.ts` → **DRIFT (intended)**.
+  Surfaces the pre-existing `infra/sources.json: 29` vs
+  `TRUTH.md / SRD-v3.md: 26` gap. The lint exists to make this gap
+  blocking; resolution is the architect's call per §2.A.9. Two
+  options: (a) align the binding-doc phrasing to 29; (b) remove or
+  disable 3 entries in `infra/sources.json`.
+
+### Surfaced + landed (this block)
+
+- **DB hot path correctness.** Postgres-first commit + atomic cluster
+  write (A.1/A.2). worker-pattern can now read every fresh canonical
+  it expects to.
+- **Rule-pass policy.** Three-bucket classification (RCCM/NIU
+  resolved, name-only candidates held, unresolved → LLM); name-only
+  matches route to the review queue instead of auto-merging
+  (verification 5.c).
+- **Source-id discipline.** Sentinel `'unknown'` fallback removed;
+  worker dead-letters with operator alert when `source_event_id` is
+  absent (verification 5.d).
+- **Neo4j-mirror visibility.** New `neo4j_mirror_state` column +
+  `vigil_neo4j_mirror_state_total{state}` Prometheus gauge +
+  paging/warning alerts. `Cypher.addAlias` MATCH→MERGE fixes the
+  silent-no-op on missing Entity nodes (A.3).
+- **Pattern-dispatch correctness.** worker-entity no longer publishes
+  PATTERN_DETECT from a `finally` block with a hardcoded empty
+  envelope; success-path only, per-canonical, with real id and
+  source_event_id (A.4).
+- **Score discipline.** worker-score filters backdated/future-timed
+  signals (`contributed_at <= NOW()`); the dead `IN (...)` query is
+  removed (A.5).
+- **Rule-pass performance.** Expression B-tree index on the
+  normalised display_name lookup. The previous trgm GIN index could
+  not serve the rule-pass exact-equality query (A.6).
+- **Source-count coherence.** New CI lint asserts the catalogue size
+  matches across `infra/sources.json`, `TRUTH.md`, and SRD §10.2
+  (A.7).
+- **LLM pricing.** Pricing table moved to `infra/llm/pricing.json`,
+  keyed by exact `model_id`. `LlmPricingNotConfiguredError` throws
+  on missing entry — no silent zero-cost fallback. CI lint asserts
+  every default model_id is priced (A.8).
+- **Bedrock cost accounting.** Tier-1 failover no longer reports
+  `costUsd: 0`. The pricing-table lookup applies the
+  `aws_bedrock_premium_multiplier` so the daily/monthly ceilings
+  stay live during failover (A.9).
+
+### Held / deferred (out of Block A by architect-approved scope)
+
+- pgvector — Phase-2 / new track.
+- Neo4j-mirror reconcile worker (state column lands now; the
+  background retry/reset worker is its own track).
+- worker-pattern dispatch tier audit — Block C.
+- adapter-runner robots.txt 7-window counter — DROPPED.
+- dossier render byte-identity — Block D follow-up.
+
+### Architect decisions still pending (do NOT block this block)
+
+1. **Source-count canonical number.** Pick 29 (and update the binding
+   docs) or pick 26 (and remove 3 entries from `infra/sources.json`).
+   The lint will pass once one path is taken.
+
+### Hand-off to Block B
+
+When the architect signs the completion summary, the next step is
+Block B (per the original Phase-1-completion prompt's structure,
+not yet drafted in this branch). The agent will halt at this point
+and await the architect's Block-B prompt.
