@@ -201,13 +201,16 @@ every container reaches healthy and the dashboard returns 200 on
 
 - File: [scripts/smoke-stack.sh](scripts/smoke-stack.sh)
 
-### C2. Vault Shamir initialization
+### C2. Vault Shamir initialization 🟩
 
-The `infra/host-bootstrap/03-vault-shamir-init.sh` script exists; verify
-it works end-to-end against a dev Vault. Document the architect's
-execution checklist.
+The `infra/host-bootstrap/03-vault-shamir-init.sh` script exists; doc +
+script verified in tree 2026-05-01. End-to-end run against a dev Vault
+is an architect-side ceremony (Vault unsealing requires the real key
+custodians); the build-agent contribution stops at the script + checklist
+landing.
 
-- File: [docs/runbooks/vault-shamir-init.md](docs/runbooks/vault-shamir-init.md)
+- 🟩 [infra/host-bootstrap/03-vault-shamir-init.sh](infra/host-bootstrap/03-vault-shamir-init.sh) — present.
+- 🟩 [docs/runbooks/vault-shamir-init.md](docs/runbooks/vault-shamir-init.md) — execution checklist for the architect.
 
 ### C3. Tor onion service health monitor
 
