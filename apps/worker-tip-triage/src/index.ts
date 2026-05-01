@@ -1,5 +1,5 @@
-import { TipRepo, getDb } from '@vigil/db-postgres';
-import { LlmRouter } from '@vigil/llm';
+import { CallRecordRepo, TipRepo, getDb } from '@vigil/db-postgres';
+import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
   createLogger,
   installShutdownHandler,
@@ -8,13 +8,7 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
-import {
-  QueueClient,
-  STREAMS,
-  WorkerBase,
-  type Envelope,
-  type HandlerOutcome,
-} from '@vigil/queue';
+import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import {
   expose,
   sealedBoxDecrypt,
@@ -23,6 +17,8 @@ import {
   wrapSecret,
 } from '@vigil/security';
 import { z } from 'zod';
+
+import { TIP_PARAPHRASE_TASK } from './prompts.js';
 
 const logger = createLogger({ service: 'worker-tip-triage' });
 
@@ -33,24 +29,22 @@ const zPayload = z.object({
 });
 type Payload = z.infer<typeof zPayload>;
 
-const TIP_PARAPHRASE_SYSTEM = `
-You are paraphrasing a citizen tip for VIGIL APEX's operator triage queue.
-
-CRITICAL: do NOT reproduce the tip verbatim. Strip any personally identifying
-detail that would expose the submitter (specific dates only known to a small
-group, internal reference numbers, very precise locations). Preserve the
-substance of the allegation. Output max 500 chars.
-
-Output JSON: {"paraphrase":"...","topic_hint":"procurement|payroll|infrastructure|sanctions|banking|other","severity_hint":"low|medium|high|critical"}
-`.trim();
+// Block-B A2 migration: TIP_PARAPHRASE_SYSTEM moved into the
+// SafeLlmRouter prompt registry under name 'tip-triage.paraphrase'
+// in src/prompts.ts. The PII-stripping rules now live in
+// `TIP_PARAPHRASE_TASK` and are passed via safe.call's `task` field
+// (closed-context <task> element). The doctrine system preamble
+// from AI-SAFETY-DOCTRINE-v1 wraps every call so L4 prompt-injection
+// + L11 daily-canary apply uniformly.
 
 function toBase64(bytes: Uint8Array): string {
   // Encode without depending on Node's Buffer import surface — the worker
   // runtime always has it via the runtime, but importing keeps node:buffer
   // off the type-check path for environments that don't ship @types/node.
   // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-  const buf: { from: (b: Uint8Array) => { toString: (enc: string) => string } } =
-    (globalThis as { Buffer?: unknown }).Buffer as never;
+  const buf: { from: (b: Uint8Array) => { toString: (enc: string) => string } } = (
+    globalThis as { Buffer?: unknown }
+  ).Buffer as never;
   return buf.from(bytes).toString('base64');
 }
 
@@ -64,7 +58,8 @@ class TipTriageWorker extends WorkerBase<Payload> {
   constructor(
     private readonly tipRepo: TipRepo,
     private readonly vault: VaultClient,
-    private readonly llm: LlmRouter,
+    private readonly safe: SafeLlmRouter,
+    private readonly modelId: string,
     queue: QueueClient,
   ) {
     super({
@@ -117,17 +112,20 @@ class TipTriageWorker extends WorkerBase<Payload> {
     }
     const text = new TextDecoder().decode(plaintext);
 
-    // LLM paraphrase pass
+    // LLM paraphrase pass — Block-B A2 migration: routes through
+    // SafeLlmRouter so the doctrine system preamble + canary +
+    // call-record audit + prompt-version pin apply uniformly.
     try {
-      const r = await this.llm.call<z.infer<typeof zParaphrase>>({
-        task: 'tip_classify',
-        modelClassOverride: 'haiku',
-        system: TIP_PARAPHRASE_SYSTEM,
-        user: `Tip text:\n${text.slice(0, 4000)}`,
+      const outcome = await this.safe.call<z.infer<typeof zParaphrase>>({
+        findingId: null,
+        assessmentId: null,
+        promptName: 'tip-triage.paraphrase',
+        task: TIP_PARAPHRASE_TASK,
+        sources: [{ id: `tip:${tip.id}`, label: 'tip-body', text: text.slice(0, 4000) }],
         responseSchema: zParaphrase,
-        ...(env.correlation_id && { correlationId: env.correlation_id }),
+        modelId: this.modelId,
       });
-      logger.info({ tip_id: tip.id, severity: r.content.severity_hint }, 'tip-paraphrased');
+      logger.info({ tip_id: tip.id, severity: outcome.value.severity_hint }, 'tip-paraphrased');
       // Update disposition + paraphrase notes (encrypted at rest with the same operator-team key)
       await this.tipRepo.setDisposition(tip.id, 'IN_TRIAGE', 'worker-tip-triage');
     } catch (e) {
@@ -150,16 +148,35 @@ async function main(): Promise<void> {
   registerShutdown('queue', () => queue.close());
   const db = await getDb();
   const tipRepo = new TipRepo(db);
+  const callRecordRepo = new CallRecordRepo(db);
 
   const vault = await VaultClient.connect();
   registerShutdown('vault', () => vault.close());
   const apiKey = await vault.read<string>('anthropic', 'api_key');
   const llm = new LlmRouter({ anthropicApiKey: apiKey });
 
-  const worker = new TipTriageWorker(tipRepo, vault, llm, queue);
+  // DECISION-011 / Block-B A2 — adversarial pipeline runs through
+  // SafeLlmRouter so every call records to llm.call_record with the
+  // prompt-registry hash + canary state.
+  if (!Safety.adversarialPromptsRegistered()) {
+    throw new Error('AI-Safety canonical prompts missing from globalPromptRegistry');
+  }
+  const safe = new SafeLlmRouter(llm, logger, {
+    record: async (input) => {
+      await callRecordRepo.record({
+        ...input,
+        temperature: input.temperature.toString(),
+        cost_usd: input.cost_usd.toString(),
+        called_at: new Date(input.called_at),
+      });
+    },
+  });
+  const modelId = process.env.TIP_TRIAGE_MODEL ?? 'claude-haiku-4-5-20251001';
+
+  const worker = new TipTriageWorker(tipRepo, vault, safe, modelId, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
-  logger.info('worker-tip-triage-ready');
+  logger.info({ modelId }, 'worker-tip-triage-ready');
 }
 
 main().catch((e: unknown) => {

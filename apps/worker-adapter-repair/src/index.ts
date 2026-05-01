@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { getDb } from '@vigil/db-postgres';
-import { LlmRouter } from '@vigil/llm';
+import { CallRecordRepo, getDb } from '@vigil/db-postgres';
+import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
   createLogger,
   installShutdownHandler,
@@ -16,11 +16,7 @@ import cron from 'node-cron';
 import { request } from 'undici';
 import { z } from 'zod';
 
-
-import {
-  SELECTOR_REDERIVE_SYSTEM_PROMPT,
-  selectorRederiveUserPrompt,
-} from './prompts.js';
+import { SELECTOR_REDERIVE_TASK, selectorRederiveUserPrompt } from './prompts.js';
 import { runShadowTest, maybePromote } from './shadow-test.js';
 import { isCritical, zCandidateSelector } from './types.js';
 
@@ -70,10 +66,12 @@ async function findBrokenSources(): Promise<Array<{ id: string; pageUrl: string 
   // For now we trust the adapter to record its primary URL in
   // last_error metadata if the source goes 'first_contact_failed'.
   // Realistically operations also has the URL in infra/sources.yaml.
-  return r.rows.map((row) => ({
-    id: row.source_id,
-    pageUrl: extractUrlHint(row.last_error) ?? '',
-  })).filter((s) => s.pageUrl.length > 0);
+  return r.rows
+    .map((row) => ({
+      id: row.source_id,
+      pageUrl: extractUrlHint(row.last_error) ?? '',
+    }))
+    .filter((s) => s.pageUrl.length > 0);
 }
 
 function extractUrlHint(s: string | null): string | null {
@@ -96,7 +94,8 @@ async function fetchArchivedFirstContact(sourceId: string): Promise<string | nul
 
 async function generateProposal(
   source: { id: string; pageUrl: string },
-  llm: LlmRouter,
+  safe: SafeLlmRouter,
+  modelId: string,
 ): Promise<CandidateProposal | null> {
   const newHtml = await fetchPage(source.pageUrl);
   if (!newHtml) {
@@ -118,24 +117,36 @@ async function generateProposal(
   const oldSelector = r.rows[0]?.selector ?? {};
   const expectedFields = (r.rows[0]?.expected_fields as string[] | undefined) ?? [];
 
-  const llmResult = await llm.call<z.infer<typeof zCandidateSelector>>({
-    task: 'extraction',
-    system: SELECTOR_REDERIVE_SYSTEM_PROMPT,
-    user: selectorRederiveUserPrompt({
-      sourceId: source.id,
-      oldSelector,
-      oldHtmlSnippet: oldHtml,
-      newHtml,
-      expectedFields,
-    }),
+  // Block-B A2 migration — closed-context call via SafeLlmRouter.
+  // The selector-rederive payload (oldSelector, old/new HTML,
+  // expected_fields) lands as a single `source_document`; the
+  // doctrine system preamble + canary + call_record audit apply.
+  // Note: SafeLlmRouter does not currently surface a `batch` flag;
+  // the daily sweep runs at 03:00 Africa/Douala overnight, so the
+  // on-demand 50% Batch-API discount is deferred to a follow-up.
+  const llmResult = await safe.call<z.infer<typeof zCandidateSelector>>({
+    findingId: null,
+    assessmentId: null,
+    promptName: 'adapter-repair.selector-rederive',
+    task: SELECTOR_REDERIVE_TASK,
+    sources: [
+      {
+        id: `selector-rederive:${source.id}`,
+        label: 'selector-rederive-payload',
+        text: selectorRederiveUserPrompt({
+          sourceId: source.id,
+          oldSelector,
+          oldHtmlSnippet: oldHtml,
+          newHtml,
+          expectedFields,
+        }),
+      },
+    ],
     responseSchema: zCandidateSelector,
-    maxTokens: 1_500,
-    batch: true,         // overnight run, batch is fine (50% off)
-    critical: false,
+    modelId,
   });
-  if (!llmResult.content.selector) {
-    logger.warn({ source: source.id, rationale: llmResult.content.rationale },
-      'llm-cannot-rederive');
+  if (!llmResult.value.selector) {
+    logger.warn({ source: source.id, rationale: llmResult.value.rationale }, 'llm-cannot-rederive');
     return null;
   }
 
@@ -144,15 +155,17 @@ async function generateProposal(
     INSERT INTO source.adapter_repair_proposal
       (id, source_id, candidate_selector, rationale, generated_by_llm, status)
     VALUES
-      (${proposalId}::uuid, ${source.id}, ${JSON.stringify(llmResult.content.selector)}::jsonb,
-       ${llmResult.content.rationale}, ${`anthropic:${llmResult.model}`}, 'shadow_testing')
+      (${proposalId}::uuid, ${source.id}, ${JSON.stringify(llmResult.value.selector)}::jsonb,
+       ${llmResult.value.rationale}, ${`anthropic:${modelId}`}, 'shadow_testing')
   `);
-  logger.info({ proposalId, source: source.id, confidence: llmResult.content.confidence },
-    'proposal-generated');
+  logger.info(
+    { proposalId, source: source.id, confidence: llmResult.value.confidence },
+    'proposal-generated',
+  );
   return {
     id: proposalId,
     sourceId: source.id,
-    candidateSelector: llmResult.content.selector,
+    candidateSelector: llmResult.value.selector,
     pageUrl: source.pageUrl,
   };
 }
@@ -167,12 +180,12 @@ async function fetchPage(url: string): Promise<string | null> {
   }
 }
 
-async function dailyRepairSweep(llm: LlmRouter): Promise<void> {
+async function dailyRepairSweep(safe: SafeLlmRouter, modelId: string): Promise<void> {
   const broken = await findBrokenSources();
   logger.info({ count: broken.length }, 'daily-repair-sweep-start');
   for (const source of broken) {
     try {
-      await generateProposal(source, llm);
+      await generateProposal(source, safe, modelId);
     } catch (e) {
       logger.error({ err: e, source: source.id }, 'proposal-generation-failed');
     }
@@ -215,7 +228,7 @@ async function hourlyShadowSweep(): Promise<void> {
           // itself is not invoked. Cross-validating against the actual
           // adapter is Phase H6 territory (golden tests).
           applyOld: () => null,
-          applyNew: () => candidate.data.selector ? {} : null,
+          applyNew: () => (candidate.data.selector ? {} : null),
           candidate: candidate.data,
         },
         logger,
@@ -239,10 +252,29 @@ async function main(): Promise<void> {
   const apiKey = await vault.read<string>('anthropic', 'api_key');
   const llm = new LlmRouter({ anthropicApiKey: apiKey });
 
-  // Daily 03:00 Africa/Douala — overnight when Anthropic Batch API
-  // turnaround time (≤ 24 h) is acceptable.
+  // DECISION-011 / Block-B A2 — adversarial pipeline runs through
+  // SafeLlmRouter so every call records to llm.call_record with the
+  // prompt-registry hash + canary state.
+  if (!Safety.adversarialPromptsRegistered()) {
+    throw new Error('AI-Safety canonical prompts missing from globalPromptRegistry');
+  }
+  const db = await getDb();
+  const callRecordRepo = new CallRecordRepo(db);
+  const safe = new SafeLlmRouter(llm, logger, {
+    record: async (input) => {
+      await callRecordRepo.record({
+        ...input,
+        temperature: input.temperature.toString(),
+        cost_usd: input.cost_usd.toString(),
+        called_at: new Date(input.called_at),
+      });
+    },
+  });
+  const modelId = process.env.ADAPTER_REPAIR_MODEL ?? 'claude-sonnet-4-6';
+
+  // Daily 03:00 Africa/Douala — overnight when latency is non-critical.
   cron.schedule('0 3 * * *', () => {
-    void dailyRepairSweep(llm);
+    void dailyRepairSweep(safe, modelId);
   });
 
   // Hourly shadow sweep.
@@ -250,7 +282,7 @@ async function main(): Promise<void> {
     void hourlyShadowSweep();
   });
 
-  logger.info('worker-adapter-repair-ready');
+  logger.info({ modelId }, 'worker-adapter-repair-ready');
 }
 
 main().catch((e: unknown) => {

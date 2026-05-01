@@ -43,18 +43,31 @@ Target: 200 rows. **Live state (2026-05-01):** 224 rows in
 [packages/llm/**tests**/synthetic-hallucinations.jsonl](../../packages/llm/__tests__/synthetic-hallucinations.jsonl) — surpasses target.
 Closed during a prior pass (no Block-B commit needed).
 
-### A2. SafeLlmRouter per-worker migration
+### A2. SafeLlmRouter per-worker migration — 🟩
 
-The doctrine chokepoint must wrap every direct LlmRouter call so the
-12 AI-SAFETY-DOCTRINE-v1 layers apply uniformly.
+All five workers covered. The doctrine chokepoint wraps every
+direct LlmRouter call so the 12 AI-SAFETY-DOCTRINE-v1 layers apply
+uniformly.
 
-- A2.1 [apps/worker-extractor/](../../apps/worker-extractor/) — **🟩 already migrated.**
-  [src/index.ts:288](../../apps/worker-extractor/src/index.ts#L288) instantiates `SafeLlmRouter` and passes a `SafeLlmRouterLike` adapter to the extractor.
-- A2.2 [apps/worker-counter-evidence/](../../apps/worker-counter-evidence/) — **🟩 already migrated.**
-  [src/index.ts:189](../../apps/worker-counter-evidence/src/index.ts#L189) calls `this.safe.call({...})`.
-- A2.3 [apps/worker-pattern/](../../apps/worker-pattern/) — **🟩 N/A (no LLM calls).** The pattern dispatcher is deterministic; there is no Claude call to wrap. The `task: 'pattern_evaluate'` task class would be added if a future LLM-backed pattern lands.
-- A2.4 [apps/worker-tip-triage/](../../apps/worker-tip-triage/) — **drift-corrected scope (Block-B reconciliation, architect signoff 2026-05-01).** Currently calls `LlmRouter.call` directly at [src/index.ts:122](../../apps/worker-tip-triage/src/index.ts#L122).
-- A2.5 [apps/worker-adapter-repair/](../../apps/worker-adapter-repair/) — **drift-corrected scope.** Currently calls `LlmRouter.call` directly at [src/index.ts:121](../../apps/worker-adapter-repair/src/index.ts#L121).
+- A2.1 🟩 [apps/worker-extractor/](../../apps/worker-extractor/) — already migrated (SafeLlmRouterLike adapter at `src/llm-extractor.ts`).
+- A2.2 🟩 [apps/worker-counter-evidence/](../../apps/worker-counter-evidence/) — already migrated (`this.safe.call(...)` at `src/index.ts:189`).
+- A2.3 🟩 [apps/worker-pattern/](../../apps/worker-pattern/) — N/A (deterministic dispatcher, no Claude calls).
+- A2.4 🟩 [apps/worker-tip-triage/](../../apps/worker-tip-triage/) — Block-B B.4 commit: registered `tip-triage.paraphrase` prompt; `safe.call` with PII-stripping `task` field; closed-context source for tip body; CallRecordRepo sink.
+- A2.5 🟩 [apps/worker-adapter-repair/](../../apps/worker-adapter-repair/) — Block-B B.4 commit: registered `adapter-repair.selector-rederive` prompt; `safe.call` with conservative-selector `task`; closed-context source for old/new HTML; CallRecordRepo sink.
+
+Doctrine layer mapping (both new migrations):
+
+| Layer                              | Pre-migration | Post-migration                 |
+| ---------------------------------- | ------------- | ------------------------------ |
+| L1 hallucination (citations)       | N/A           | N/A                            |
+| L4 prompt injection (system rules) | implicit      | uniform                        |
+| L4 schema validation               | preserved     | preserved                      |
+| L8 anchoring                       | N/A           | N/A                            |
+| L9 prompt-version pin              | absent        | NEW                            |
+| L11 daily canary                   | absent        | NEW                            |
+| L11 call-record audit              | absent        | NEW                            |
+| L13 jailbreak                      | T=0.0/0.2     | T=0.1 default                  |
+| L14 model update                   | unpinned      | model_id pinned in call_record |
 
 ### A3. NO_TESTS packages → real tests — 🟩
 
