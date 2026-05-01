@@ -435,10 +435,37 @@ Status, Block-D D.7 / 2026-05-01:
   The 1:1 invariant (every lint has a synthetic-failure case) is the
   unit-test of the gate itself.
 
-### C8. PR template + commitlint config
+### C8. PR template + commitlint config — 🟩
 
-- C8.1 [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) (verify).
-- C8.2 `commitlint.config.cjs` enforces Conventional Commits.
+Status, Block-D D.8 / 2026-05-01:
+
+- C8.1 🟩 [.github/PULL_REQUEST_TEMPLATE.md](../../.github/PULL_REQUEST_TEMPLATE.md)
+  ships: ring (0..5) + scope, description, 10-item self-critique
+  checklist (SRD compliance, input validation, Vault-only secrets,
+  idempotency, structured logging, ≥80% coverage, non-root container,
+  audit trail, fabrication-resistance, YAGNI), AT-?-?? acceptance-
+  test pointer, DECISION-???: pointer, architect sign-off line.
+  Block-D fixed the broken `IMPLEMENTATION-PLAN.md` ref to point at
+  `docs/IMPLEMENTATION-PLAN.md`.
+- C8.2 🟩 [commitlint.config.cjs](../../commitlint.config.cjs)
+  declares 12 allowed types (feat / fix / docs / chore / refactor /
+  perf / test / build / ci / security / deps / revert) and a closed
+  scope-enum (top-level + every package + every worker app + the 6
+  ring-level scopes + 3 Phase-2 MOU-gated adapter scopes). Subject
+  rules: never upper/pascal/start-case, never empty, never
+  trailing-period, header ≤100 chars, body ≤100 chars per line.
+- C8.3 🟩 [.husky/commit-msg](../../.husky/commit-msg) runs
+  `pnpm exec commitlint --edit "$1"` on every commit; rejects on any
+  rule violation.
+- C8.4 🟩 [.husky/pre-commit](../../.husky/pre-commit) blocks
+  staging of `personal/{calibration-seed,council-candidates,prompts/
+*.local.md}` and any `.env` file (whitelist `.env.example`); runs
+  `lint-staged` + `gitleaks protect --staged` if available.
+
+Verified Block-D D.8 / 2026-05-01: smoke-tested commitlint locally
+against four cases — bad type ✓ rejects with `[type-enum]`; bad
+scope ✓ rejects with `[scope-enum]`; header >100 chars ✓ rejects
+with `[header-max-length]`; valid commit ✓ silent pass.
 
 ### C9. Backup script verification
 

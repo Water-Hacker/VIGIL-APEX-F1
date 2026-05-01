@@ -11,7 +11,7 @@
 
 <!-- What does this PR do? Why? Cite SRD/EXEC/Companion sections. -->
 
-## Self-critique checklist (per IMPLEMENTATION-PLAN.md)
+## Self-critique checklist (per [docs/IMPLEMENTATION-PLAN.md](../docs/IMPLEMENTATION-PLAN.md))
 
 - [ ] Matches SRD spec exactly, with cited section numbers
 - [ ] Every external input validated (Zod / parameterised SQL / CSP / rate-limited)
