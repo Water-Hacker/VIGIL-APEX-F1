@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import {
-  CallRecordRepo,
-  VerbatimAuditRepo,
-  type Db,
-} from '@vigil/db-postgres';
+import { CallRecordRepo, VerbatimAuditRepo, type Db } from '@vigil/db-postgres';
 import { Safety } from '@vigil/llm';
 import { type Logger } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
+
+import { uniformSample } from './uniform-sample';
 
 /**
  * AI-SAFETY-DOCTRINE-v1 §B.1 verbatim audit sampler.
@@ -72,7 +70,7 @@ export async function runVerbatimAuditSampler(
   if (allRows.length === 0) return { sampled: 0, matches: 0, mismatches: 0 };
 
   const sampleSize = Math.max(1, Math.ceil(allRows.length * fraction));
-  const shuffled = [...allRows].sort(() => Math.random() - 0.5).slice(0, sampleSize);
+  const shuffled = uniformSample(allRows, sampleSize);
 
   let matches = 0;
   let mismatches = 0;
