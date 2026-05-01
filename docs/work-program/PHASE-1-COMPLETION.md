@@ -12,72 +12,75 @@
 
 ## Snapshot of state
 
-| Dimension                       | Status                               |
-| ------------------------------- | ------------------------------------ |
-| Build (`turbo run build`)       | 38/38 ✓                              |
-| Typecheck                       | 55/55 ✓                              |
-| Lint at `--max-warnings=0`      | 55/55 ✓                              |
-| Tests                           | 46/46 packages green (712 tests)     |
-| Adapters built                  | 30 (target ≥ 26 / TRUTH §C says 27)  |
-| Patterns built                  | 43 (target 43, 1:1 fixture coverage) |
-| Weaknesses 🟩 closed            | 18 / 27                              |
-| Weaknesses 🟧 in progress       | 2 (W-10, W-14)                       |
-| Weaknesses 🟦 architect-blocked | 5                                    |
-| Weaknesses ⬛ deferred          | 1 (W-16, M2 exit)                    |
-| Decisions PROVISIONAL           | 1 (DECISION-012 / TAL-PA)            |
-| TRUTH.md open questions         | 6                                    |
-| In-code TODOs                   | 2 (both stale references — sweep)    |
+**Last refreshed: 2026-05-01.** Counts move with every commit; the
+prior hand-maintained "46 packages / 712 tests" snapshot drifted.
+The numbers below come from a fresh sweep of the live tree.
+
+| Dimension                        | Status                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| Build (`turbo run build`)        | 39/39 ✓                                                                          |
+| Typecheck                        | 56/56 ✓                                                                          |
+| Lint at `--max-warnings=0`       | 56/56 ✓                                                                          |
+| Tests (turbo)                    | 48/48 packages green                                                             |
+| Adapters in `infra/sources.json` | 29 (TRUTH §C and SRD §10.2 aligned per Block-A reconciliation §2.A.9)            |
+| Patterns built                   | 43 (target 43, 1:1 fixture coverage)                                             |
+| Phase-gate lints                 | 9 green + 1 surfacing pre-existing drift (`check-source-count` resolved 19e29ca) |
+| Weaknesses 🟩 closed             | 18 / 27 (no change since prior snapshot)                                         |
+| Weaknesses 🟧 in progress        | 2 (W-10, W-14 — corpus already at 224 rows; W-10 native helper M3-M4)            |
+| Weaknesses 🟦 architect-blocked  | 5                                                                                |
+| Weaknesses ⬛ deferred           | 1 (W-16, M2 exit)                                                                |
+| Decisions PROVISIONAL            | DECISION-012 + DECISION-013 + DECISION-014/14b/15/16 (read-through pending)      |
+| TRUTH.md open questions          | 6                                                                                |
+| In-code TODOs                    | 0 actionable (the two A7 refs are descriptive prose, not stale TODOs)            |
 
 ---
 
 ## TRACK A — Code-side completion (the build agent executes)
 
-### A1. Anti-hallucination corpus expansion (W-14)
+### A1. Anti-hallucination corpus expansion (W-14) — 🟩
 
-Target: 200 rows. Current: 40. Add 160 synthetic adversarial cases covering
-each of the 12 anti-hallucination layers + each of the 43 patterns'
-failure modes.
-
-- File: [packages/llm/**tests**/synthetic-hallucinations.jsonl](packages/llm/__tests__/synthetic-hallucinations.jsonl)
-- Per-pattern entries needed (one TP-trap, one FP-trap per pattern × 43 = 86 rows).
-- Per-layer entries needed (5 each for L1, L2, L3, L4, L6, L7, L11 × 7 = 35 rows).
-- Per-worker entries (worker-extract / counter-evidence / pattern boundary cases × 13 = 39 rows).
-- Re-run [packages/llm/**tests**/hallucinations.test.ts](packages/llm/__tests__/hallucinations.test.ts) — pass-rate must hit ≥ 80%.
+Target: 200 rows. **Live state (2026-05-01):** 224 rows in
+[packages/llm/**tests**/synthetic-hallucinations.jsonl](../../packages/llm/__tests__/synthetic-hallucinations.jsonl) — surpasses target.
+Closed during a prior pass (no Block-B commit needed).
 
 ### A2. SafeLlmRouter per-worker migration
 
-Three workers still call `LlmRouter` directly; the SafeLlmRouter chokepoint
-exists but each worker needs the wrapper applied.
+The doctrine chokepoint must wrap every direct LlmRouter call so the
+12 AI-SAFETY-DOCTRINE-v1 layers apply uniformly.
 
-- A2.1 [apps/worker-extract/](apps/worker-extract/) — wrap every prompt invocation in `SafeLlmRouter.call({findingId, assessmentId, promptName, ...})` so the router records prompt_version, model_version, citations, and runs the multi-pass cluster check.
-- A2.2 [apps/worker-counter-evidence/](apps/worker-counter-evidence/) — same.
-- A2.3 [apps/worker-pattern/](apps/worker-pattern/) — same; add the `task: 'pattern_evaluate'` task class to [packages/llm/src/types.ts](packages/llm/src/types.ts) `TASK_MODEL` / `TASK_TEMPERATURE` if not present.
+- A2.1 [apps/worker-extractor/](../../apps/worker-extractor/) — **🟩 already migrated.**
+  [src/index.ts:288](../../apps/worker-extractor/src/index.ts#L288) instantiates `SafeLlmRouter` and passes a `SafeLlmRouterLike` adapter to the extractor.
+- A2.2 [apps/worker-counter-evidence/](../../apps/worker-counter-evidence/) — **🟩 already migrated.**
+  [src/index.ts:189](../../apps/worker-counter-evidence/src/index.ts#L189) calls `this.safe.call({...})`.
+- A2.3 [apps/worker-pattern/](../../apps/worker-pattern/) — **🟩 N/A (no LLM calls).** The pattern dispatcher is deterministic; there is no Claude call to wrap. The `task: 'pattern_evaluate'` task class would be added if a future LLM-backed pattern lands.
+- A2.4 [apps/worker-tip-triage/](../../apps/worker-tip-triage/) — **drift-corrected scope (Block-B reconciliation, architect signoff 2026-05-01).** Currently calls `LlmRouter.call` directly at [src/index.ts:122](../../apps/worker-tip-triage/src/index.ts#L122).
+- A2.5 [apps/worker-adapter-repair/](../../apps/worker-adapter-repair/) — **drift-corrected scope.** Currently calls `LlmRouter.call` directly at [src/index.ts:121](../../apps/worker-adapter-repair/src/index.ts#L121).
 
-### A3. NO_TESTS packages → real tests
+### A3. NO_TESTS packages → real tests — 🟩
 
-Eleven packages currently pass `vitest run --passWithNoTests` because
-they have no tests. Each gets at least one smoke test asserting the
-public API doesn't crash on a basic input.
+All 11 listed packages now ship at least one test file (verified
+2026-05-01: observability=3, db-neo4j=7, queue=2, dossier=3,
+fabric-bridge=1, worker-document=4, worker-federation-agent=1,
+audit-bridge=1, worker-adapter-repair=1, worker-fabric-bridge=1,
+worker-pattern=1). Closed during a prior pass.
 
-- [ ] @vigil/observability — logger format, metrics labels, trace correlation
-- [ ] @vigil/db-neo4j — graph driver smoke (gated on `INTEGRATION_NEO4J_URL`)
-- [ ] @vigil/queue — envelope round-trip (in-memory mock Redis)
-- [ ] @vigil/dossier — render input → output hash determinism
-- [ ] @vigil/fabric-bridge — chaincode call shape (mocked Fabric SDK)
-- [ ] worker-document — OCR pipeline contract
-- [ ] worker-federation-agent — signed-envelope round-trip
-- [ ] audit-bridge — UDS `/append` endpoint
-- [ ] worker-adapter-repair — selector-derivation prompt shape + shadow-test threshold
-- [ ] worker-fabric-bridge — Postgres → Fabric replication idempotency
-- [ ] worker-pattern — pattern dispatch + LLM evaluation envelope (after A2.3)
+- [x] @vigil/observability
+- [x] @vigil/db-neo4j
+- [x] @vigil/queue
+- [x] @vigil/dossier
+- [x] @vigil/fabric-bridge
+- [x] worker-document
+- [x] worker-federation-agent
+- [x] audit-bridge
+- [x] worker-adapter-repair
+- [x] worker-fabric-bridge
+- [x] worker-pattern
 
-### A4. worker-federation-receiver test failure
+### A4. worker-federation-receiver test failure — 🟩
 
-One test file in worker-federation-receiver fails (1 file failed, 8 passed,
-3 skipped). Investigate, fix or document the gating env.
-
-- File: locate via `pnpm --filter worker-federation-receiver run test 2>&1`
-- Likely env-dep (gRPC server port). Refactor to use a freshly-bound port.
+`pnpm --filter worker-federation-receiver run test` reports
+**40/40 pass, 3 files** (verified 2026-05-01). Closed during a
+prior pass.
 
 ### A5. CAS integration harness in CI
 
@@ -101,10 +104,17 @@ The TAL-PA doctrine + DECISION-012 entry is committed. Promotion needs:
 - A6.4 Rotate `AUDIT_PUBLIC_EXPORT_SALT` documentation (key custody, rotation cadence).
 - A6.5 Update [docs/decisions/log.md](docs/decisions/log.md) to FINAL once architect signs.
 
-### A7. Stale TODOs sweep
+### A7. Stale TODOs sweep — 🟩
 
-- A7.1 [apps/dashboard/src/app/council/proposals/[id]/vote-ceremony.tsx](apps/dashboard/src/app/council/proposals/[id]/vote-ceremony.tsx) — "TODO C5b" was already shipped; remove the stale reference.
-- A7.2 [apps/dashboard/src/app/api/council/vote/challenge/route.ts](apps/dashboard/src/app/api/council/vote/challenge/route.ts) — same.
+Both files re-checked 2026-05-01:
+
+- A7.1 `vote-ceremony.tsx` carries only a descriptive
+  `(challenge from /api/council/vote/challenge — DECISION-008 C5b)`
+  reference, not a stale TODO marker.
+- A7.2 `challenge/route.ts` says `Closes the C5b TODO` past-tense
+  in its doc comment.
+
+Closed during a prior pass.
 
 ### A8. End-to-end fixture script
 
@@ -128,13 +138,12 @@ with a clear error message naming the env var.
 - A9.2 For each: classify (dev-default-acceptable | architect-must-set | runtime-injection-from-vault).
 - A9.3 Tier-1 boot guards (per DECISION-008): refuse to start with PLACEHOLDER for production-critical configs.
 
-### A10. Pattern coverage gate
+### A10. Pattern coverage gate — 🟩
 
-43 patterns × 43 fixture tests = 1:1. Add a CI gate so a new pattern
-without a paired fixture file fails the build.
-
-- File: [scripts/check-pattern-coverage.ts](scripts/check-pattern-coverage.ts) (new)
-- Wire into `.github/workflows/ci.yml` as a blocking step.
+[scripts/check-pattern-coverage.ts](../../scripts/check-pattern-coverage.ts)
+exists and is wired in [phase-gate.yml](../../.github/workflows/phase-gate.yml).
+Verified 2026-05-01: 43 source patterns ↔ 43 paired fixtures, gate
+exits 0. Closed during a prior pass.
 
 ---
 
