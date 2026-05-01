@@ -304,14 +304,15 @@ documenting:
 Architect-action items captured at the end of the runbook for the
 M0c ceremony.
 
-### C3. Tor onion service health monitor
+### C3. Tor onion service health monitor — 🟩
 
-`/tip` is Tor-native (W-09 🟩). Add a sentinel that pings the .onion
-hourly from the Hetzner sentinel monitors and alerts if down for
+Stack:
 
-> 30 min.
-
-- File: [apps/sentinel-monitor/src/checks/tor-tip-onion.ts](apps/sentinel-monitor/src/checks/tor-tip-onion.ts)
+- [scripts/sentinel-tor-check.ts](../../scripts/sentinel-tor-check.ts) — hourly probe via SOCKS5h to the local Tor daemon; emits `vigil_tor_onion_up{target}` to the Prometheus pushgateway. Targets: `tip`, `verify` (via env `TIP_ONION_HOSTNAME` / `VERIFY_ONION_HOSTNAME`).
+- [infra/host-bootstrap/systemd/vigil-sentinel-tor.service](../../infra/host-bootstrap/systemd/vigil-sentinel-tor.service) + [.timer](../../infra/host-bootstrap/systemd/vigil-sentinel-tor.timer) — `OnCalendar=*:23:00` (hourly at :23 to avoid colliding with anchor + replication bursts on the hour).
+- Block-D D.3 added two Prometheus alerts in [infra/docker/prometheus/alerts/vigil.yml](../../infra/docker/prometheus/alerts/vigil.yml):
+  - `TorOnionDown` — `vigil_tor_onion_up == 0` for 30m → warning.
+  - `TorOnionStale` — `absent(vigil_tor_onion_up)` for 2h → warning (catches sentinel-cron-itself-down distinct from onion-down).
 
 ### C4. Grafana dashboards (JSON)
 
