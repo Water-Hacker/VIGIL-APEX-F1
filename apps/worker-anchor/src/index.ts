@@ -1,17 +1,8 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import {
-  HashChain,
-  PolygonAnchor,
-  UnixSocketSignerAdapter,
-} from '@vigil/audit-chain';
-import {
-  PublicAnchorRepo,
-  UserActionEventRepo,
-  getDb,
-  getPool,
-} from '@vigil/db-postgres';
+import { HashChain, PolygonAnchor, UnixSocketSignerAdapter } from '@vigil/audit-chain';
+import { PublicAnchorRepo, UserActionEventRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -45,9 +36,17 @@ async function main(): Promise<void> {
 
   const signer = new UnixSocketSignerAdapter();
   const polygonContract = process.env.POLYGON_ANCHOR_CONTRACT;
-  if (!polygonContract || /^0x0+$/i.test(polygonContract)) {
+  // Block-B A9 — reject anything that isn't the EVM 20-byte address
+  // shape. Previous guard caught only the null-address (`0x0...0`);
+  // the literal `PLACEHOLDER_DEPLOYED_AT_M1` from .env.example slipped
+  // through and produced a cryptic ENS error at first interaction.
+  // Now the regex pins shape: 0x + 40 hex chars, case-insensitive.
+  // Null-address still fails (it's also matched as zero-only after
+  // the shape check).
+  const isEvmAddress = (v: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(v);
+  if (!polygonContract || !isEvmAddress(polygonContract) || /^0x0+$/i.test(polygonContract)) {
     throw new Error(
-      'POLYGON_ANCHOR_CONTRACT is unset or null-address; refusing to start worker-anchor. Set the deployed contract address before boot.',
+      `POLYGON_ANCHOR_CONTRACT is unset, null-address, or not an EVM 20-byte address (got: ${polygonContract ?? '<unset>'}); refusing to start worker-anchor. Set the deployed contract address before boot.`,
     );
   }
   const polygonRpcUrl = process.env.POLYGON_RPC_URL;
@@ -86,10 +85,7 @@ async function main(): Promise<void> {
     () => stopping,
   ).catch((e: unknown) => logger.error({ err: e }, 'high-sig-loop-fatal'));
 
-  logger.info(
-    { intervalMs, highSigIntervalMs, contract: polygonContract },
-    'worker-anchor-ready',
-  );
+  logger.info({ intervalMs, highSigIntervalMs, contract: polygonContract }, 'worker-anchor-ready');
 
   while (!stopping) {
     try {
@@ -162,7 +158,11 @@ async function computeMerkleRootForRange(
     for (let i = 0; i < layer.length; i += 2) {
       const left = layer[i]!;
       const right = i + 1 < layer.length ? layer[i + 1]! : left;
-      next.push(createHash('sha256').update(Buffer.concat([left, right])).digest());
+      next.push(
+        createHash('sha256')
+          .update(Buffer.concat([left, right]))
+          .digest(),
+      );
     }
     layer = next;
   }

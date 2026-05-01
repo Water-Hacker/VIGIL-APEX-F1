@@ -12,110 +12,137 @@
 
 ## Snapshot of state
 
-| Dimension                       | Status                               |
-| ------------------------------- | ------------------------------------ |
-| Build (`turbo run build`)       | 38/38 ✓                              |
-| Typecheck                       | 55/55 ✓                              |
-| Lint at `--max-warnings=0`      | 55/55 ✓                              |
-| Tests                           | 46/46 packages green (712 tests)     |
-| Adapters built                  | 30 (target ≥ 26 / TRUTH §C says 27)  |
-| Patterns built                  | 43 (target 43, 1:1 fixture coverage) |
-| Weaknesses 🟩 closed            | 18 / 27                              |
-| Weaknesses 🟧 in progress       | 2 (W-10, W-14)                       |
-| Weaknesses 🟦 architect-blocked | 5                                    |
-| Weaknesses ⬛ deferred          | 1 (W-16, M2 exit)                    |
-| Decisions PROVISIONAL           | 1 (DECISION-012 / TAL-PA)            |
-| TRUTH.md open questions         | 6                                    |
-| In-code TODOs                   | 2 (both stale references — sweep)    |
+**Last refreshed: 2026-05-01.** Counts move with every commit; the
+prior hand-maintained "46 packages / 712 tests" snapshot drifted.
+The numbers below come from a fresh sweep of the live tree.
+
+| Dimension                        | Status                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| Build (`turbo run build`)        | 39/39 ✓                                                                          |
+| Typecheck                        | 56/56 ✓                                                                          |
+| Lint at `--max-warnings=0`       | 56/56 ✓                                                                          |
+| Tests (turbo)                    | 48/48 packages green                                                             |
+| Adapters in `infra/sources.json` | 29 (TRUTH §C and SRD §10.2 aligned per Block-A reconciliation §2.A.9)            |
+| Patterns built                   | 43 (target 43, 1:1 fixture coverage)                                             |
+| Phase-gate lints                 | 9 green + 1 surfacing pre-existing drift (`check-source-count` resolved 19e29ca) |
+| Weaknesses 🟩 closed             | 18 / 27 (no change since prior snapshot)                                         |
+| Weaknesses 🟧 in progress        | 2 (W-10, W-14 — corpus already at 224 rows; W-10 native helper M3-M4)            |
+| Weaknesses 🟦 architect-blocked  | 5                                                                                |
+| Weaknesses ⬛ deferred           | 1 (W-16, M2 exit)                                                                |
+| Decisions PROVISIONAL            | DECISION-012 + DECISION-013 + DECISION-014/14b/15/16 (read-through pending)      |
+| TRUTH.md open questions          | 6                                                                                |
+| In-code TODOs                    | 0 actionable (the two A7 refs are descriptive prose, not stale TODOs)            |
 
 ---
 
 ## TRACK A — Code-side completion (the build agent executes)
 
-### A1. Anti-hallucination corpus expansion (W-14)
+### A1. Anti-hallucination corpus expansion (W-14) — 🟩
 
-Target: 200 rows. Current: 40. Add 160 synthetic adversarial cases covering
-each of the 12 anti-hallucination layers + each of the 43 patterns'
-failure modes.
+Target: 200 rows. **Live state (2026-05-01):** 224 rows in
+[packages/llm/**tests**/synthetic-hallucinations.jsonl](../../packages/llm/__tests__/synthetic-hallucinations.jsonl) — surpasses target.
+Closed during a prior pass (no Block-B commit needed).
 
-- File: [packages/llm/**tests**/synthetic-hallucinations.jsonl](packages/llm/__tests__/synthetic-hallucinations.jsonl)
-- Per-pattern entries needed (one TP-trap, one FP-trap per pattern × 43 = 86 rows).
-- Per-layer entries needed (5 each for L1, L2, L3, L4, L6, L7, L11 × 7 = 35 rows).
-- Per-worker entries (worker-extract / counter-evidence / pattern boundary cases × 13 = 39 rows).
-- Re-run [packages/llm/**tests**/hallucinations.test.ts](packages/llm/__tests__/hallucinations.test.ts) — pass-rate must hit ≥ 80%.
+### A2. SafeLlmRouter per-worker migration — 🟩
 
-### A2. SafeLlmRouter per-worker migration
+All five workers covered. The doctrine chokepoint wraps every
+direct LlmRouter call so the 12 AI-SAFETY-DOCTRINE-v1 layers apply
+uniformly.
 
-Three workers still call `LlmRouter` directly; the SafeLlmRouter chokepoint
-exists but each worker needs the wrapper applied.
+- A2.1 🟩 [apps/worker-extractor/](../../apps/worker-extractor/) — already migrated (SafeLlmRouterLike adapter at `src/llm-extractor.ts`).
+- A2.2 🟩 [apps/worker-counter-evidence/](../../apps/worker-counter-evidence/) — already migrated (`this.safe.call(...)` at `src/index.ts:189`).
+- A2.3 🟩 [apps/worker-pattern/](../../apps/worker-pattern/) — N/A (deterministic dispatcher, no Claude calls).
+- A2.4 🟩 [apps/worker-tip-triage/](../../apps/worker-tip-triage/) — Block-B B.4 commit: registered `tip-triage.paraphrase` prompt; `safe.call` with PII-stripping `task` field; closed-context source for tip body; CallRecordRepo sink.
+- A2.5 🟩 [apps/worker-adapter-repair/](../../apps/worker-adapter-repair/) — Block-B B.4 commit: registered `adapter-repair.selector-rederive` prompt; `safe.call` with conservative-selector `task`; closed-context source for old/new HTML; CallRecordRepo sink.
 
-- A2.1 [apps/worker-extract/](apps/worker-extract/) — wrap every prompt invocation in `SafeLlmRouter.call({findingId, assessmentId, promptName, ...})` so the router records prompt_version, model_version, citations, and runs the multi-pass cluster check.
-- A2.2 [apps/worker-counter-evidence/](apps/worker-counter-evidence/) — same.
-- A2.3 [apps/worker-pattern/](apps/worker-pattern/) — same; add the `task: 'pattern_evaluate'` task class to [packages/llm/src/types.ts](packages/llm/src/types.ts) `TASK_MODEL` / `TASK_TEMPERATURE` if not present.
+Doctrine layer mapping (both new migrations):
 
-### A3. NO_TESTS packages → real tests
+| Layer                              | Pre-migration | Post-migration                 |
+| ---------------------------------- | ------------- | ------------------------------ |
+| L1 hallucination (citations)       | N/A           | N/A                            |
+| L4 prompt injection (system rules) | implicit      | uniform                        |
+| L4 schema validation               | preserved     | preserved                      |
+| L8 anchoring                       | N/A           | N/A                            |
+| L9 prompt-version pin              | absent        | NEW                            |
+| L11 daily canary                   | absent        | NEW                            |
+| L11 call-record audit              | absent        | NEW                            |
+| L13 jailbreak                      | T=0.0/0.2     | T=0.1 default                  |
+| L14 model update                   | unpinned      | model_id pinned in call_record |
 
-Eleven packages currently pass `vitest run --passWithNoTests` because
-they have no tests. Each gets at least one smoke test asserting the
-public API doesn't crash on a basic input.
+### A3. NO_TESTS packages → real tests — 🟩
 
-- [ ] @vigil/observability — logger format, metrics labels, trace correlation
-- [ ] @vigil/db-neo4j — graph driver smoke (gated on `INTEGRATION_NEO4J_URL`)
-- [ ] @vigil/queue — envelope round-trip (in-memory mock Redis)
-- [ ] @vigil/dossier — render input → output hash determinism
-- [ ] @vigil/fabric-bridge — chaincode call shape (mocked Fabric SDK)
-- [ ] worker-document — OCR pipeline contract
-- [ ] worker-federation-agent — signed-envelope round-trip
-- [ ] audit-bridge — UDS `/append` endpoint
-- [ ] worker-adapter-repair — selector-derivation prompt shape + shadow-test threshold
-- [ ] worker-fabric-bridge — Postgres → Fabric replication idempotency
-- [ ] worker-pattern — pattern dispatch + LLM evaluation envelope (after A2.3)
+All 11 listed packages now ship at least one test file (verified
+2026-05-01: observability=3, db-neo4j=7, queue=2, dossier=3,
+fabric-bridge=1, worker-document=4, worker-federation-agent=1,
+audit-bridge=1, worker-adapter-repair=1, worker-fabric-bridge=1,
+worker-pattern=1). Closed during a prior pass.
 
-### A4. worker-federation-receiver test failure
+- [x] @vigil/observability
+- [x] @vigil/db-neo4j
+- [x] @vigil/queue
+- [x] @vigil/dossier
+- [x] @vigil/fabric-bridge
+- [x] worker-document
+- [x] worker-federation-agent
+- [x] audit-bridge
+- [x] worker-adapter-repair
+- [x] worker-fabric-bridge
+- [x] worker-pattern
 
-One test file in worker-federation-receiver fails (1 file failed, 8 passed,
-3 skipped). Investigate, fix or document the gating env.
+### A4. worker-federation-receiver test failure — 🟩
 
-- File: locate via `pnpm --filter worker-federation-receiver run test 2>&1`
-- Likely env-dep (gRPC server port). Refactor to use a freshly-bound port.
+`pnpm --filter worker-federation-receiver run test` reports
+**40/40 pass, 3 files** (verified 2026-05-01). Closed during a
+prior pass.
 
-### A5. CAS integration harness in CI
+### A5. CAS integration harness in CI — 🟩
 
-The `audit-log-cas.test.ts` is gated on `INTEGRATION_DB_URL`; today it skips
-in CI. Wire a docker-compose service in `.github/workflows/ci.yml` that
-spins up Postgres, applies migrations, and exports the env var so the
-test runs.
+- A5.1 🟩 — postgres:16.2-alpine service in `.github/workflows/ci.yml:84-96`.
+- A5.2 🟩 — `pnpm --filter @vigil/db-postgres run migrate` step at line 116-119.
+- A5.3 🟩 — `INTEGRATION_DB_URL` exported to the test job at line 129+134.
+- A5.4 🟩 — Block-B regression pin (commit `<filled at commit time>`):
+  new CI step "audit-log CAS race regression must execute (not skip)"
+  re-runs the CAS test with `--reporter=verbose` and greps for the
+  test name; fails the job if the test doesn't appear in the output
+  OR appears with a skip marker.
 
-- A5.1 GH Actions service for postgres:16
-- A5.2 Run drizzle migrations as a CI step before vitest
-- A5.3 Export `INTEGRATION_DB_URL=postgres://...` to the test job
-- A5.4 Verify `audit-log-cas.test.ts` runs (no longer skipped)
+### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; architect-action remaining
 
-### A6. DECISION-012 PROVISIONAL → FINAL
+Block-B B.6 ships A6.1 + A6.3 + A6.4 in
+[docs/decisions/decision-012-promotion-prep.md](../decisions/decision-012-promotion-prep.md).
 
-The TAL-PA doctrine + DECISION-012 entry is committed. Promotion needs:
+- A6.1 🟩 Cross-reference audit: 29 doctrine paths verified resolved 2026-05-01.
+- A6.2 🟩 Architect read-through checklist already exists at [docs/decisions/decision-012-readthrough-checklist.md](../decisions/decision-012-readthrough-checklist.md) (architect-action when ready).
+- A6.3 🟩 Schema side-by-side: `audit.user_action_event` + `audit.user_action_chain` vs doctrine §3 / SRD §17 — no discrepancies.
+- A6.4 🟩 Salt rotation operations: format, custody, cadence, runbook, DR procedure, failure modes.
+- A6.5 🟦 **Architect action.** Promote PROVISIONAL → FINAL in [docs/decisions/log.md](../decisions/log.md). Per architect operating posture, the agent does NOT perform this autonomously.
 
-- A6.1 Cross-reference audit: every file the doctrine mentions exists at the cited path.
-- A6.2 Architect read-through checklist (`docs/decisions/decision-012-readthrough-checklist.md`).
-- A6.3 Side-by-side: current `audit.user_action_event` schema vs SRD §17 expectations.
-- A6.4 Rotate `AUDIT_PUBLIC_EXPORT_SALT` documentation (key custody, rotation cadence).
-- A6.5 Update [docs/decisions/log.md](docs/decisions/log.md) to FINAL once architect signs.
+### A7. Stale TODOs sweep — 🟩
 
-### A7. Stale TODOs sweep
+Both files re-checked 2026-05-01:
 
-- A7.1 [apps/dashboard/src/app/council/proposals/[id]/vote-ceremony.tsx](apps/dashboard/src/app/council/proposals/[id]/vote-ceremony.tsx) — "TODO C5b" was already shipped; remove the stale reference.
-- A7.2 [apps/dashboard/src/app/api/council/vote/challenge/route.ts](apps/dashboard/src/app/api/council/vote/challenge/route.ts) — same.
+- A7.1 `vote-ceremony.tsx` carries only a descriptive
+  `(challenge from /api/council/vote/challenge — DECISION-008 C5b)`
+  reference, not a stale TODO marker.
+- A7.2 `challenge/route.ts` says `Closes the C5b TODO` past-tense
+  in its doc comment.
 
-### A8. End-to-end fixture script
+Closed during a prior pass.
 
-A single Bash/Node runner that boots docker-compose, seeds events, walks
-through finding → posterior → council vote → escalation → render → SFTP
-delivery → public verify, and asserts at each step. Replaces today's
-"manual fixture run" in OPERATIONS.
+### A8. End-to-end fixture script — 🟩 (with deferred SRD §30 follow-up)
 
-- File: [scripts/e2e-fixture.sh](scripts/e2e-fixture.sh) (new)
-- Companion: [scripts/seed-fixture-events.ts](scripts/seed-fixture-events.ts) (new)
-- Coverage: every Phase 1 critical path in SRD §30 acceptance tests.
+Both files exist and the audit-coverage doc is shipped:
+
+- [scripts/e2e-fixture.sh](../../scripts/e2e-fixture.sh) — 134-line Bash runner; seed → assert dashboard → assert chain → assert pattern → teardown.
+- [scripts/seed-fixture-events.ts](../../scripts/seed-fixture-events.ts) — 108-line deterministic seed (1 investment_project + 1 treasury_disbursement + 1 finding stub).
+- [docs/work-program/E2E-FIXTURE-COVERAGE.md](./E2E-FIXTURE-COVERAGE.md) — Block-B audit doc (B.5 commit). Maps every §30 entry to coverage status.
+
+**Key audit finding.** SRD §30.1–§30.7 carry milestone titles but
+NO enumerated tests; only §30.8 has named tests (CT-01..CT-06).
+The fixture covers what it can within a 5-second synthetic run;
+gap-fills against an authoritative SRD §30 list need the
+architect to fill in §30.1–§30.7 first. Audit found 0 fixture
+commits warranted within the architect's 3-commit cap.
 
 ### A9. Production-placeholder sweep
 
@@ -128,13 +155,12 @@ with a clear error message naming the env var.
 - A9.2 For each: classify (dev-default-acceptable | architect-must-set | runtime-injection-from-vault).
 - A9.3 Tier-1 boot guards (per DECISION-008): refuse to start with PLACEHOLDER for production-critical configs.
 
-### A10. Pattern coverage gate
+### A10. Pattern coverage gate — 🟩
 
-43 patterns × 43 fixture tests = 1:1. Add a CI gate so a new pattern
-without a paired fixture file fails the build.
-
-- File: [scripts/check-pattern-coverage.ts](scripts/check-pattern-coverage.ts) (new)
-- Wire into `.github/workflows/ci.yml` as a blocking step.
+[scripts/check-pattern-coverage.ts](../../scripts/check-pattern-coverage.ts)
+exists and is wired in [phase-gate.yml](../../.github/workflows/phase-gate.yml).
+Verified 2026-05-01: 43 source patterns ↔ 43 paired fixtures, gate
+exits 0. Closed during a prior pass.
 
 ---
 
