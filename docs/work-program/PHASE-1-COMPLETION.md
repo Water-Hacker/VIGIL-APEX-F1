@@ -391,13 +391,49 @@ has `system.health_degraded`. Block-D commits the live name; if the
 architect prefers the spec name, the rename is a one-enum-add + one
 script-change in a follow-up.
 
-### C7. Phase-gate CI workflow validation
+### C7. Phase-gate CI workflow validation — 🟩
 
-`.github/workflows/phase-gate.yml` exists per OPERATIONS §8. Verify it
-reads the current phase from the decision log and enforces.
+`.github/workflows/phase-gate.yml` exists per OPERATIONS §8 — 10 lints
+gating every PR (current-phase reader; DRY-RUN-DECISION GO check;
+check-decisions; audit-decision-log; check-pattern-coverage;
+check-weaknesses-index; check-migration-pairs;
+check-test-coverage-floor; check-source-count; check-llm-pricing;
+generate-pattern-catalogue --check; check-decision-cross-links).
 
-- C7.1 Read [.github/workflows/phase-gate.yml](.github/workflows/phase-gate.yml).
-- C7.2 Add a test that mutates a Phase-2 file in a Phase-1 PR and asserts the workflow rejects.
+Status, Block-D D.7 / 2026-05-01:
+
+- C7.1 🟩 Phase-gate workflow walked end-to-end; 10 lints documented
+  in the workflow comments are the live set. The workflow reads
+  `**Current phase: Phase-N**` from `docs/decisions/log.md` and gates
+  via `DRY-RUN-DECISION.md`. (No code change needed.)
+- C7.2 🟩 Architect-spec'd option (b) on-the-fly mutation harness:
+  [scripts/synthetic-failure.ts](../../scripts/synthetic-failure.ts) +
+  [.github/workflows/synthetic-failure.yml](../../.github/workflows/synthetic-failure.yml).
+  Five mutually-different mutation surfaces (markdown append, single-
+  line text patch, JSON edit, src-file add, src-file add) drive the
+  five lints chosen for cross-coverage of mutation kind:
+  1. `check-decision-cross-links` — DECISION-099 with no AUDIT/W/sha
+  2. `check-source-count` — TRUTH.md "29 sources" → "30 sources"
+  3. `check-llm-pricing` — pricing.json models map emptied
+  4. `check-pattern-coverage` — `p-a-999-synthetic.ts` with no fixture
+  5. `check-migration-pairs` — `9999_synthetic.sql` with no `_down.sql`
+
+  Each case mutates → spawns the lint → restores in a try/finally so
+  the working tree is clean even on harness failure. Verified locally
+  2026-05-01: 5/5 REJECTED with exit 1, working tree restored,
+  baseline lints still pass. The harness exits 1 on any ESCAPED case
+  (lint passed on broken input) so the workflow fails loud if a gate
+  silently breaks.
+
+  Workflow triggers: PR-on-touch (the lint scripts, the harness, or
+  any of the input surfaces); weekly cron (Monday 04:00 UTC); manual
+  `workflow_dispatch`. Per-gate REJECTED log line per architect spec:
+  `[<gate-name>] ✓ REJECTED (exit 1)`.
+
+  Architect-action item recorded in the harness header: when a future
+  phase-gate lint joins the batch, also add a synthetic-failure case.
+  The 1:1 invariant (every lint has a synthetic-failure case) is the
+  unit-test of the gate itself.
 
 ### C8. PR template + commitlint config
 

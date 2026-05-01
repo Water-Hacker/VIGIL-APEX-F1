@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: synthetic-failure
+
+# Block-D D.7 / C7 — meta-test for the phase-gate lints.
+#
+# `phase-gate.yml` runs 10 lints on every PR against main. A lint that
+# silently passes on broken input gives the operator false confidence
+# that a class of bug cannot ship. This workflow proves the lints
+# actually reject broken input by mutating the tree on-the-fly,
+# running the lint, and asserting non-zero exit, then restoring.
+#
+# Per architect signoff for Block-D D.7 (option (b) on-the-fly mutation
+# + per-gate REJECTED log): 5 violations, run sequentially, each
+# restores cleanly, REJECTED log per gate, ESCAPED any-one fails the
+# workflow.
+#
+# Triggers:
+#   - on every PR that touches a phase-gate lint OR the harness itself
+#     (so the meta-test runs whenever a lint changes shape);
+#   - on a weekly cron (Monday 04:00 UTC) so existing lints are
+#     re-validated against incidental drift in the input surfaces;
+#   - on manual workflow_dispatch for ad-hoc runs.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/synthetic-failure.yml'
+      - 'scripts/check-decision-cross-links.ts'
+      - 'scripts/check-source-count.ts'
+      - 'scripts/check-llm-pricing.ts'
+      - 'scripts/check-pattern-coverage.ts'
+      - 'scripts/check-migration-pairs.ts'
+      - 'scripts/synthetic-failure.ts'
+      - 'TRUTH.md'
+      - 'docs/source/SRD-v3.md'
+      - 'infra/sources.json'
+      - 'infra/llm/pricing.json'
+      - 'packages/patterns/src/**'
+      - 'packages/patterns/test/**'
+      - 'packages/db-postgres/drizzle/**'
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-failure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run synthetic-failure harness (5 cases × phase-gate lints)
+        run: pnpm exec tsx scripts/synthetic-failure.ts
