@@ -74,3 +74,24 @@ describe('normalizeName', () => {
     expect(normalizeName('S.A.')).toBe('sa');
   });
 });
+
+describe('normalizeName cross-language (Block-A reconciliation §5.f)', () => {
+  it('FR Coopérative and EN Cooperative collapse to the same key', () => {
+    // Positive — two Latin-alphabet languages spelling the same
+    // word (FR with é, EN without) MUST normalise identically so
+    // bilingual adapter outputs do not split a single canonical.
+    expect(normalizeName('Coopérative')).toBe('cooperative');
+    expect(normalizeName('Cooperative')).toBe('cooperative');
+    expect(normalizeName('Coopérative')).toBe(normalizeName('Cooperative'));
+  });
+
+  it('FR Société and ES Sociedade do NOT collapse to the same key', () => {
+    // Negative — we do NOT do over-aggressive cross-Romance folding.
+    // "société" (FR) and "sociedade" (ES) are different words; they
+    // must NOT normalise to the same key. Pin that the rule-pass
+    // does not become a translation engine.
+    expect(normalizeName('Société')).toBe('societe');
+    expect(normalizeName('Sociedade')).toBe('sociedade');
+    expect(normalizeName('Société')).not.toBe(normalizeName('Sociedade'));
+  });
+});

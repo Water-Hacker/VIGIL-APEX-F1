@@ -322,4 +322,48 @@ export class EntityRepo {
       return canonical;
     });
   }
+
+  /**
+   * Insert a row into `entity.er_review_queue` for a normalised-name
+   * collision the rule-pass refused to auto-merge.
+   *
+   * Block-A reconciliation §5.c — name-only matches are NOT a strong
+   * enough signal to merge two canonicals. "Société Générale du
+   * Cameroun SA" and "Société Générale du Cameroun SARL" share a
+   * normalised name (after the SARL/SA single-letter collapse) but
+   * are distinct legal persons. Auto-merging on name alone is a
+   * silent data-corruption mode.
+   *
+   * The new alias is held in the rationale JSON; the candidate_b
+   * UUID is a placeholder representing "would-be canonical for this
+   * alias" — there is no foreign key on the column, so the
+   * placeholder is safe. When an operator decides via the Phase-2
+   * review-queue surface, they either MERGE (attaching the alias to
+   * candidate_a) or KEEP_SEPARATE (creating a new canonical from the
+   * placeholder UUID).
+   */
+  async addReviewQueueRow(input: {
+    candidateExistingId: string;
+    candidatePlaceholderId: string;
+    similarity: number;
+    proposedAction: 'merge' | 'split' | 'keep_separate';
+    rationale: {
+      alias: string;
+      source_event_id: string;
+      reason: string;
+    };
+  }): Promise<{ inserted: boolean }> {
+    const r = await this.db
+      .insert(entitySchema.erReviewQueue)
+      .values({
+        id: crypto.randomUUID(),
+        candidate_canonical_a: input.candidateExistingId,
+        candidate_canonical_b: input.candidatePlaceholderId,
+        similarity: input.similarity,
+        proposed_action: input.proposedAction,
+        rationale: JSON.stringify(input.rationale),
+      })
+      .returning({ id: entitySchema.erReviewQueue.id });
+    return { inserted: r.length > 0 };
+  }
 }

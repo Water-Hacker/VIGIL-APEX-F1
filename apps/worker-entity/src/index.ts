@@ -86,7 +86,12 @@ const zErResp = z.object({
 interface RuleMatch {
   readonly alias: string;
   readonly canonicalId: string;
-  readonly via: 'rccm' | 'niu' | 'normalised_name';
+  readonly via: 'rccm' | 'niu' | 'normalised_name_corroborated';
+}
+
+interface NameOnlyCandidate {
+  readonly alias: string;
+  readonly matchedCanonicalId: string;
 }
 
 class EntityWorker extends WorkerBase<Payload> {
@@ -108,20 +113,40 @@ class EntityWorker extends WorkerBase<Payload> {
   }
 
   /**
-   * Rule-pass — deterministic deduplication. For each alias attempt
-   * RCCM / NIU / normalised-name lookup; on any hit, return a
-   * `RuleMatch`. Aliases that do not hit are returned in
-   * `unresolved` for the LLM pass to handle.
+   * Rule-pass — deterministic deduplication. Three buckets:
    *
-   * Pure I/O (Postgres reads only); does NOT mutate state. The
-   * caller is responsible for writing aliases attached to
-   * rule-resolved canonicals.
+   *   - `resolved`           — RCCM or NIU exact match. Auto-merge:
+   *                            attach the alias to the existing
+   *                            canonical. The unique-id corroborates
+   *                            the resolution; auto-merge is safe.
+   *   - `nameOnlyCandidates` — normalised-name exact match WITHOUT
+   *                            an RCCM/NIU corroborator in the same
+   *                            alias batch. Held aside for the
+   *                            corroboration check below; if no
+   *                            RCCM/NIU points to the same canonical,
+   *                            the alias goes to `entity.er_review_queue`
+   *                            (NOT auto-merged — Block-A reconciliation
+   *                            §5.c). Two real distinct companies can
+   *                            share a display name; merging on name
+   *                            alone is silent corruption.
+   *   - `unresolved`         — no rule-pass hit. Sent to the LLM pass.
+   *
+   * The corroboration step runs AFTER all aliases are tagged so the
+   * "in the same batch" semantics are preserved across the whole
+   * envelope. After corroboration, name-only candidates either
+   * promote to `resolved` (with via='normalised_name_corroborated')
+   * or fall through to the review queue.
    */
-  protected async rulePass(
-    aliases: ReadonlyArray<string>,
-  ): Promise<{ resolved: RuleMatch[]; unresolved: string[] }> {
+  protected async rulePass(aliases: ReadonlyArray<string>): Promise<{
+    resolved: RuleMatch[];
+    nameOnlyCandidates: NameOnlyCandidate[];
+    unresolved: string[];
+  }> {
     const resolved: RuleMatch[] = [];
+    const nameOnlyCandidates: NameOnlyCandidate[] = [];
     const unresolved: string[] = [];
+
+    // First pass: classify each alias.
     for (const raw of aliases) {
       const alias = raw.trim();
       if (alias === '') continue;
@@ -148,38 +173,86 @@ class EntityWorker extends WorkerBase<Payload> {
         }
       }
 
-      // (c) Normalised name — case-folded + accent-folded equality.
+      // (c) Normalised name — held as a candidate, NOT auto-merged.
       const normalised = normalizeName(alias);
       if (normalised !== '') {
         const hit = await this.entityRepo.findCanonicalByNormalizedName(alias);
         if (hit) {
-          resolved.push({ alias, canonicalId: hit.id, via: 'normalised_name' });
+          nameOnlyCandidates.push({ alias, matchedCanonicalId: hit.id });
           continue;
         }
       }
 
       unresolved.push(alias);
     }
-    return { resolved, unresolved };
+
+    // Second pass: corroborate name-only candidates against the
+    // RCCM/NIU resolutions we just collected. If any RCCM/NIU match
+    // in this batch points to the same canonical, the name-only
+    // alias is corroborated and promotes to `resolved`. Otherwise
+    // it stays in `nameOnlyCandidates` for the caller to route to
+    // the review queue.
+    const corroborated: RuleMatch[] = [];
+    const stillUncorroborated: NameOnlyCandidate[] = [];
+    const idsWithStrongMatch = new Set(resolved.map((r) => r.canonicalId));
+    for (const c of nameOnlyCandidates) {
+      if (idsWithStrongMatch.has(c.matchedCanonicalId)) {
+        corroborated.push({
+          alias: c.alias,
+          canonicalId: c.matchedCanonicalId,
+          via: 'normalised_name_corroborated',
+        });
+      } else {
+        stillUncorroborated.push(c);
+      }
+    }
+    return {
+      resolved: [...resolved, ...corroborated],
+      nameOnlyCandidates: stillUncorroborated,
+      unresolved,
+    };
   }
 
   protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
     const aliases = env.payload.raw_aliases ?? [];
     if (aliases.length === 0) return { kind: 'ack' };
 
+    // Block-A reconciliation §5.d — `source_id` cannot fall back to
+    // a sentinel string. The unique constraint on `entity.alias`
+    // includes `source_id`; collapsing every missing source to
+    // `'unknown'` deduplicates aliases that should remain distinct.
+    // We require the field on the envelope and dead-letter when
+    // missing. The operator alert is the existing dead-letter path.
+    const sourceId = env.payload.source_event_id;
+    if (sourceId === undefined || sourceId === '') {
+      logger.error(
+        { document_cid: env.payload.document_cid, alias_count: aliases.length },
+        'er-rejected-missing-source-event-id',
+      );
+      return { kind: 'dead-letter', reason: 'missing-source-event-id' };
+    }
+
     try {
       // ─── Step 1: rule-pass ───────────────────────────────────
-      const { resolved, unresolved } = await this.rulePass(aliases);
+      const { resolved, nameOnlyCandidates, unresolved } = await this.rulePass(aliases);
       logger.info(
-        { resolved: resolved.length, unresolved: unresolved.length, total: aliases.length },
+        {
+          resolved: resolved.length,
+          name_only_held: nameOnlyCandidates.length,
+          unresolved: unresolved.length,
+          total: aliases.length,
+        },
         'rule-pass-complete',
       );
 
+      const now = new Date();
+
       // For each rule-pass match, attach the alias to the existing
       // canonical (Postgres only — no Neo4j mirror needed because
-      // the canonical already exists in Neo4j).
-      const sourceId = env.payload.source_event_id ?? 'unknown';
-      const now = new Date();
+      // the canonical already exists in Neo4j; the gap with
+      // previously-failed Neo4j mirrors is the subject of Block-A
+      // reconciliation §5.b, addressed when the architect signs the
+      // schema-change plan).
       for (const m of resolved) {
         await this.entityRepo.addAlias({
           id: Ids.newEntityId() as string,
@@ -189,6 +262,36 @@ class EntityWorker extends WorkerBase<Payload> {
           language: detectLanguage(m.alias),
           first_seen: now,
         });
+      }
+
+      // For each name-only candidate that did NOT corroborate via
+      // RCCM/NIU in this batch, write to entity.er_review_queue.
+      // Block-A reconciliation §5.c — the alias is NOT attached to
+      // any canonical in entity.alias; the operator's review-queue
+      // decision is what triggers a subsequent attach (or refuse-to-
+      // merge). Until a human decides, the alias is held.
+      for (const c of nameOnlyCandidates) {
+        const placeholderId = Ids.newEntityId() as string;
+        await this.entityRepo.addReviewQueueRow({
+          candidateExistingId: c.matchedCanonicalId,
+          candidatePlaceholderId: placeholderId,
+          similarity: 1.0,
+          proposedAction: 'merge',
+          rationale: {
+            alias: c.alias,
+            source_event_id: sourceId,
+            reason:
+              'normalised-name exact match without RCCM/NIU corroboration; ambiguity requires human review per Block-A reconciliation §5.c',
+          },
+        });
+        logger.warn(
+          {
+            existing_canonical_id: c.matchedCanonicalId,
+            alias: c.alias,
+            source_event_id: sourceId,
+          },
+          'name-only-match-routed-to-review-queue',
+        );
       }
 
       // ─── Step 2: LLM-pass (unresolved only) ──────────────────
