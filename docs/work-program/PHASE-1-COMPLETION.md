@@ -82,17 +82,16 @@ worker-pattern=1). Closed during a prior pass.
 **40/40 pass, 3 files** (verified 2026-05-01). Closed during a
 prior pass.
 
-### A5. CAS integration harness in CI
+### A5. CAS integration harness in CI — 🟩
 
-The `audit-log-cas.test.ts` is gated on `INTEGRATION_DB_URL`; today it skips
-in CI. Wire a docker-compose service in `.github/workflows/ci.yml` that
-spins up Postgres, applies migrations, and exports the env var so the
-test runs.
-
-- A5.1 GH Actions service for postgres:16
-- A5.2 Run drizzle migrations as a CI step before vitest
-- A5.3 Export `INTEGRATION_DB_URL=postgres://...` to the test job
-- A5.4 Verify `audit-log-cas.test.ts` runs (no longer skipped)
+- A5.1 🟩 — postgres:16.2-alpine service in `.github/workflows/ci.yml:84-96`.
+- A5.2 🟩 — `pnpm --filter @vigil/db-postgres run migrate` step at line 116-119.
+- A5.3 🟩 — `INTEGRATION_DB_URL` exported to the test job at line 129+134.
+- A5.4 🟩 — Block-B regression pin (commit `<filled at commit time>`):
+  new CI step "audit-log CAS race regression must execute (not skip)"
+  re-runs the CAS test with `--reporter=verbose` and greps for the
+  test name; fails the job if the test doesn't appear in the output
+  OR appears with a skip marker.
 
 ### A6. DECISION-012 PROVISIONAL → FINAL
 

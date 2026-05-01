@@ -133,6 +133,33 @@ jobs:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
           INTEGRATION_DB_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
           REDIS_URL: redis://localhost:6379
+      # Block-B A5.4 — assert the audit-log CAS race test actually ran
+      # (not silently skipped). The test is gated on INTEGRATION_DB_URL;
+      # if a future change unsets that env or breaks the postgres service,
+      # vitest skips the suite and the chain-integrity guarantee
+      # disappears from CI without a red signal. This step re-runs the
+      # CAS test with --reporter=verbose and greps for "rejects a stale
+      # prior_event_id" — the test's own name. grep -q exits non-zero if
+      # not found, failing the job.
+      - name: audit-log CAS race regression must execute (not skip)
+        run: |
+          pnpm --filter @vigil/db-postgres exec vitest run audit-log-cas \
+            --reporter=verbose 2>&1 | tee /tmp/cas-test.log
+          grep -q "rejects a stale prior_event_id" /tmp/cas-test.log || {
+            echo "FATAL: audit-log CAS test did not execute. Check INTEGRATION_DB_URL + postgres service health.";
+            exit 1;
+          }
+          # Also assert it didn't skip (the check above passes on
+          # describe.skipIf-skip output too, since vitest still prints
+          # the test name with a SKIP marker). Reject any "skipped"
+          # marker on the CAS suite line.
+          if grep -E "audit-log per-actor CAS chain.*\(skipped\)|↓.*audit-log per-actor CAS chain" /tmp/cas-test.log; then
+            echo "FATAL: audit-log CAS test was SKIPPED — INTEGRATION_DB_URL not exported to the test job.";
+            exit 1;
+          fi
+        env:
+          POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
+          INTEGRATION_DB_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
       # Phase H5 — pattern coverage hard gate. Fails the job if the
       # @vigil/patterns suite drops under 80% lines/functions/statements
       # or 75% branches. The vitest config exits non-zero on threshold
