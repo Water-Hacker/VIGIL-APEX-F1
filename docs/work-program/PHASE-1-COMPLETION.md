@@ -128,16 +128,20 @@ Both files re-checked 2026-05-01:
 
 Closed during a prior pass.
 
-### A8. End-to-end fixture script
+### A8. End-to-end fixture script — 🟩 (with deferred SRD §30 follow-up)
 
-A single Bash/Node runner that boots docker-compose, seeds events, walks
-through finding → posterior → council vote → escalation → render → SFTP
-delivery → public verify, and asserts at each step. Replaces today's
-"manual fixture run" in OPERATIONS.
+Both files exist and the audit-coverage doc is shipped:
 
-- File: [scripts/e2e-fixture.sh](scripts/e2e-fixture.sh) (new)
-- Companion: [scripts/seed-fixture-events.ts](scripts/seed-fixture-events.ts) (new)
-- Coverage: every Phase 1 critical path in SRD §30 acceptance tests.
+- [scripts/e2e-fixture.sh](../../scripts/e2e-fixture.sh) — 134-line Bash runner; seed → assert dashboard → assert chain → assert pattern → teardown.
+- [scripts/seed-fixture-events.ts](../../scripts/seed-fixture-events.ts) — 108-line deterministic seed (1 investment_project + 1 treasury_disbursement + 1 finding stub).
+- [docs/work-program/E2E-FIXTURE-COVERAGE.md](./E2E-FIXTURE-COVERAGE.md) — Block-B audit doc (B.5 commit). Maps every §30 entry to coverage status.
+
+**Key audit finding.** SRD §30.1–§30.7 carry milestone titles but
+NO enumerated tests; only §30.8 has named tests (CT-01..CT-06).
+The fixture covers what it can within a 5-second synthetic run;
+gap-fills against an authoritative SRD §30 list need the
+architect to fill in §30.1–§30.7 first. Audit found 0 fixture
+commits warranted within the architect's 3-commit cap.
 
 ### A9. Production-placeholder sweep
 
