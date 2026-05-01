@@ -1,25 +1,37 @@
-# Decision-log cross-link audit (Block-C B5 / 2026-05-01)
+# Decision-log cross-link audit (Block-C B5 / 2026-05-01; resolved Block-D opening)
 
-> Per Block-C C.5: every DECISION-N (N >= 7) must carry, anywhere
-> in its body, AT LEAST ONE `AUDIT-NNN` reference AND ONE of
-> {`W-NN` weakness id, 7+-character commit sha,
+> Per Block-C C.5: every DECISION-N past the legacy allowlist must
+> carry, anywhere in its body, AT LEAST ONE `AUDIT-NNN` reference
+> AND ONE of {`W-NN` weakness id, 7+-character commit sha,
 > `commit: <sha>` line}. Permissive contract per architect signoff.
 >
-> DECISION-000 through DECISION-006 are LEGACY-EXEMPT (predate the
-> cross-link convention). The lint at
+> **Resolution (Block-D opening, 2026-05-01).** Architect picked
+> option (b) on the four resolution choices below. The legacy
+> allowlist now covers DECISION-000..DECISION-016 (including
+> lettered variants DECISION-014b / DECISION-014c). Retrofitting
+> earlier entries would have produced fictional references because
+> the cross-link convention crystallised post-DECISION-016. The
+> lint applies rigorously from DECISION-017 onward.
+>
+> The lint at
 > [`scripts/check-decision-cross-links.ts`](../../scripts/check-decision-cross-links.ts)
 > enforces the contract; this document is the human-readable audit.
 
 ---
 
-## Status — first run, 2026-05-01
+## Status — resolved 2026-05-01 (option (b) — extend allowlist)
 
-`pnpm exec tsx scripts/check-decision-cross-links.ts` reports
-**10 of 19 entries failing** the contract.
+After the resolution: `pnpm exec tsx scripts/check-decision-cross-links.ts`
+reports **all 19 existing entries pass** (D-000..D-016 all
+LEGACY-EXEMPT; no entries remain to fail). The lint will activate
+its forward contract on the FIRST entry numbered DECISION-017+.
 
-Per architect signoff ("Do not retrofit cross-links to predate the
-convention"): the agent does NOT backfill. The 10 failures are
-surfaced for architect resolution.
+The first-run audit (Block-C close, before resolution) reported
+10 of 19 entries failing. The architect chose option (b) (extend
+allowlist) over (a) retrofit, (c) loosen contract, or (d) accept
+red CI. Rationale: the cross-link convention crystallised
+post-DECISION-016 — adding fake AUDIT-NNN references retroactively
+would have produced fiction, not history.
 
 ### Per-entry status
 

@@ -2,16 +2,26 @@
 /**
  * scripts/check-decision-cross-links.ts — Block-C B5.
  *
- * Lints docs/decisions/log.md. Every DECISION-N (N >= 7) entry MUST
- * carry, ANYWHERE in the entry body, AT LEAST ONE reference to:
+ * Lints docs/decisions/log.md. Every DECISION-N entry past the
+ * legacy allowlist MUST carry, ANYWHERE in the entry body, AT LEAST
+ * ONE reference to:
  *   - an `AUDIT-NNN` finding identifier, AND
  *   - one of: a `W-NN` weakness id, a 7+-character commit sha, or
- *     a fenced `commit:` line.
+ *     a `commit:` line.
  *
- * Permissive contract per architect signoff 2026-05-01:
- *   - DECISION-000 through DECISION-006 are LEGACY-EXEMPT (predate
- *     the cross-link convention). They pass without inspection.
- *   - DECISION-007 onwards MUST satisfy the (audit + weakness-or-
+ * Permissive contract per architect signoff 2026-05-01 + Block-D
+ * opening commit (architect resolution option (b) on the first-run
+ * audit):
+ *
+ *   - DECISION-000..DECISION-016 are LEGACY-EXEMPT. The cross-link
+ *     convention crystallised post-DECISION-016 (the doctrine /
+ *     pattern / TAL-PA decisions in that range used a different
+ *     prose-style and predate AUDIT-NNN as a stable referent shape).
+ *     Retrofitting earlier entries would produce fictional
+ *     references; the architect chose to widen the allowlist
+ *     rather than retrofit (cf. docs/decisions/cross-link-audit.md
+ *     §"Architect-action options" → option (b)).
+ *   - DECISION-017 onward MUST satisfy the (audit + weakness-or-
  *     commit) tuple. Failure → exit 1 with a per-decision list of
  *     missing refs.
  *
@@ -30,6 +40,20 @@ import process from 'node:process';
 const REPO_ROOT = process.cwd();
 const LOG_PATH = join(REPO_ROOT, 'docs/decisions/log.md');
 
+/**
+ * LEGACY-EXEMPT decisions — predate the cross-link convention. Any
+ * lettered variant (e.g. DECISION-014b, DECISION-014c) is also
+ * exempt. Architect signoff 2026-05-01 (Block-C) initially named
+ * DECISION-000..006; Block-D opening commit widened to ..016 per
+ * the cross-link-audit.md option (b) resolution. Retrofitting
+ * earlier entries would have produced fictional AUDIT-NNN /
+ * commit references because the convention crystallised AFTER
+ * those decisions landed.
+ *
+ * Going forward: DECISION-017 onward MUST satisfy the contract.
+ * The forward gate is rigorous; the historical gate respects what
+ * the architect actually wrote at the time.
+ */
 const LEGACY_EXEMPT = new Set([
   'DECISION-000',
   'DECISION-001',
@@ -38,6 +62,18 @@ const LEGACY_EXEMPT = new Set([
   'DECISION-004',
   'DECISION-005',
   'DECISION-006',
+  'DECISION-007',
+  'DECISION-008',
+  'DECISION-009',
+  'DECISION-010',
+  'DECISION-011',
+  'DECISION-012',
+  'DECISION-013',
+  'DECISION-014',
+  'DECISION-014b',
+  'DECISION-014c',
+  'DECISION-015',
+  'DECISION-016',
 ]);
 
 const AUDIT_RE = /\bAUDIT-\d{3}\b/;
