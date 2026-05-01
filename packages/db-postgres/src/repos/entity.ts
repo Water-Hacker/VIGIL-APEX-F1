@@ -342,6 +342,64 @@ export class EntityRepo {
    * candidate_a) or KEEP_SEPARATE (creating a new canonical from the
    * placeholder UUID).
    */
+  /**
+   * Block-A reconciliation §5.b — flip neo4j_mirror_state to 'synced'
+   * after a successful Cypher write. No-op if the canonical row was
+   * already 'synced' (the call is idempotent so worker retries do
+   * not flip-flop).
+   */
+  async markNeo4jSynced(canonicalId: string): Promise<{ updated: boolean }> {
+    const r = await this.db.execute(sql`
+      UPDATE entity.canonical
+         SET neo4j_mirror_state = 'synced'
+       WHERE id = ${canonicalId}
+         AND neo4j_mirror_state <> 'synced'
+       RETURNING id
+    `);
+    return { updated: r.rows.length > 0 };
+  }
+
+  /**
+   * Block-A reconciliation §5.b — flip neo4j_mirror_state to 'failed'
+   * after the worker exhausts its inline retry budget. Only failures
+   * after the budget is spent should call this; transient single
+   * failures stay 'pending' so the (deferred) reconcile worker can
+   * pick them up later.
+   */
+  async markNeo4jFailed(canonicalId: string): Promise<{ updated: boolean }> {
+    const r = await this.db.execute(sql`
+      UPDATE entity.canonical
+         SET neo4j_mirror_state = 'failed'
+       WHERE id = ${canonicalId}
+         AND neo4j_mirror_state <> 'synced'
+       RETURNING id
+    `);
+    return { updated: r.rows.length > 0 };
+  }
+
+  /**
+   * Block-A reconciliation §5.b — count canonicals grouped by
+   * neo4j_mirror_state. Caller (worker-entity, on a periodic tick)
+   * pushes the result into the vigil_neo4j_mirror_state_total{state}
+   * Prometheus gauge.
+   */
+  async neo4jMirrorStateCounts(): Promise<{ synced: number; pending: number; failed: number }> {
+    const r = await this.db.execute(sql`
+      SELECT neo4j_mirror_state AS state, count(*)::bigint AS n
+        FROM entity.canonical
+       GROUP BY neo4j_mirror_state
+    `);
+    type Row = { state: 'synced' | 'pending' | 'failed'; n: string | number };
+    const out = { synced: 0, pending: 0, failed: 0 };
+    for (const row of r.rows as Row[]) {
+      const n = typeof row.n === 'string' ? Number.parseInt(row.n, 10) : row.n;
+      if (row.state === 'synced') out.synced = n;
+      else if (row.state === 'pending') out.pending = n;
+      else if (row.state === 'failed') out.failed = n;
+    }
+    return out;
+  }
+
   async addReviewQueueRow(input: {
     candidateExistingId: string;
     candidatePlaceholderId: string;

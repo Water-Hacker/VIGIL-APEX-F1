@@ -8,6 +8,7 @@ import {
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  neo4jMirrorStateTotal,
 } from '@vigil/observability';
 import {
   QueueClient,
@@ -362,37 +363,60 @@ class EntityWorker extends WorkerBase<Payload> {
           throw e;
         }
 
-        // (b) Neo4j SECOND — best-effort mirror. On failure log and
-        // continue; the Postgres canonical row stands. A future
-        // worker-fabric-bridge / cross-witness pass reconciles
-        // Neo4j.
-        try {
-          await this.neo4j.run(Cypher.upsertEntity, {
-            id,
-            props: {
-              display_name: cluster.canonical,
-              kind: cluster.kind,
-              resolution_confidence: cluster.confidence,
-              resolved_by: 'llm',
-            },
-          });
-          for (const alias of cluster.aliases) {
-            await this.neo4j.run(Cypher.addAlias, {
-              entity_id: id,
-              alias,
-              source_id: sourceId,
-              language: detectLanguage(alias),
-              first_seen: now.toISOString(),
+        // (b) Neo4j SECOND — best-effort mirror with bounded inline
+        // retries. Block-A reconciliation §5.b: try up to N times
+        // (default 3, env NEO4J_MIRROR_MAX_RETRIES). On final failure
+        // the canonical row's neo4j_mirror_state flips to 'failed';
+        // on success it flips to 'synced'. Either way the Postgres
+        // canonical row stands (SRD §15.1 invariant). The reconcile
+        // worker that picks up `failed` rows is OUT OF SCOPE for
+        // Block A.
+        const maxRetries = Number.parseInt(process.env.NEO4J_MIRROR_MAX_RETRIES ?? '3', 10);
+        let attempt = 0;
+        let mirrorOk = false;
+        let lastErr: unknown = null;
+        while (attempt < Math.max(1, maxRetries)) {
+          attempt += 1;
+          try {
+            await this.neo4j.run(Cypher.upsertEntity, {
+              id,
+              props: {
+                display_name: cluster.canonical,
+                kind: cluster.kind,
+                resolution_confidence: cluster.confidence,
+                resolved_by: 'llm',
+              },
             });
+            for (const alias of cluster.aliases) {
+              await this.neo4j.run(Cypher.addAlias, {
+                entity_id: id,
+                alias,
+                source_id: sourceId,
+                language: detectLanguage(alias),
+                first_seen: now.toISOString(),
+              });
+            }
+            mirrorOk = true;
+            break;
+          } catch (e) {
+            lastErr = e;
+            logger.warn(
+              { err: e, canonical_id: id, attempt, max_retries: maxRetries },
+              'neo4j-mirror-attempt-failed',
+            );
           }
-        } catch (e) {
-          // Postgres canonical row stands; Neo4j mirror is degraded.
-          // Operator alert via the existing AdapterFailing /
-          // WorkerLoopStalled rules; we do not retry here.
-          logger.warn(
-            { err: e, canonical_id: id },
-            'neo4j-mirror-failed; postgres canonical stands',
+        }
+        if (mirrorOk) {
+          await this.entityRepo.markNeo4jSynced(id);
+        } else {
+          // Postgres canonical row stands; the Neo4j mirror is now
+          // recorded as 'failed' so oncall (and the deferred
+          // reconcile worker) can find it.
+          logger.error(
+            { err: lastErr, canonical_id: id, attempts: attempt },
+            'neo4j-mirror-failed; postgres canonical stands; state=failed',
           );
+          await this.entityRepo.markNeo4jFailed(id);
         }
       }
       return { kind: 'ack' };
@@ -465,6 +489,34 @@ async function main(): Promise<void> {
   const worker = new EntityWorker(entityRepo, neo4j, safe, modelId, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  // Block-A reconciliation §5.b — periodic mirror-state gauge tick.
+  // The gauge is a derived count grouped by neo4j_mirror_state; we
+  // recompute on a 60s interval (env NEO4J_MIRROR_GAUGE_INTERVAL_MS).
+  // Cheap query thanks to the index added in 0013.
+  const gaugeIntervalMs = Number.parseInt(
+    process.env.NEO4J_MIRROR_GAUGE_INTERVAL_MS ?? '60000',
+    10,
+  );
+  const gaugeTick = async (): Promise<void> => {
+    try {
+      const counts = await entityRepo.neo4jMirrorStateCounts();
+      neo4jMirrorStateTotal.set({ state: 'synced' }, counts.synced);
+      neo4jMirrorStateTotal.set({ state: 'pending' }, counts.pending);
+      neo4jMirrorStateTotal.set({ state: 'failed' }, counts.failed);
+    } catch (e) {
+      logger.warn({ err: e }, 'neo4j-mirror-gauge-tick-failed');
+    }
+  };
+  await gaugeTick();
+  const gaugeTimer = setInterval(() => {
+    void gaugeTick();
+  }, gaugeIntervalMs);
+  registerShutdown('mirror-gauge', () => {
+    clearInterval(gaugeTimer);
+    return Promise.resolve();
+  });
+
   logger.info({ modelId }, 'worker-entity-ready');
 }
 
