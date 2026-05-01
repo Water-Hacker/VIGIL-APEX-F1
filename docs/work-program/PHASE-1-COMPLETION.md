@@ -334,12 +334,27 @@ listing per-file justification (superseded / out-of-scope-for-MVP /
 Phase-2-only). Architect-required single source of truth for "why
 isn't there a dashboard for X?" questions.
 
-### C5. Falco rules
+### C5. Falco rules — 🟩
 
-Custom rules for: vault-binary-execed, yubikey-removed-mid-session,
-unsigned-commit-on-main, postgres-from-non-app, audit-actions-direct-write.
+11 rules at [infra/observability/falco/vigil-rules.yaml](../../infra/observability/falco/vigil-rules.yaml).
+Block-D D.5 work (architect signoff option (e)→ii + (a)→α + 3 NEW):
 
-- File: [infra/observability/falco/vigil-rules.yaml](infra/observability/falco/vigil-rules.yaml)
+Refactored (NOT delete-and-readd):
+
+- `shell_in_vigil_container` — same matcher + output + priority; fresher comment naming the generic threat (AUDITABLE-OPERATOR-PRESENCE; Cameroon TTPs are infrastructure/social, not container-runtime).
+- `privilege_escalation_in_container` — broadened scope from `vigil_app_containers OR vigil_db_containers` to `container.id != host` (any container — picks up keycloak/tor/caddy/fabric-peer infra previously missed).
+
+Added (NEW per architect spec):
+
+- `worker_outbound_to_non_allowlisted_host` (b) — DATA-EXFILTRATION-OR-C2. Allowlist: vigil-internal subnet + vault + anthropic.com + bedrock-runtime.\* + polygon RPC. adapter-runner exempt (its outbound is the adapter contract).
+- `cross_container_secret_read` (c) — CREDENTIAL-THEFT. Per-secret container ownership map (anthropic_api_key → LLM workers; postgres_password → postgres; etc.).
+- `data_volume_write_from_non_owner` (d) — DATA-TAMPERING-OR-PERSISTENCE. /srv/vigil/{postgres,neo4j,ipfs}/data/ — only the owning store's container may write.
+
+Tests: [infra/observability/falco/RULE-TESTS.md](../../infra/observability/falco/RULE-TESTS.md).
+Per-rule trigger + expected log line documented. 2 of 11 sandbox-
+testable; 9 require host-side bind mounts / privileged Falco /
+real network egress allowlist — production-only verification per
+architect spec, walked during M0c hardening week.
 
 ### C6. Sentinel quorum check
 

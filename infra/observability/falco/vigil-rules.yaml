@@ -127,11 +127,24 @@
   priority: HIGH
   tags: [vigil, db, network]
 
-# === Shell into a running app container ===
+# === Shell into a running worker container ===
+# Block-D D.5 (architect signoff option (e)→ii): replaces the
+# pre-Block-D shell_in_vigil_container rule. NOT a fresh-from-
+# scratch rule — same matcher (shell_procs + vigil_app_containers
+# + proc.tty != 0), same output formatting, same priority. The
+# only delta is a fresher comment naming the generic threat
+# category: interactive operator presence inside a production
+# worker is a manual action that must trip an audit-of-audit row,
+# because production worker images are built no-shell by spec
+# (any TTY shell means the operator has opted out of the audited
+# path). Generic category: AUDITABLE-OPERATOR-PRESENCE; no
+# Cameroon-specific TTP applies (TTP-CMR-* are SIM/customs/load-
+# shedding social-engineering threats, not container-runtime).
 - rule: shell_in_vigil_container
-  desc: Interactive shell launched inside a VIGIL APEX app container.
-    Production containers should run with no-shell; any shell is a
-    manual operator action that must trip an audit-of-audit row.
+  desc: Interactive shell launched inside a VIGIL APEX worker container.
+    Production worker images run no-shell; any TTY shell is a manual
+    operator action that bypasses the audited path and must trip an
+    audit-of-audit row.
   condition: >
     spawned_process and shell_procs and vigil_app_containers
     and proc.tty != 0
@@ -174,15 +187,182 @@
   priority: HIGH
   tags: [vigil, network, doctrine]
 
-# === Sudo / privilege escalation inside any vigil container ===
+# === Sudo / privilege escalation inside any container ===
+# Block-D D.5 (architect signoff option (a)→α): broaden container
+# scope from `vigil_app_containers OR vigil_db_containers` to ANY
+# container with `container.id != host`. Same matcher (sudo / su /
+# doas), same output formatting, same priority (HIGH), same tags.
+# The scope broadening picks up infra containers the prior rule
+# missed (vigil-keycloak, vigil-tor, vigil-caddy, vigil-fabric-peer,
+# the prom/grafana/falco sidecars). All run as non-root by spec;
+# any escalation is a defect regardless of which image.
+# Generic category: CONTAINER-LATERAL-MOVEMENT.
 - rule: privilege_escalation_in_container
-  desc: A process inside a VIGIL APEX container called sudo or setuid.
-    Containers run as non-root by spec; any escalation is a defect.
+  desc: A process inside any container called sudo / su / doas. All
+    VIGIL containers run as non-root by spec; any escalation
+    attempt — in app, db, OR infra container — is a defect or an
+    intrusion.
   condition: >
     spawned_process and (proc.name in ("sudo", "su", "doas"))
-    and (vigil_app_containers or vigil_db_containers)
+    and container.id != host
   output: >
-    Privilege escalation attempted inside VIGIL container
-    (user=%user.name proc=%proc.cmdline container=%container.name)
+    Privilege escalation attempted inside container
+    (user=%user.name proc=%proc.cmdline container=%container.name image=%container.image.repository)
   priority: HIGH
   tags: [vigil, privilege]
+
+# ─────────────────────────────────────────────────────────────────
+# Block-D D.5 — three NEW rules per architect signoff (rules
+# (b)/(c)/(d) of the spec'd 5; rules (a) and (e) refactored into
+# the existing privilege_escalation_in_container and
+# shell_in_vigil_container rules above per architect resolution).
+#
+# Each rule names the threat it addresses. THREAT-MODEL-CMR.md
+# TTPs are SIM-cloning / customs-delay / load-shedding / social
+# pressure on the architect — none container-runtime — so the
+# threat tag for each new rule is "GENERIC" with the category
+# spelled out.
+# ─────────────────────────────────────────────────────────────────
+
+# Allowlist of egress destinations the workers MAY reach. Every
+# other outbound from a worker container is suspicious. The
+# allowlist is intentionally conservative — adding a host requires
+# a decision-log entry per OPERATIONS §12.
+- list: vigil_worker_egress_allowlist
+  items:
+    # Internal compose subnet (vigil-internal bridge); resolved by
+    # the docker DNS, so we match by suffix on the network name.
+    - 'vigil-postgres'
+    - 'vigil-neo4j'
+    - 'vigil-redis'
+    - 'vigil-ipfs'
+    - 'vigil-vault'
+    - 'vigil-keycloak'
+    - 'audit-bridge'
+    - 'vigil-fabric-peer'
+    # External LLM providers (DECISION-011, DECISION-008)
+    - 'api.anthropic.com'
+    - 'bedrock-runtime.us-east-1.amazonaws.com'
+    - 'bedrock-runtime.us-west-2.amazonaws.com'
+    - 'bedrock-runtime.eu-west-1.amazonaws.com'
+    # Polygon RPC providers (SRD §22; the actual host depends on
+    # whether the operator is on Alchemy / Infura / public RPC —
+    # the comma-list lives in env POLYGON_RPC_URL +
+    # POLYGON_RPC_FALLBACK_URLS)
+    - 'polygon-rpc.com'
+    - 'rpc-mainnet.matic.network'
+    # Allowlist for the source-portal scrape adapters is enforced
+    # at the application layer (worker-adapter-repair / robots.txt
+    # honour); Falco trusts the adapter-runner's outbound to any
+    # source domain because the source list IS the adapter
+    # contract. We DON'T enumerate every source.json hostname here
+    # — the whitelist would drift behind sources.json.
+    - 'ANY-FROM-ADAPTER-RUNNER-PROCESS'
+
+# === (b) Outbound from worker container to non-allowlisted host ===
+# Generic category: DATA-EXFILTRATION-OR-C2.
+# A worker container that opens an outbound TCP/443 connection to
+# a host NOT in the allowlist (vigil-internal subnet, vault,
+# anthropic, bedrock, polygon, allowlisted source portals) is
+# either misconfigured or compromised. The adapter-runner gets a
+# pass because its outbound is part of the adapter contract; per-
+# adapter robots.txt + EXEC §10 doctrine handle the source-side
+# discipline.
+- rule: worker_outbound_to_non_allowlisted_host
+  desc: A worker container opened an outbound connection to a host
+    not in the egress allowlist. Possible exfiltration, command-and-
+    control, or accidental upstream-data-broker call.
+  condition: >
+    outbound and (fd.sport = 443 or fd.sport = 80)
+    and vigil_app_containers
+    and not container.image.repository = "vigil-apex/adapter-runner"
+    and not (fd.sip.name in (vigil_worker_egress_allowlist))
+  output: >
+    Worker outbound to non-allowlisted host
+    (host=%fd.sip.name port=%fd.sport container=%container.name image=%container.image.repository)
+  priority: HIGH
+  tags: [vigil, network, exfiltration]
+
+# === (c) Read on /run/secrets/* from non-owning container ===
+# Generic category: CREDENTIAL-THEFT.
+# Docker secrets materialise at /run/secrets/<name> inside the
+# container they are explicitly granted to. A read of that path
+# from any container that doesn't own that secret indicates the
+# operator has mis-mounted (worth a P2 alert) or that a process
+# is walking another container's mount namespace (P0 indicator).
+# The rule whitelists 05-secret-materialisation.sh which is the
+# only host-side process expected to touch this path.
+- rule: cross_container_secret_read
+  desc: Read against /run/secrets/* from a process that does not own
+    the secret. Possible credential theft or container-escape
+    indicator.
+  condition: >
+    open_read and fd.name startswith "/run/secrets/"
+    and not proc.name = "05-secret-materialisat"
+    and not container.id = host
+    and (
+      (fd.name contains "/anthropic_api_key"
+        and not container.image.repository in (
+          "vigil-apex/worker-extractor",
+          "vigil-apex/worker-counter-evidence",
+          "vigil-apex/worker-tip-triage",
+          "vigil-apex/worker-adapter-repair",
+          "vigil-apex/worker-entity",
+          "vigil-apex/worker-dossier",
+          "vigil-apex/worker-conac-sftp"
+        ))
+      or
+      (fd.name contains "/postgres_password"
+        and not container.image.repository = "postgres")
+      or
+      (fd.name contains "/neo4j_password"
+        and not container.image.repository = "neo4j")
+      or
+      (fd.name contains "/vault_token"
+        and not vigil_app_containers)
+      or
+      (fd.name contains "/conac_sftp_private_key"
+        and not container.image.repository = "vigil-apex/worker-conac-sftp")
+    )
+  output: >
+    Cross-container secret read
+    (path=%fd.name proc=%proc.cmdline container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [vigil, secrets, credential-theft]
+
+# === (d) Write to /srv/vigil/{postgres,neo4j,ipfs}/data/ from non-owner ===
+# Generic category: DATA-TAMPERING-OR-PERSISTENCE.
+# Docker bind-mounts the data volumes of each persistent store
+# into the host filesystem at /srv/vigil/<store>/data/. Only the
+# matching container's process should ever write there. Any
+# other writer is either tampering with the store, planting
+# persistence (e.g., a malicious Postgres role escalation via
+# direct on-disk writes), or a misconfigured backup path. All
+# three warrant page-on-call.
+- rule: data_volume_write_from_non_owner
+  desc: A process wrote into /srv/vigil/postgres/data/, /neo4j/data/,
+    or /ipfs/data/ that is NOT the owning store's container. Possible
+    on-disk tampering or persistence-establishment.
+  condition: >
+    open_write and (fd.name startswith "/srv/vigil/postgres/data/"
+                    or fd.name startswith "/srv/vigil/neo4j/data/"
+                    or fd.name startswith "/srv/vigil/ipfs/data/")
+    and not (
+      (fd.name startswith "/srv/vigil/postgres/data/"
+        and container.image.repository = "postgres")
+      or
+      (fd.name startswith "/srv/vigil/neo4j/data/"
+        and container.image.repository = "neo4j")
+      or
+      (fd.name startswith "/srv/vigil/ipfs/data/"
+        and container.image.repository = "ipfs/kubo")
+    )
+    # The architect's nightly backup script reads these paths via
+    # pg_basebackup / cypher-shell snapshot / kubo repo gc — all
+    # are READS, not writes. Any WRITER outside the store-owning
+    # container is suspicious.
+  output: >
+    Data-volume write from non-owning container
+    (path=%fd.name proc=%proc.cmdline container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [vigil, persistence, data-tampering]
