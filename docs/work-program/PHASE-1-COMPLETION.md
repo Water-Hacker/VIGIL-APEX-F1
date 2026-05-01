@@ -201,45 +201,64 @@ status AND ship a paired fixture-test in
 `packages/patterns/test/category-X/`. CI fails with a clear field-list
 error on any missing registry field.
 
-### B2. Worker runbooks
+### B2. Worker runbooks — 🟩
 
-Bilingual (FR + EN) runbook per worker in `docs/runbooks/`:
-adapter-runner, worker-anchor, worker-audit-watch, worker-document,
-worker-dossier, worker-extract, worker-counter-evidence, worker-pattern,
-worker-score, worker-governance, worker-conac-sftp, worker-tip-decrypt,
-worker-fabric-bridge, worker-federation-agent, worker-federation-receiver,
-worker-adapter-repair, worker-satellite, audit-bridge, dashboard.
+Block-C C.2 (template + 4 staged group commits) shipped 23
+runbooks at `docs/runbooks/<service>.md`, one per service. Hybrid
+bilingual layout (P-3): single file per service, FR + EN narrative
+sub-blocks; language-neutral content single-source.
 
-19 workers/services × 2 languages = 38 docs. Skeleton template + per-worker fill-in.
+Plus two canonical R-runbooks for system-wide ceremonies:
 
-### B3. Disaster-recovery rehearsal script
+- [R4-council-rotation.md](../runbooks/R4-council-rotation.md) — pillar rotation procedure.
+- [R6-dr-rehearsal.md](../runbooks/R6-dr-rehearsal.md) — DR rehearsal (script in C.3).
 
-Per OPERATIONS §10 "Emergency Repo Access" + SRD §27 DR plan. A
-playbook the backup architect can execute during the quarterly drill.
+R-procedure structure per service: R1 routine deploy, R2 restore
+from backup, R3 credential rotation (per-service flavor:
+YubiKey / Vault password / API-key / mTLS / N/A), R5 incident
+response (P0–P3 tailored per service). R4 only on services that
+touch council state (worker-governance, dashboard); else points
+at canonical. R6 always points at canonical.
 
-- File: [docs/runbooks/dr-rehearsal.md](docs/runbooks/dr-rehearsal.md)
-- Companion: [scripts/dr-restore-test.sh](scripts/dr-restore-test.sh)
+### B3. Disaster-recovery rehearsal script — 🟩
 
-### B4. TRUTH.md reconciliation
+Block-C C.3:
 
-Re-read TRUTH §A–§L; bump "Last updated" header to 2026-04-29 and
-flip any "proposed" status to "committed" if the underlying code shipped.
+- [scripts/dr-rehearsal.ts](../../scripts/dr-rehearsal.ts) — 10-step
+  simulation; pre-flight refuses without dr-rehearsal compose
+  profile + /mnt/nas-dr-test mount + Shamir fixture; --dry-run for
+  pre-flight validation; --report for JSON timing emit.
+- [docs/runbooks/R6-dr-rehearsal.md](../runbooks/R6-dr-rehearsal.md) — operator runbook.
+- SLA: RTO ≤ 6 h, RPO ≤ 5 min, audit-chain clean post-restore.
 
-- B4.1 §A "Build duration" — proposed → committed
-- B4.2 §E "Deep-cold backup" — proposed → committed (or 🟦 if architect not done)
-- B4.3 §F "Tip portal Tor presence" — proposed → committed (W-09 is 🟩)
-- B4.4 §G "Plan B recipient" — proposed → committed (DECISION-010 routes by body)
-- B4.5 §G "Public verification" — proposed → committed (W-15 is 🟩)
-- B4.6 §E "Council vote signing" — proposed → committed (W-10 partial; flag the libykcs11 deferred bit)
+### B4. TRUTH.md reconciliation — 🟩
 
-### B5. Decision log cross-link audit
+Block-C C.4 (selective scope per architect's "5 highest-
+architectural-weight" default):
 
-Every "see DECISION-XXX" reference resolves; every "see SRD §YY"
-reference resolves; every code path the log claims to have shipped
-exists.
+1. Source-count: 26 → 29 (commit `19e29ca`, Block-A reconciliation §2.A.9).
+2. LLM tier 0: pricing keyed by model_id (commit `9b4b274`, Block-A §2.A.4).
+3. LLM tier 1: Bedrock cost accounting (commit `2db2271`, Block-A §2.A.5).
+4. LLM doctrine chokepoint (NEW row): SafeLlmRouter universal coverage (Block-B A2 / commit `10dac28`).
+5. Neo4j mirror state (NEW row): column + Prometheus gauge (Block-A §5.b / commit `3bc1250`).
+6. Audit-export salt custody (NEW row): Vault path + rotation cadence (DECISION-012).
 
-- File: [scripts/audit-decision-log.ts](scripts/audit-decision-log.ts) (new)
-- CI step: blocking on broken refs.
+Out of scope per the selectivity bar: operational hardenings (POLYGON_ANCHOR_CONTRACT regex, A9 PLACEHOLDER sweep details) live in PHASE-1-COMPLETION.md + per-worker runbooks.
+
+### B5. Decision log cross-link audit — 🟩 (with surfaced architect-action)
+
+Block-C C.5:
+
+- [scripts/check-decision-cross-links.ts](../../scripts/check-decision-cross-links.ts) — permissive contract; LEGACY_EXEMPT = D-000..D-006; D-007+ must satisfy AT LEAST ONE AUDIT-NNN AND ONE of {W-NN, 7+-char commit-sha, "commit:" line}.
+- [docs/decisions/cross-link-audit.md](../decisions/cross-link-audit.md) — first-run audit doc.
+- Wired into phase-gate.yml.
+
+**Surfaced architect-action.** First run reports 10 of 19 entries failing (D-009..D-016). Per architect's "do not retrofit" the agent does NOT backfill. CI red on this single check until architect picks resolution option (a)/(b)/(c)/(d) per the audit doc.
+
+(B5 follow-up note: a separate orthogonal lint at
+[scripts/audit-decision-log.ts](../../scripts/audit-decision-log.ts)
+already verifies markdown link resolution; the new lint adds
+cross-reference completeness on top of link-validity.)
 
 ---
 
