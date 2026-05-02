@@ -325,3 +325,74 @@ during execution. Architect can prioritise:
 **Generated**: 2026-04-30
 **Branch**: `audit/phase-2-execution` (~96 commits ahead of `main`)
 **Source of truth**: `AUDIT.md`
+
+---
+
+## Phase-3 post-closure rescan addendum (2026-04-30, same day)
+
+After Phase-2 closure landed on `main`, a fresh end-to-end rescan was
+run against the same scope using the original Phase-1 grep patterns
+(see `AUDIT.md` §10). Two new findings surfaced — both class-matches
+with closed Phase-2 findings on different code paths the original
+sweep didn't reach.
+
+### Headline numbers
+
+- **New findings authored**: 2 (1 high, 1 medium)
+- **Fixed by code change**: 2 / 2 (both)
+- **Architect-blocked / needs-human-confirmation**: 0
+- **Out-of-scope**: 0
+
+### Fixes shipped
+
+| ID        | Severity | Commit  | Test count                                           | Class-match with |
+| --------- | -------- | ------- | ---------------------------------------------------- | ---------------- |
+| AUDIT-092 | high     | 1deca6f | 11 cases (boundary + uniformity + 4 source-grep)     | AUDIT-029        |
+| AUDIT-093 | medium   | 0304fba | 13 cases (defaults + happy + oversize + source-grep) | AUDIT-036        |
+
+### Patterns observed
+
+The same two recurring weakness classes called out in §4 of the main
+report (RNG choice and external-input bounds) re-surfaced on code
+paths Phase-1 didn't index:
+
+1. **Non-cryptographic RNG on adversarial paths**. AUDIT-029 closed
+   `packages/adapters/src/fingerprint.ts`; AUDIT-092 closed
+   `apps/adapter-runner/src/triggers/verbatim-audit-sampler.ts`. Both
+   used `Math.random`. The rescan suggests a project-wide lint rule
+   banning `Math.random` outside an explicit allow-list of UI-only
+   modules (a `no-restricted-syntax` ESLint rule keyed on the
+   identifier path) would prevent the next instance.
+
+2. **Unbounded external-input consumption**. AUDIT-036 capped the
+   federation-receiver CRL parse; AUDIT-093 capped the adapter-runner
+   network helpers. Both consumed bytes from a network peer with no
+   pre-cap. A workspace-wide lint rule banning
+   `\.body\.text\(\)`/`\.body\.json\(\)` outside a small bounded-fetch
+   allow-list would prevent the next instance.
+
+### Recommended hardening (additions to §6 of the main report)
+
+7. **Add an ESLint `no-restricted-syntax` rule banning `Math.random`
+   in code under `apps/` and `packages/` outside an explicit
+   `// eslint-disable-next-line  -- ui-only-rng` opt-out comment.** The
+   only legitimate uses today are the worker `instanceId` (worker.ts),
+   the Anthropic batch `customId` (anthropic.ts), and the toast `id`
+   (toast.tsx) — three sites, all UI/log-disambiguation. A targeted
+   restriction catches every regression of the AUDIT-029 / AUDIT-092
+   class.
+
+8. **Add a similar rule banning `await .body.text()` / `.body.json()`
+   on undici responses outside `_bounded-fetch.ts` and the
+   federation-receiver bounded path.** Keeps the AUDIT-036 / AUDIT-093
+   class closed by mechanical CI rather than reviewer attention.
+
+### Process note
+
+The rescan cost ~30 minutes of grep-and-read against a repo where the
+prior 91-finding pass had run earlier the same day, and surfaced 2
+real findings. That 2 % residual rate after a thorough audit aligns
+with the rescan cadence in the original audit prompt
+("After every fifth finding closed, re-run the original Phase-1
+patterns") and supports keeping that cadence as a permanent practice
+during long-running audits.

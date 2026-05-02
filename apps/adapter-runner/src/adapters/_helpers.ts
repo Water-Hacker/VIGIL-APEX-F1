@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto';
 import { pickFingerprint, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
 import { chromium, type Browser } from 'playwright';
-import { request } from 'undici';
 import { z } from 'zod';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch';
 
 /**
  * Shared adapter helpers — keeps the 21 fill-in adapters thin.
@@ -137,14 +138,14 @@ export async function apiJsonFetch<T>(
     // undici pool/proxy is configured at the `Agent` layer; for adapter-runner
     // we honour proxy at the env-var layer (HTTPS_PROXY) which Bright Data sets.
   }
-  const resp = await request(url, { method: 'GET', headers });
+  const resp = await boundedRequest(url, { method: 'GET', headers });
   if (resp.statusCode === 403 || resp.statusCode === 451) {
     throw new Errors.SourceBlockedError(sourceId, { url, status: resp.statusCode });
   }
   if (resp.statusCode >= 500) {
     throw new Errors.SourceUnavailableError(sourceId, resp.statusCode, { url });
   }
-  const text = await resp.body.text();
+  const text = await boundedBodyText(resp.body, { sourceId, url });
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -171,9 +172,13 @@ export async function pdfLinkScrape(
   ctx: AdapterRunContext,
   sourceId: string,
   url: string,
-): Promise<{ links: ReadonlyArray<{ href: string; title: string }>; status: number; responseSha: string }> {
+): Promise<{
+  links: ReadonlyArray<{ href: string; title: string }>;
+  status: number;
+  responseSha: string;
+}> {
   const fp = pickFingerprint(sourceId);
-  const resp = await request(url, {
+  const resp = await boundedRequest(url, {
     method: 'GET',
     headers: { 'user-agent': fp.userAgent, 'accept-language': fp.acceptLanguage },
   });
@@ -183,7 +188,7 @@ export async function pdfLinkScrape(
   if (resp.statusCode >= 500) {
     throw new Errors.SourceUnavailableError(sourceId, resp.statusCode, { url });
   }
-  const html = await resp.body.text();
+  const html = await boundedBodyText(resp.body, { sourceId, url });
   const responseSha = createHash('sha256').update(html).digest('hex');
   const re = /<a[^>]+href="([^"]+\.pdf)"[^>]*>([^<]+)<\/a>/gi;
   const links: { href: string; title: string }[] = [];

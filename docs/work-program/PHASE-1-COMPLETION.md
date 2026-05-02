@@ -295,6 +295,7 @@ five dashboard edge surfaces:
 - `GET /tip` → 200
 - `GET /verify` → 200
 
+fix/blockA-worker-entity-postgres-write-and-rulepass
 Soft pre-flight warning when Tier-1 critical env vars
 (`GPG_FINGERPRINT`, `TIP_OPERATOR_TEAM_PUBKEY`,
 `AUDIT_PUBLIC_EXPORT_SALT`, `POLYGON_ANCHOR_CONTRACT`) are
@@ -309,6 +310,17 @@ Failure mode: prints last 50 log lines per unhealthy container
 so CI-log walking surfaces the cause immediately.
 
 ### C2. Vault Shamir initialization — 🟩 (with M0c-action items)
+### C2. Vault Shamir initialization 🟩
+
+The `infra/host-bootstrap/03-vault-shamir-init.sh` script exists; doc +
+script verified in tree 2026-05-01. End-to-end run against a dev Vault
+is an architect-side ceremony (Vault unsealing requires the real key
+custodians); the build-agent contribution stops at the script + checklist
+landing.
+
+- 🟩 [infra/host-bootstrap/03-vault-shamir-init.sh](infra/host-bootstrap/03-vault-shamir-init.sh) — present.
+- 🟩 [docs/runbooks/vault-shamir-init.md](docs/runbooks/vault-shamir-init.md) — execution checklist for the architect.
+ main
 
 [docs/runbooks/vault-shamir-init.md](../runbooks/vault-shamir-init.md)
 exists. Block-D D.2 added a "Verification status" section
