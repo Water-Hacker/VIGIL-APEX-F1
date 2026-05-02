@@ -110,6 +110,20 @@ jobs:
         # an incomplete catalogue entry."
         run: npx --yes tsx scripts/generate-pattern-catalogue.ts --check
 
+      - name: Run scripts/check-safellm-coverage.ts (SafeLlmRouter chokepoint gate)
+        # Post-Block-D follow-up — AI-SAFETY-DOCTRINE-v1 §B chokepoint
+        # gate. Asserts that every direct use of `LlmRouter` in
+        # apps/ + packages/ (excluding packages/llm/ itself and
+        # __tests__/) is structurally paired with a `new SafeLlmRouter`
+        # in the same file. A `new LlmRouter` not paired = drift; a
+        # `LlmRouter.call(` or `.llm.call(` call site is unconditional
+        # drift. The bare router bypasses all 12 doctrine defences.
+        # Initial scan: 5 paired references, 0 drift, 0 allowlist
+        # entries. Migration template + ALLOWLIST documented in the
+        # script header; architect signoff required for any
+        # allowlist addition.
+        run: npx --yes tsx scripts/check-safellm-coverage.ts
+
       - name: Run scripts/check-decision-cross-links.ts (Block-C B5 forward contract)
         # Block-C B5 — every DECISION-N (N >= 7) must carry AT LEAST
         # ONE AUDIT-NNN reference AND ONE of {W-NN, 7+-char commit

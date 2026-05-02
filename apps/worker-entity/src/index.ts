@@ -22,6 +22,10 @@ import { VaultClient } from '@vigil/security';
 import { Ids } from '@vigil/shared';
 import { z } from 'zod';
 
+// Side-effect import: registers the `entity.resolve-aliases` prompt in
+// the SafeLlmRouter prompt registry. Must be imported before any
+// safe.call referencing that prompt name.
+import { ENTITY_RESOLVE_ALIASES_PROMPT_NAME, ENTITY_RESOLVE_ALIASES_TASK } from './prompts.js';
 import { RCCM_RE, NIU_RE, detectLanguage, canonicalRccm, canonicalNiu } from './rule-pass.js';
 
 const logger = createLogger({ service: 'worker-entity' });
@@ -313,18 +317,30 @@ class EntityWorker extends WorkerBase<Payload> {
         await this.dispatchPatterns(dispatchedCanonicalIds, sourceId, env);
         return { kind: 'ack' };
       }
-      const rendered = Safety.globalPromptRegistry.latest('entity.resolve-aliases');
-      if (!rendered) {
+      // Block-D follow-up — L4 closed-context migration. Aliases now
+      // ride inside a <source_document> tag via SafeLlmRouter's
+      // `sources` parameter instead of inline in `task`. The doctrine
+      // system preamble teaches the model to treat tag contents as
+      // data, not instructions; embedding them in `task` would bypass
+      // that defence regardless of normalisation. Prompt is registered
+      // by the worker-local `./prompts.js` side-effect import (see
+      // imports at top of file).
+      if (Safety.globalPromptRegistry.latest(ENTITY_RESOLVE_ALIASES_PROMPT_NAME) === null) {
         logger.error('entity-resolve-prompt-missing');
         return { kind: 'retry', reason: 'prompt-not-registered', delay_ms: 60_000 };
       }
-      const tmpl = rendered.render({ aliases: unresolved });
       const outcome = await this.safe.call<z.infer<typeof zErResp>>({
         findingId: null,
         assessmentId: null,
-        promptName: 'entity.resolve-aliases',
-        task: tmpl.user,
-        sources: [],
+        promptName: ENTITY_RESOLVE_ALIASES_PROMPT_NAME,
+        task: ENTITY_RESOLVE_ALIASES_TASK,
+        sources: [
+          {
+            id: 'aliases-pending-resolution',
+            label: 'Unresolved entity name candidates (one per line)',
+            text: unresolved.map((a, idx) => `${idx + 1}. ${a}`).join('\n'),
+          },
+        ],
         responseSchema: zErResp,
         modelId: this.modelId,
       });
