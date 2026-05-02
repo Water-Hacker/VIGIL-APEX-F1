@@ -14,6 +14,8 @@ name: security
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*.*.*' # Block-E E.10: SBOM signed + attached to release
   pull_request:
     branches: [main]
   schedule:
@@ -21,7 +23,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # required for release-asset upload (E.10)
   security-events: write
   pull-requests: read
 
@@ -46,9 +48,17 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          # `--all-projects` walks the workspace; severity threshold blocks
-          # only Critical to keep the gate signal-rich.
-          args: --all-projects --severity-threshold=critical --fail-on=upgradable
+          # `--all-projects` walks the workspace; severity threshold
+          # blocks only Critical to keep the gate signal-rich (High +
+          # below surface as warnings in the SARIF upload, per
+          # OPERATIONS §4).
+          # `--fail-on=upgradable` further narrows the block to findings
+          # the architect can actually act on (an unfixable Critical is
+          # an allowlist conversation, not a CI gate).
+          # `--policy-path` consumes the architect-curated allowlist
+          # under `.snyk-policy.yaml` (Block-E E.6); any rationale-
+          # documented exception listed there is honoured by the gate.
+          args: --all-projects --severity-threshold=critical --fail-on=upgradable --policy-path=.snyk-policy.yaml
       - name: Upload Snyk SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
@@ -97,3 +107,54 @@ jobs:
             vigil-apex.spdx.json
             vigil-apex.summary.json
           retention-days: 90
+
+      # ── Block-E E.10 / E5: release-time signing + attachment ───
+      # Active only on tag-push events. The SBOMs above run on every
+      # push / PR / schedule for visibility; only release tags (vN.N.N)
+      # get the architect-signed deliverable. The signing key is the
+      # architect's GPG signing subkey, exported via repo secret
+      # GPG_SIGNING_KEY (ASCII-armored secret key); GPG_PASSPHRASE
+      # unlocks it. Both secrets architect-provisioned per HSK-v1.
+      # If either secret is absent, signing is skipped and the
+      # release ships with unsigned SBOMs — which is wrong, so the
+      # step fails the job to prevent a silent downgrade.
+      - name: Import GPG signing key (release only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -z "${GPG_SIGNING_KEY}" ] || [ -z "${GPG_PASSPHRASE}" ]; then
+            echo "::error::GPG_SIGNING_KEY / GPG_PASSPHRASE secrets must be set for tag-push SBOM signing (per BLOCK-E-PLAN §2.10 acceptance)."
+            exit 1
+          fi
+          echo "${GPG_SIGNING_KEY}" | gpg --batch --import
+          echo 'pinentry-mode loopback' >> ~/.gnupg/gpg.conf
+          echo "use-agent" >> ~/.gnupg/gpg.conf
+
+      - name: Sign SBOMs with architect's GPG key (release only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          for f in vigil-apex.cdx.json vigil-apex.spdx.json vigil-apex.summary.json; do
+            if [ -f "$f" ]; then
+              gpg --batch --yes --pinentry-mode loopback \
+                --passphrase "${GPG_PASSPHRASE}" \
+                --detach-sign --armor "$f"
+              echo "signed $f → $f.asc"
+            fi
+          done
+
+      - name: Attach signed SBOMs to GitHub release (release only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            vigil-apex.cdx.json
+            vigil-apex.cdx.json.asc
+            vigil-apex.spdx.json
+            vigil-apex.spdx.json.asc
+            vigil-apex.summary.json
+            vigil-apex.summary.json.asc
+          fail_on_unmatched_files: false

@@ -12,7 +12,7 @@
 
 ## Snapshot of state
 
-**Last refreshed: 2026-05-02 (Block-E E.0).** Counts move with every
+**Last refreshed: 2026-05-02 (Block-E E.5).** Counts move with every
 commit; the prior hand-maintained "46 packages / 712 tests" snapshot
 drifted. The numbers below come from a fresh sweep of the live tree.
 
@@ -109,14 +109,23 @@ prior pass.
   test name; fails the job if the test doesn't appear in the output
   OR appears with a skip marker.
 
-**A5 deferred follow-up (Block E scope, architect-confirmed 2026-05-01).**
-Salt-collision CI alert: when two consecutive
-`audit.public_export.salt_fingerprint` values match, the operator
-forgot the quarterly rotation. The
+**A5 deferred follow-up — 🟩 (Block-E E.11).**
+Salt-collision CI alert shipped:
+[`apps/adapter-runner/src/triggers/salt-collision-check.ts`](../../apps/adapter-runner/src/triggers/salt-collision-check.ts)
+queries the
 [`audit.public_export_salt_collisions`](../../packages/db-postgres/drizzle/0012_audit_export_salt_fingerprint.sql)
-view exists; the CI alert that fires on a non-empty result is
-**deferred-not-dropped**, target Block E. No urgency — quarterly
-cron only, 90-day detection window before the next export.
+view on a quarterly cron (06:00 day-2 of Jan / Apr / Jul / Oct
+Africa/Douala — runs the morning AFTER the quarterly export so the
+just-written row is included in the search). Logs structured
+`event: audit.public_export.salt_collision`, sets the
+`vigil_audit_salt_collisions_total` Prometheus gauge, and throws
+`SaltCollisionError` so the scheduler error path fires. Two new
+alert rules in
+[`infra/docker/prometheus/alerts/vigil.yml`](../../infra/docker/prometheus/alerts/vigil.yml):
+`AuditSaltCollision` (critical, fires immediately on > 0) and
+`AuditSaltCollisionCheckStale` (warning, fires when the gauge
+hasn't been refreshed in > 100 days — the cron itself is broken).
+5 unit tests pin the trigger contract.
 
 ### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; A6.5 🟦 architect-blocked
 
@@ -541,13 +550,13 @@ emit yellow warnings (not hard errors) so the gap is visible in CI
 without blocking. Each row points the operator at
 docs/runbooks/backup.md for the architect-action context.
 
-| Spec item                   | Current                             | Gap                                                 | Action             |
-| --------------------------- | ----------------------------------- | --------------------------------------------------- | ------------------ |
-| Vault snapshot              | btrfs-of-/srv/vigil/vault           | no `vault operator raft snapshot save` (raft-aware) | M0c week           |
-| Git repo backup             | none on backup host                 | source on github + architect's working tree only    | M0c week           |
-| Audit-chain explicit export | inside postgres dump only           | no separate signed CSV/JSONL of audit.actions       | M0c week           |
-| Encrypted-at-rest archive   | manifest signed, contents plaintext | NAS stores plaintext basebackup + dumps             | M0c week           |
-| Hetzner archive mirror      | only Synology rclone target         | no second-region mirror                             | Phase-2 (post-MOU) |
+| Spec item                   | Current                                                                                                                                                                                                                                                                                                          | Gap                                              | Action                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------ |
+| Vault snapshot              | 🟩 `vault operator raft snapshot save` step + scoped policy [`infra/vault-policies/backup-snapshot.hcl`](../../infra/vault-policies/backup-snapshot.hcl) + quarterly token-rotation runbook (Block-E E.12)                                                                                                       | n/a                                              | quarterly token rotation |
+| Git repo backup             | 🟡 (Block-E E.15 — landing)                                                                                                                                                                                                                                                                                      | source on github + architect's working tree only | Block-E E.15             |
+| Audit-chain explicit export | 🟩 `audit-chain.csv` + `audit-user-actions.csv` GPG-signed exports + offline verifier ([`scripts/verify-hashchain-offline.ts`](../../scripts/verify-hashchain-offline.ts)) with bit-identical parity (Block-E E.13)                                                                                              | n/a                                              | quarterly review         |
+| Encrypted-at-rest archive   | 🟩 every plaintext output wrapped via `gpg --encrypt --recipient $GPG_ENCRYPT_RECIPIENT`; plaintext removed; restore requires YubiKey + GPG passphrase ([`RESTORE.md`](../RESTORE.md) Phase 0.5; smoke test [`scripts/test-encrypt-roundtrip.sh`](../../scripts/test-encrypt-roundtrip.sh) green) (Block-E E.14) | n/a                                              | quarterly review         |
+| Hetzner archive mirror      | only Synology rclone target                                                                                                                                                                                                                                                                                      | no second-region mirror                          | Phase-2 (post-MOU)       |
 
 These are defence-in-depth additions, not blockers — the current
 pipeline meets the 6-hour RTO target for host loss + btrfs
@@ -605,72 +614,175 @@ on every Block-D commit.
 
 ## TRACK D — Test quality (additional integration / E2E)
 
-### D1. Council vote ceremony E2E
+### D1. Council vote ceremony E2E — 🟩 (Block-E E.1, commit `8be5960`)
 
-Mock 5 council members, run a 3-of-5 escalation vote, assert: vote
-events emitted, posterior crosses 0.85, dossier render enqueued, all
-high-sig events anchored individually.
+[apps/worker-governance/**tests**/council-vote-e2e.test.ts](../../apps/worker-governance/__tests__/council-vote-e2e.test.ts)
+mounts the full ceremony handler set via `bindWatch` and exercises 10
+cases: full proposal-open → vote-cast → escalate flow, prior-routing
+short-circuit, recommended_recipient_body propagation, projection-lag
+fallback, missing-finding fail-closed, recuse path, default-recipient
+fallback, and bindWatch shape + error-isolation.
 
-### D2. Tip portal Tor flow E2E
+### D2. Tip portal Tor flow E2E — 🟩 (Block-E E.2, commit `41bff18`)
 
-Submit a tip via a Tor SOCKS proxy, assert: ciphertext stored,
-council 3-of-5 decryption works, paraphrase generated, raw text never
-crosses the council boundary.
+[apps/worker-tip-triage/**tests**/tor-flow-e2e.test.ts](../../apps/worker-tip-triage/__tests__/tor-flow-e2e.test.ts)
+walks a libsodium-sealed-box ciphertext through the council 3-of-5
+quorum decryption path, paraphrase generation, and CallRecordRepo
+sink. The plaintext-leak privacy invariant
+(`assertPlaintextLeakOnlyInSafeCallSources`) walks every mock-call
+argument and asserts plaintext appears only inside a SafeLlmRouter
+`sources[].text` block — never in DB writes, queue messages, or
+audit records. SafeLlmRouter is decoupled via a structural
+`SafeLlmRouterLike` adapter (mirrors worker-extractor) so vitest
+does not need to resolve the broken bedrock-sdk `./core` exports map.
 
-### D3. CONAC SFTP delivery E2E
+### D3. CONAC SFTP delivery E2E — 🟩 (Block-E E.3, commit `1860b16`)
 
-Spin a local SFTP server, render a dossier, deliver, ack, assert
-audit rows + delivery row + receipt row + Polygon anchor.
+[apps/worker-conac-sftp/**tests**/sftp-delivery-e2e.test.ts](../../apps/worker-conac-sftp/__tests__/sftp-delivery-e2e.test.ts)
+asserts manifest correctness for all 5 recipient bodies (CONAC,
+COUR_DES_COMPTES, MINFI, ANIF, CDC), env-driven delivery target
+resolution, and the DECISION-008 Tier-1 boot guard. Byte-level SFTP
+transport is intentionally NOT in scope (production verification
+covered under AT-M3-03 with a real SFTP daemon — same posture as
+Block-D D.5 Falco rules).
 
-### D4. Federation stream E2E
+### D4. Federation stream E2E — 🟩 (Block-E E.3, commit `1860b16`)
 
-Sign an envelope on the agent, replay protection check, signature
-verification, region-prefix enforcement, payload-cap rejection.
+[packages/federation-stream/**tests**/envelope-e2e.test.ts](../../packages/federation-stream/__tests__/envelope-e2e.test.ts)
+adds the orthogonal coverage to `src/sign.test.ts` (which already
+covers REGION_MISMATCH / KEY_UNKNOWN / REPLAY_WINDOW backward /
+PAYLOAD_TOO_LARGE / SIGNATURE_INVALID per-function): a parameterised
+rejection-code table walking all 5 codes through
+`verifyEnvelopeWithPolicy`, the forward-window symmetry case, and
+signature-uniqueness assertions proving canonical signing differs
+when payload or observedAtMs differ even under shared dedupKey.
 
-### D5. WebAuthn → secp256k1 path
+### D5. WebAuthn → secp256k1 path — 🟩 (Block-E E.4, commit `949495b`)
 
 Per W-10. The native libykcs11 helper is deferred to M3-M4; the
-WebAuthn fallback path is shipped and needs an E2E test asserting
-the fallback works for a sample council member.
+WebAuthn fallback (FIDO2/ES256K, COSE alg -47) is the path Phase-1
+ships with.
+[apps/dashboard/**tests**/webauthn-fallback-e2e.test.ts](../../apps/dashboard/__tests__/webauthn-fallback-e2e.test.ts)
+exercises POST /api/council/vote end-to-end (happy path; counter
+not bumped when assertion counter equals stored — W3C WebAuthn
+§6.1.1 clone-detection contract; every documented failure branch);
+a structural assertion proves the route + `packages/security/src/fido.ts`
+have zero `from '...libykcs11'` imports (after stripping doc
+comments — both files mention libykcs11 in the W-10 rationale,
+which is expected); fido.ts advertises -47 in
+`supportedAlgorithmIDs`; vote-ceremony page documents
+W-10 + vigil-polygon-signer explicitly.
 
-### D6. Dashboard a11y CI
+### D6. Dashboard a11y CI — 🟩 (already in CI; Block-E E.5 expansion)
 
-Per OPERATIONS, a11y is enforced. Wire `playwright test tests/a11y/`
-into `.github/workflows/ci.yml` (currently the dashboard `test`
-target only runs vitest).
+Per OPERATIONS, a11y is enforced.
+[.github/workflows/ci.yml](../../.github/workflows/ci.yml) `a11y` job
+runs `playwright test tests/a11y/` on every PR with zero violations
+of `axe-core` "critical" or "serious" levels (lower-severity findings
+are surfaced in the HTML report but not blocking — the runway to
+tighten over time without breaking the build today). 5 public-surface
+pages covered today; operator surfaces (with mock-JWT cookie) are a
+follow-up under D6-extension.
 
-### D7. Visual regression tests
+### D7. Visual regression tests — 🟡 PARTIAL (Block-E E.5, harness only)
 
-Per SRD §03.5 (UI consistency). Snapshot the 19 dashboard pages on a
-canonical fixture; fail on visual diff > threshold.
+Per SRD §03.5 (UI consistency). Harness landed in Block-E E.5:
+
+- [apps/dashboard/playwright-visual.config.ts](../../apps/dashboard/playwright-visual.config.ts) — separate config, deterministic 1280×800 viewport, per-test clock pinning + animation disable.
+- [apps/dashboard/tests/visual/public-surfaces.spec.ts](../../apps/dashboard/tests/visual/public-surfaces.spec.ts) — 5 public-surface pages snapshotted at `maxDiffPixelRatio: 0.001` (>0.1% pixel diff fails).
+- `.github/workflows/ci.yml` `visual` job — Postgres-backed, `continue-on-error: true` until baselines are stamped.
+
+**Architect-side baseline-stamp pass pending** before the CI job is
+flipped to hard-blocking. Procedure documented in the
+playwright-visual.config.ts header. The remaining 14 authenticated
+pages need a mock-JWT fixture and are tracked as a follow-up under
+D7-extension.
 
 ---
 
 ## TRACK E — Security
 
-### E1. Snyk Pro vulnerability scan
+### E1. Snyk Pro vulnerability scan — 🟩 (Block-E E.6)
 
-Per OPERATIONS §4 CI gates. Wire Snyk into CI; blocking on Critical,
-warning on High.
+Per OPERATIONS §4 CI gates. Wired in
+[.github/workflows/security.yml](../../.github/workflows/security.yml)
+`snyk` job: `--all-projects --severity-threshold=critical
+--fail-on=upgradable --policy-path=.snyk-policy.yaml`. Daily cron
+(05:23 UTC), per-PR, per-push to main, manual dispatch. SARIF
+uploaded to GitHub code-scanning. The `if: env.SNYK_TOKEN != ''`
+guard makes the job a no-op until the architect provisions the
+secret.
 
-### E2. Threat-model code-coverage matrix
+[.snyk-policy.yaml](../../.snyk-policy.yaml) — empty seed. Architect-
+only writes; every `ignore` entry MUST carry a `reason` + ISO-8601
+`expires` ≤ 90 days; indefinite suppressions explicitly forbidden;
+each Critical allowlist entry mirrors a decision-log entry per
+DECISION-N convention. File-header doctrine documents the editing
+rules; on first SNYK_TOKEN-enabled run, any pre-existing Critical
+that is not auto-upgradable becomes a halt-and-surface event for
+architect classification (allowlist with rationale + expiry, OR
+upgrade, OR architect-acknowledged risk).
 
-Cross-reference `THREAT-MODEL-CMR.md` threats × code mitigations.
-Output: a CSV / matrix doc showing every threat has either a code
-mitigation or an explicit "out of scope" note.
+### E2. Threat-model code-coverage matrix — 🟩 (Block-E E.7)
 
-### E3. Dependency rotation
+[docs/security/threat-coverage-matrix.md](../security/threat-coverage-matrix.md)
+swept 2026-05-02. Coverage: TTP-CMR-01..07 (all 🟩 / 🟦); SRD §05
+Tier-1/2/3 generic threats T-1.x..T-3.x (all 🟩 / 🟦); 8 actor-class
+rows from THREAT-MODEL §1; new §3 Infrastructure-realities table
+(6 rows); new cross-cutting code-quality-gates table covering
+a11y, visual regression, SafeLlmRouter chokepoint, secret-scan,
+SBOM. Block-E commit cross-links: E.0 sentinel-quorum (T-1.1),
+E.2 tip-portal privacy invariant (T-2.4), E.5 a11y + visual
+(SRD §03.5), E.6 Snyk policy (T-3.3). Zero rows uncovered.
 
-Quarterly dependency audit; renovate-bot config; blocking on Critical
-CVE within 7 days.
+### E3. Dependency rotation — 🟩 (Block-E E.8)
 
-### E4. Pre-commit secret scan
+[`renovate.json`](../../renovate.json) — renovate-bot config:
+weekly Mon-AM cadence (`schedule: ["before 5am on monday"]`),
+quarterly review for Tier-1 crypto + smart-contract + Anthropic
+SDK deps via per-package soak windows (14 / 7 / 3 days), workspace
+pins explicitly ignored, vulnerabilityAlerts always-on with
+immediate PR creation. Auto-merge disabled across the board so
+every dependency change enters the TAL-PA audit chain via the
+operator's manual review row (DECISION-012 contract). The 7-day
+SLA on Critical-CVE PRs is enforced by the architect's quarterly
+review pass; runbook
+[`docs/runbooks/dependency-rotation.md`](../runbooks/dependency-rotation.md)
+spells out the SLA table, the triage flow, the failure-modes,
+and the audit-emission contract for every Critical-class
+decision.
 
-Already in C10 — covered.
+### E4. Pre-commit secret scan — 🟩 (complete on arrival; cited Block-E E.9)
 
-### E5. SBOM generation
+Three-layer chain shipped:
 
-Software Bill of Materials per package; generated on release; signed.
+- [`.husky/pre-commit`](../../.husky/pre-commit) — gitleaks runs on
+  every staged commit before lint-staged; refuses to commit on any
+  match.
+- [`.gitleaks.toml`](../../.gitleaks.toml) — consolidated singular
+  `[allowlist]` form (commit `7f90302` corrected the gitleaks
+  8.21.2 plural-form regression); the allowlist is the single
+  system of record for known false positives.
+- [`.github/workflows/secret-scan.yml`](../../.github/workflows/secret-scan.yml)
+  — server-side gitleaks scan on every push + PR; redundant with
+  the pre-commit hook but blocks any direct-push bypass.
+
+No new code shipped in E.9; E.4 was complete-on-arrival per
+BLOCK-E-PLAN §2.9.
+
+### E5. SBOM generation — 🟩 (Block-E E.10)
+
+[`.github/workflows/security.yml`](../../.github/workflows/security.yml)
+`sbom` job: Syft generates CycloneDX 1.5 + SPDX SBOMs on every
+push / PR / schedule (90-day artefact retention) plus the
+workspace dependency map via
+[`scripts/generate-sbom-summary.ts`](../../scripts/generate-sbom-summary.ts).
+Block-E E.10 added the release-time chain: tag-push events
+(`v*.*.*`) trigger GPG-detach-sign of the three SBOMs against the
+architect's signing subkey (`GPG_SIGNING_KEY` + `GPG_PASSPHRASE`
+secrets — required at tag-push time, fail-loudly if absent so a
+release never ships unsigned SBOMs); softprops/action-gh-release
+attaches both `*.json` and `*.json.asc` to the GitHub release.
 
 ---
 

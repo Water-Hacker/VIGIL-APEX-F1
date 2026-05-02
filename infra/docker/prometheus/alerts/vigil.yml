@@ -156,3 +156,33 @@ groups:
         annotations:
           summary: 'sentinel-tor-check has not pushed in > 2 h'
           description: 'No vigil_tor_onion_up metric in pushgateway for the last 2 hours — sentinel cron likely not firing. Check Hetzner sentinel monitor logs; verify the hourly cron is registered.'
+
+      # Block-E E.11 / A5.4 — TAL-PA salt-collision alert.
+      # The salt-collision-check trigger (apps/adapter-runner) runs the
+      # morning after each quarterly export and queries the
+      # `audit.public_export_salt_collisions` view. The gauge is set to
+      # the row-count it observes; a non-zero value means a previous
+      # quarter's salt was reused — a forgotten rotation. This makes
+      # `actor_id_hash` rainbow-tableable across the affected periods.
+      # Fires immediately when > 0 (no `for:` window): the operator
+      # must rotate `AUDIT_PUBLIC_EXPORT_SALT` and re-export the
+      # affected quarter(s) at the next cron tick.
+      - alert: AuditSaltCollision
+        expr: vigil_audit_salt_collisions_total > 0
+        labels: { severity: critical }
+        annotations:
+          summary: 'TAL-PA quarterly export salt collision ({{ $value }} pair(s))'
+          description: "audit.public_export_salt_collisions returned {{ $value }} row(s) — a prior quarter's `AUDIT_PUBLIC_EXPORT_SALT` was reused. actor_id_hash is rainbow-tableable across the affected periods. Action: (1) rotate AUDIT_PUBLIC_EXPORT_SALT to a fresh 32-byte hex; (2) re-run the quarterly export for the affected period(s); (3) audit-of-audit log a salt-rotation entry per docs/runbooks/audit-salt-rotation.md."
+
+      # Block-E E.11 / A5.4 — companion alert: salt-collision-check did
+      # not fire. The trigger runs quarterly (default 06:00 day-2 of
+      # Jan / Apr / Jul / Oct Africa/Douala), so the gauge is set
+      # exactly 4 times per year. If the metric is stale > 100 days,
+      # the cron is the problem — distinct from a clean run.
+      - alert: AuditSaltCollisionCheckStale
+        expr: time() - timestamp(vigil_audit_salt_collisions_total) > 8640000
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: 'salt-collision-check has not run in > 100 days'
+          description: 'The vigil_audit_salt_collisions_total gauge has not been refreshed in over 100 days, but the check is scheduled quarterly. Either AUDIT_SALT_COLLISION_CHECK_ENABLED is false, the cron expression is invalid, or the adapter-runner did not boot. Check adapter-runner logs for `salt-collision-check-scheduled` at boot.'

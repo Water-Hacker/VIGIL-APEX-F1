@@ -46,6 +46,7 @@ import { currentQuarterWindow, runCalibrationAudit } from './triggers/calibratio
 import { runGraphMetricTrigger } from './triggers/graph-metric-runner.js';
 import { runPatternCohort } from './triggers/pattern-cohort-runner.js';
 import { runQuarterlyAuditExport } from './triggers/quarterly-audit-export.js';
+import { runSaltCollisionCheck } from './triggers/salt-collision-check.js';
 import { defaultProviderChain, runSatelliteTrigger } from './triggers/satellite-trigger.js';
 import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 
@@ -348,6 +349,43 @@ async function main(): Promise<void> {
           logger.info({ cron: exportCron }, 'audit-public-export-scheduled');
         } else {
           logger.error({ cron: exportCron }, 'invalid-audit-public-export-cron; trigger disabled');
+        }
+      }
+
+      // AUDIT-024 / Block-E E.11 — salt-collision check. Runs the
+      // morning AFTER the quarterly export (default 06:00 day-2 of
+      // Jan / Apr / Jul / Oct Africa/Douala) so the just-written
+      // export row is included in the search. The check throws a
+      // SaltCollisionError if any pair of consecutive exports share
+      // their salt_fingerprint — a forgotten rotation. The error is
+      // logged with the colliding period labels; a Prometheus
+      // alert-rule scrapes the structured-log
+      // `event: audit.public_export.salt_collision` field.
+      const saltCheckEnabled =
+        (process.env.AUDIT_SALT_COLLISION_CHECK_ENABLED ?? 'true').toLowerCase() !== 'false';
+      if (saltCheckEnabled) {
+        const saltCheckCron = process.env.AUDIT_SALT_COLLISION_CHECK_CRON ?? '0 6 2 1,4,7,10 *';
+        if (validate(saltCheckCron)) {
+          const saltCheckTask = schedule(
+            saltCheckCron,
+            () => {
+              void (async () => {
+                try {
+                  await runSaltCollisionCheck({ db, logger });
+                } catch (err) {
+                  logger.error({ err }, 'salt-collision-check-failed');
+                }
+              })();
+            },
+            { timezone: 'Africa/Douala', scheduled: true },
+          );
+          tasks.push(saltCheckTask);
+          logger.info({ cron: saltCheckCron }, 'salt-collision-check-scheduled');
+        } else {
+          logger.error(
+            { cron: saltCheckCron },
+            'invalid-salt-collision-check-cron; trigger disabled',
+          );
         }
       }
     } else {

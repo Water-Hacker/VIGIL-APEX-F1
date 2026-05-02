@@ -21,15 +21,19 @@ in the dark. Every step is concrete; every assumption is named.
    `docs/incident-response/`.
 
 2. Identify the most recent intact archive on the Synology NAS:
+
    ```sh
    ssh nas@synology.vigilapex.cm \
        'ls -t /volume1/vigil-archive/ | head -1'
    ```
+
    Verify the manifest signature:
+
    ```sh
    ARCHIVE=/mnt/synology/vigil-archive/<DATE>
    gpg --verify "$ARCHIVE/MANIFEST.sha256.sig" "$ARCHIVE/MANIFEST.sha256"
    ```
+
    The signature MUST be from the architect's GPG key
    (`docs/source/HSK-v1.md` records the fingerprint). Anything else →
    STOP and escalate to the backup architect.
@@ -39,6 +43,65 @@ in the dark. Every step is concrete; every assumption is named.
    (cd "$ARCHIVE" && sha256sum -c MANIFEST.sha256)
    ```
    Any mismatch → STOP. Try the previous archive.
+
+## Phase 0.5 — Decrypt the archive (Block-E E.14, 5-15 min)
+
+Per Block-E E.14, every plaintext archive output is wrapped in
+`.gpg` before landing on the NAS. Restoration therefore requires
+the architect's GPG private-key passphrase + YubiKey present at
+this step (the encrypt-subkey lives on the YubiKey per HSK-v1).
+
+3a. Insert the architect's primary YubiKey + unlock GPG. Confirm
+the encrypt-capable subkey is reachable:
+`sh
+    gpg --card-status   # confirms YubiKey is the active token
+    gpg --list-keys --with-colons | grep -E '^(pub|sub):'
+    # The encrypt-capable subkey (capability 'e') must be listed.
+    `
+
+3b. Decrypt every `.gpg` in the archive directory in-place. Each
+invocation reverses an `encrypt_at_rest` call from
+`infra/host-bootstrap/10-vigil-backup.sh`:
+`sh
+    cd "$ARCHIVE"
+    for f in *.gpg; do
+      gpg --batch --output "${f%.gpg}" --decrypt "$f"
+      rm -f "$f"
+    done
+    # Untar any directories that were tar-then-encrypted
+    # (postgres dir, neo4j dump dir).
+    for t in *.tar; do
+      tar -xf "$t" -C .
+      rm -f "$t"
+    done
+    `
+Any decryption failure → STOP and escalate. Common causes:
+YubiKey not present, wrong PIN entered too many times (encrypt
+subkey locked — recover via the master key per HSK-v1 §6.4),
+wrong archive (encrypted by a key the operator does not hold).
+
+3c. Cross-check the per-file detached signatures (architect-
+authored over the plaintext) where present:
+`sh
+    if [ -f audit-chain.csv.sig ]; then
+      gpg --verify audit-chain.csv.sig audit-chain.csv
+    fi
+    if [ -f audit-user-actions.csv.sig ]; then
+      gpg --verify audit-user-actions.csv.sig audit-user-actions.csv
+    fi
+    `
+A mismatch means the plaintext was altered between signing
+and decryption — STOP and escalate.
+
+3d. Run the offline hash-chain verifier (Block-E E.13) against
+the decrypted CSV — proves chain internal integrity post-
+decryption:
+`sh
+    pnpm tsx scripts/verify-hashchain-offline.ts audit-chain.csv > report.txt
+    echo "verifier exit code: $?"
+    # 0 = chain intact; 1 = divergences listed in report.txt;
+    # 2 = input error (CSV malformed)
+    `
 
 ## Phase 1 — Host & volumes (60 min)
 
@@ -57,6 +120,7 @@ in the dark. Every step is concrete; every assumption is named.
 ## Phase 2 — Postgres (30 min)
 
 6. Stop the dashboard + worker stacks if running:
+
    ```sh
    docker compose -f infra/docker/docker-compose.yaml down dashboard \
        worker-pattern worker-entity worker-score worker-counter-evidence \
@@ -66,6 +130,7 @@ in the dark. Every step is concrete; every assumption is named.
    ```
 
 7. Restore Postgres from the basebackup:
+
    ```sh
    docker compose -f infra/docker/docker-compose.yaml up -d vigil-postgres
    docker exec -i vigil-postgres bash -c '
@@ -76,8 +141,9 @@ in the dark. Every step is concrete; every assumption is named.
      pg_ctl start
    '
    ```
-   *(Copy the basebackup tarball into the container first via `docker cp
-   "$ARCHIVE/postgres" vigil-postgres:/tmp/postgres`.)*
+
+   _(Copy the basebackup tarball into the container first via `docker cp
+"$ARCHIVE/postgres" vigil-postgres:/tmp/postgres`.)_
 
 8. Verify the audit chain end-to-end:
    ```sh
@@ -91,6 +157,7 @@ in the dark. Every step is concrete; every assumption is named.
 ## Phase 3 — Neo4j + IPFS (30 min)
 
 9. Restore Neo4j:
+
    ```sh
    docker compose up -d vigil-neo4j
    docker cp "$ARCHIVE/neo4j" vigil-neo4j:/tmp/neo4j-dump
@@ -111,6 +178,7 @@ in the dark. Every step is concrete; every assumption is named.
 11. Bring up Vault and unseal interactively (3 of 5 council members
     present + their YubiKeys, OR the architect with their cold-storage
     Shamir shares from the lawyer-held envelope per EXEC §34.5):
+
     ```sh
     docker compose up -d vigil-vault
     /usr/local/bin/vigil-vault-unseal --interactive
@@ -129,6 +197,7 @@ in the dark. Every step is concrete; every assumption is named.
 
 13. Start observability + edge services first; they stabilise before
     the data plane attaches:
+
     ```sh
     docker compose up -d vigil-redis vigil-keycloak vigil-prometheus \
         vigil-alertmanager vigil-grafana vigil-logstash vigil-filebeat \
@@ -136,6 +205,7 @@ in the dark. Every step is concrete; every assumption is named.
     ```
 
 14. Then the data-plane workers + dashboard + MINFI API:
+
     ```sh
     docker compose up -d
     ```
@@ -148,6 +218,7 @@ in the dark. Every step is concrete; every assumption is named.
 ## Phase 6 — Verify (15 min)
 
 16. Run the post-restore smoke suite:
+
     ```sh
     ./tools/e2e-smoke.sh
     make verify-hashchain
@@ -156,6 +227,7 @@ in the dark. Every step is concrete; every assumption is named.
 
 17. Trigger the watchdog manually so the archive's last-known-good is
     visible in the audit log:
+
     ```sh
     sudo /usr/local/bin/vigil-watchdog
     ```
@@ -170,6 +242,7 @@ in the dark. Every step is concrete; every assumption is named.
 ## Phase 7 — Sign off
 
 19. Append a row to `docs/decisions/log.md`:
+
     > YYYY-MM-DD — Restore from `<ARCHIVE>` completed in `<MM>` minutes.
     > RTO observed: `<MM>m`. Hash-chain integrity: ✓. Sign-off: <name>.
 
