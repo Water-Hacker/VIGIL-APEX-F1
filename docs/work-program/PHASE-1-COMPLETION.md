@@ -743,9 +743,23 @@ spells out the SLA table, the triage flow, the failure-modes,
 and the audit-emission contract for every Critical-class
 decision.
 
-### E4. Pre-commit secret scan
+### E4. Pre-commit secret scan — 🟩 (complete on arrival; cited Block-E E.9)
 
-Already in C10 — covered.
+Three-layer chain shipped:
+
+- [`.husky/pre-commit`](../../.husky/pre-commit) — gitleaks runs on
+  every staged commit before lint-staged; refuses to commit on any
+  match.
+- [`.gitleaks.toml`](../../.gitleaks.toml) — consolidated singular
+  `[allowlist]` form (commit `7f90302` corrected the gitleaks
+  8.21.2 plural-form regression); the allowlist is the single
+  system of record for known false positives.
+- [`.github/workflows/secret-scan.yml`](../../.github/workflows/secret-scan.yml)
+  — server-side gitleaks scan on every push + PR; redundant with
+  the pre-commit hook but blocks any direct-push bypass.
+
+No new code shipped in E.9; E.4 was complete-on-arrival per
+BLOCK-E-PLAN §2.9.
 
 ### E5. SBOM generation
 
