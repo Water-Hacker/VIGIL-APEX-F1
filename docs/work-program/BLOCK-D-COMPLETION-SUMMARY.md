@@ -1,10 +1,14 @@
 # Block D — completion summary
 
-> **Status:** all 12 work commits + opening allowlist commit shipped on
-> branch `fix/blockA-worker-entity-postgres-write-and-rulepass`. Awaiting
-> architect review.
-> **Branch tip:** `1e5d1d2` (D.11 / SRD §30 draft).
+> **Status:** ✅ architect-signed 2026-05-01. All 12 work commits +
+> opening allowlist commit shipped on branch
+> `fix/blockA-worker-entity-postgres-write-and-rulepass`.
+> **Branch tip at Block-D close:** `1e5d1d2` (D.11 / SRD §30 draft).
 > **Span:** 2533430 (Block-D opener) → 1e5d1d2 (D.11). 13 commits.
+> **Architect-action items resolution:** §2.1, §2.3, §2.4 retargeted
+> in Block-E entry Commit 1 (`b39a18c`, 2026-05-02). §2.2 resolved in
+> Block-E E.0 (2026-05-02). §2.5 (Falco production-only verification)
+> remains M0c-walked per the original spec.
 > **Author:** build agent (Claude).
 
 ---
@@ -60,13 +64,18 @@ as Block E sub-block E.17 (likely 2-3 internal commits: script
 extension, KNOWN_EVENT_TYPES + unit test, sandboxed Vault E2E
 harness).
 
-### 2.2 Sentinel-quorum action-name drift (from D.6)
+### 2.2 Sentinel-quorum action-name drift (from D.6) — ✅ RESOLVED
 
 Architect's spec said `sentinel.quorum_outage`; the live action enum
-(`packages/shared/src/schemas/audit.ts:18`) has `system.health_degraded`.
-Block-D commits the live name. **Architect-action:** if the spec name
-is preferred, the rename is a one-enum-add + one-script-change in a
-follow-up.
+(`packages/shared/src/schemas/audit.ts:18`) had `system.health_degraded`.
+Block-D commits the live name. **Resolved in Block-E sub-block E.0
+(2026-05-02)**: one-enum-add — added `sentinel.quorum_outage` to
+`zAuditAction` while preserving `system.health_degraded` (still used
+by `apps/adapter-runner/src/triggers/calibration-audit-runner.ts` for
+the general TAL-PA category-J / calibration-health signal).
+sentinel-quorum's `emitOutageAuditRow` now emits the specific
+`sentinel.quorum_outage` value. Old audit rows retain their legacy
+value (audit-chain values are immutable).
 
 ### 2.3 Backup architect-spec coverage gaps (from D.9)
 

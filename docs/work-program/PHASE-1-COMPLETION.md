@@ -12,9 +12,9 @@
 
 ## Snapshot of state
 
-**Last refreshed: 2026-05-01.** Counts move with every commit; the
-prior hand-maintained "46 packages / 712 tests" snapshot drifted.
-The numbers below come from a fresh sweep of the live tree.
+**Last refreshed: 2026-05-02 (Block-E E.0).** Counts move with every
+commit; the prior hand-maintained "46 packages / 712 tests" snapshot
+drifted. The numbers below come from a fresh sweep of the live tree.
 
 | Dimension                        | Status                                                                           |
 | -------------------------------- | -------------------------------------------------------------------------------- |
