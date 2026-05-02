@@ -13,7 +13,7 @@ import type { AddressInfo } from 'node:net';
 // Block-D D.6 / C6 — sentinel-quorum integration test.
 //
 // Spec: 3 sentinel VPS (Helsinki, Tokyo, NYC) probe the dashboard. If 2 of 3
-// report `down`, the on-host coordinator emits a `system.health_degraded`
+// report `down`, the on-host coordinator emits a `sentinel.quorum_outage`
 // audit-of-audit row via the audit-bridge UDS.
 //
 // This test stands up:
@@ -163,7 +163,7 @@ describe('sentinel-quorum integration (gated on 3 sentinel ports + 1 UDS)', () =
     expect(true).toBe(true);
   });
 
-  it('3-of-3 down → emits system.health_degraded audit row to UDS', async () => {
+  it('3-of-3 down → emits sentinel.quorum_outage audit row to UDS', async () => {
     if (!allBound) return;
     helsinki!.outcome = 'down';
     tokyo!.outcome = 'down';
@@ -184,7 +184,7 @@ describe('sentinel-quorum integration (gated on 3 sentinel ports + 1 UDS)', () =
 
     expect(bridge!.captured).toHaveLength(1);
     const row = bridge!.captured[0]!;
-    expect(row.action).toBe('system.health_degraded');
+    expect(row.action).toBe('sentinel.quorum_outage');
     expect(row.actor).toBe('system:sentinel-quorum');
     expect(row.subject_kind).toBe('system');
     expect(row.subject_id).toBe('dashboard');

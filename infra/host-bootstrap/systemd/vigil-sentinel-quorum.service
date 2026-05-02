@@ -11,7 +11,7 @@ Group=vigil
 WorkingDirectory=/opt/vigil-apex
 EnvironmentFile=-/etc/vigil/sentinel.env
 # Polls Helsinki / Tokyo / NYC sentinels for the dashboard target. If two
-# of three report "down", emits a system.health_degraded audit row via
+# of three report "down", emits a sentinel.quorum_outage audit row via
 # the audit-bridge UDS and exits 1.
 ExecStart=/usr/bin/env -S npx --yes tsx /opt/vigil-apex/scripts/sentinel-quorum.ts dashboard
 TimeoutStartSec=60

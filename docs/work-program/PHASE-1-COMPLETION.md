@@ -12,9 +12,9 @@
 
 ## Snapshot of state
 
-**Last refreshed: 2026-05-01.** Counts move with every commit; the
-prior hand-maintained "46 packages / 712 tests" snapshot drifted.
-The numbers below come from a fresh sweep of the live tree.
+**Last refreshed: 2026-05-02 (Block-E E.0).** Counts move with every
+commit; the prior hand-maintained "46 packages / 712 tests" snapshot
+drifted. The numbers below come from a fresh sweep of the live tree.
 
 | Dimension                        | Status                                                                           |
 | -------------------------------- | -------------------------------------------------------------------------------- |
@@ -144,7 +144,7 @@ Both files re-checked 2026-05-01:
 
 Closed during a prior pass.
 
-### A8. End-to-end fixture script — 🟩 (with SRD §30 enumeration deferred to Block D)
+### A8. End-to-end fixture script — 🟩 (SRD §30 enumeration resolved 2026-05-02)
 
 Both files exist and the audit-coverage doc is shipped:
 
@@ -179,6 +179,19 @@ inferred list in
 [E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping)
 which the draft's 20 `[INFERRED]` entries supersede with explicit
 naming.
+
+**A8 resolution (2026-05-02) — 🟩 closed.** Architect delivered
+[`docs/source/SRD-30-architect-decisions.md`](../source/SRD-30-architect-decisions.md)
+(commit `c28e6d6`): **17 ACCEPT**, **3 EDIT** (AT-M0c-05,
+AT-M1-06, AT-M1-07), **0 REJECT**. Final §30 binding count:
+**59 acceptance tests** (39 CITED + 20 INFERRED, with 3 of the
+latter edited from draft). Build agent merged the architect-
+blessed enumeration into [SRD-v3.md §30.1..§30.7](../source/SRD-v3.md)
+in the Block-E entry Commit 1 (this commit), replacing the empty
+sub-headings. The §30 follow-up tracked at this row is closed;
+downstream Block-E items (e2e-fixture coverage matrix re-run,
+PR-template AT-?-?? placeholder rename) inherit the new
+enumeration.
 
 ### A9. Production-placeholder sweep
 

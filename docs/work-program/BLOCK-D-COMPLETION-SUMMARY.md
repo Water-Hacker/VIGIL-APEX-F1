@@ -1,10 +1,14 @@
 # Block D — completion summary
 
-> **Status:** all 12 work commits + opening allowlist commit shipped on
-> branch `fix/blockA-worker-entity-postgres-write-and-rulepass`. Awaiting
-> architect review.
-> **Branch tip:** `1e5d1d2` (D.11 / SRD §30 draft).
+> **Status:** ✅ architect-signed 2026-05-01. All 12 work commits +
+> opening allowlist commit shipped on branch
+> `fix/blockA-worker-entity-postgres-write-and-rulepass`.
+> **Branch tip at Block-D close:** `1e5d1d2` (D.11 / SRD §30 draft).
 > **Span:** 2533430 (Block-D opener) → 1e5d1d2 (D.11). 13 commits.
+> **Architect-action items resolution:** §2.1, §2.3, §2.4 retargeted
+> in Block-E entry Commit 1 (`b39a18c`, 2026-05-02). §2.2 resolved in
+> Block-E E.0 (2026-05-02). §2.5 (Falco production-only verification)
+> remains M0c-walked per the original spec.
 > **Author:** build agent (Claude).
 
 ---
@@ -47,16 +51,31 @@ accept. **Architect-action options:**
 - (B) Extend script to support `--recipient` flags (more flexible
   but a script change).
 
-Default: M0c hardening week — operator picks during the actual Vault
-ceremony.
+**Resolution:** Block E sub-block, **Option (B)** — extend script
+with `--recipient share<N>=<recipient>` flags, perform inline age
+encryption (plaintext shares never touch disk), exercise end-to-end
+against a sandboxed Vault container in dev compose. **NOT M0c.**
+Architect's reasoning: Option (A) preserves a plaintext-shares-on-
+disk window during the ceremony, which violates the defence-in-
+depth posture of the rest of the system. Resolving now (with no
+time pressure) means the architect arrives at M0c with a script
+that has been exercised end-to-end against a real Vault. Tracked
+as Block E sub-block E.17 (likely 2-3 internal commits: script
+extension, KNOWN_EVENT_TYPES + unit test, sandboxed Vault E2E
+harness).
 
-### 2.2 Sentinel-quorum action-name drift (from D.6)
+### 2.2 Sentinel-quorum action-name drift (from D.6) — ✅ RESOLVED
 
 Architect's spec said `sentinel.quorum_outage`; the live action enum
-(`packages/shared/src/schemas/audit.ts:18`) has `system.health_degraded`.
-Block-D commits the live name. **Architect-action:** if the spec name
-is preferred, the rename is a one-enum-add + one-script-change in a
-follow-up.
+(`packages/shared/src/schemas/audit.ts:18`) had `system.health_degraded`.
+Block-D commits the live name. **Resolved in Block-E sub-block E.0
+(2026-05-02)**: one-enum-add — added `sentinel.quorum_outage` to
+`zAuditAction` while preserving `system.health_degraded` (still used
+by `apps/adapter-runner/src/triggers/calibration-audit-runner.ts` for
+the general TAL-PA category-J / calibration-health signal).
+sentinel-quorum's `emitOutageAuditRow` now emits the specific
+`sentinel.quorum_outage` value. Old audit rows retain their legacy
+value (audit-chain values are immutable).
 
 ### 2.3 Backup architect-spec coverage gaps (from D.9)
 
@@ -65,32 +84,39 @@ Five architect-spec'd backup items not yet in
 as yellow warnings (not hard errors); the runbook's gap table records
 each with an action target:
 
-| Spec item                   | Action target      |
-| --------------------------- | ------------------ |
-| Vault snapshot (raft-aware) | M0c hardening week |
-| Git repo backup             | M0c hardening week |
-| Audit-chain explicit export | M0c hardening week |
-| Encrypted-at-rest archive   | M0c hardening week |
-| Hetzner archive mirror      | Phase-2 (post-MOU) |
+| Spec item                   | Action target                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| Vault snapshot (raft-aware) | Block E (sub-block E.12)                                                               |
+| Git repo backup             | Block E low-priority (sub-block E.15)                                                  |
+| Audit-chain explicit export | Block E (sub-block E.13)                                                               |
+| Encrypted-at-rest archive   | Block E (sub-block E.14)                                                               |
+| Hetzner archive mirror      | Phase-2 (post-MOU; decision-log entry only in Block E sub-block E.16, no provisioning) |
 
 These are defence-in-depth additions, not blockers — the current
 pipeline meets the 6-hour RTO target for the failure modes RESTORE.md
 is written for.
 
-### 2.4 SRD §30 enumeration: 20 INFERRED entries (from D.11)
+### 2.4 SRD §30 enumeration: 20 INFERRED entries (from D.11) — ✅ RESOLVED
 
-Architect reviews `docs/source/SRD-30-enumeration-draft.md` and
-accepts / edits / rejects the 20 `[INFERRED]` entries. The 39
-`[CITED]` entries are verbatim from existing Tables 186-192 and need
-no decision — only relocation under §30.1..§30.7 sub-headings.
+**Resolved 2026-05-02.** Architect delivered
+[`docs/source/SRD-30-architect-decisions.md`](../source/SRD-30-architect-decisions.md)
+(commit `c28e6d6`): **17 ACCEPT** verbatim, **3 EDIT** (AT-M0c-05,
+AT-M1-06, AT-M1-07), **0 REJECT**. Final §30 binding count:
+**59 acceptance tests** (39 CITED + 20 INFERRED, 3 of the latter
+edited from draft). Merged into
+[`docs/source/SRD-v3.md`](../source/SRD-v3.md) §30.1..§30.7 in this
+commit (Block-E entry Commit 1), replacing the empty sub-headings
+with the full enumeration.
 
-After architect resolution:
+Downstream:
 
-1. Build agent merges accepted set into SRD-v3.md §30.
-2. `e2e-fixture.sh` coverage matrix re-runs against the architect-
-   blessed enumeration; new `AT-NNN` entries become fixture
+1. ✅ Build agent merged the architect-blessed set into SRD-v3.md §30
+   (this commit).
+2. **Pending Block E:** `e2e-fixture.sh` coverage matrix re-runs
+   against the new enumeration; new `AT-NNN` entries become fixture
    line-items.
-3. PR-template's `AT-?-??:` placeholder becomes architect-named.
+3. **Pending Block E:** PR-template's `AT-?-??:` placeholder becomes
+   architect-named.
 
 ### 2.5 Falco rule production-only verification (from D.5)
 

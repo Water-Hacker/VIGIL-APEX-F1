@@ -9,25 +9,11 @@ import {
   registerShutdown,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
-import {
-  expose,
-  sealedBoxDecrypt,
-  shamirCombineFromBase64,
-  VaultClient,
-  wrapSecret,
-} from '@vigil/security';
-import { z } from 'zod';
+import { VaultClient } from '@vigil/security';
 
-import { TIP_PARAPHRASE_TASK } from './prompts.js';
+import { handleTip, zTipTriagePayload, type TipTriagePayload } from './triage-flow.js';
 
 const logger = createLogger({ service: 'worker-tip-triage' });
-
-const zPayload = z.object({
-  tip_id: z.string().uuid(),
-  // Three Shamir shares from council members (3-of-5; SRD §28.4 quorum decryption)
-  decryption_shares: z.array(z.string()).min(3).max(5),
-});
-type Payload = z.infer<typeof zPayload>;
 
 // Block-B A2 migration: TIP_PARAPHRASE_SYSTEM moved into the
 // SafeLlmRouter prompt registry under name 'tip-triage.paraphrase'
@@ -36,25 +22,13 @@ type Payload = z.infer<typeof zPayload>;
 // (closed-context <task> element). The doctrine system preamble
 // from AI-SAFETY-DOCTRINE-v1 wraps every call so L4 prompt-injection
 // + L11 daily-canary apply uniformly.
+//
+// Block-E E.2: handler logic extracted to src/triage-flow.ts so the
+// 3-of-5 council Shamir decrypt → SafeLlmRouter paraphrase flow is
+// E2E-testable without spinning up Vault / Postgres / Redis. See
+// __tests__/tor-flow-e2e.test.ts.
 
-function toBase64(bytes: Uint8Array): string {
-  // Encode without depending on Node's Buffer import surface — the worker
-  // runtime always has it via the runtime, but importing keeps node:buffer
-  // off the type-check path for environments that don't ship @types/node.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-  const buf: { from: (b: Uint8Array) => { toString: (enc: string) => string } } = (
-    globalThis as { Buffer?: unknown }
-  ).Buffer as never;
-  return buf.from(bytes).toString('base64');
-}
-
-const zParaphrase = z.object({
-  paraphrase: z.string().min(20).max(500),
-  topic_hint: z.enum(['procurement', 'payroll', 'infrastructure', 'sanctions', 'banking', 'other']),
-  severity_hint: z.enum(['low', 'medium', 'high', 'critical']),
-});
-
-class TipTriageWorker extends WorkerBase<Payload> {
+class TipTriageWorker extends WorkerBase<TipTriagePayload> {
   constructor(
     private readonly tipRepo: TipRepo,
     private readonly vault: VaultClient,
@@ -65,74 +39,24 @@ class TipTriageWorker extends WorkerBase<Payload> {
     super({
       name: 'worker-tip-triage',
       stream: STREAMS.TIP_TRIAGE,
-      schema: zPayload,
+      schema: zTipTriagePayload,
       client: queue,
       logger,
       concurrency: 1, // sensitive — process serially
     });
   }
 
-  protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
-    // tip_id is the row UUID (matches Zod schema above + the dashboard
-    // /api/triage/tips/decrypt body). Lookup must hit the id column, not ref.
-    const tip = await this.tipRepo.getById(env.payload.tip_id);
-    if (!tip) return { kind: 'dead-letter', reason: 'tip not found' };
-
-    // 3-of-5 council quorum decryption (SRD §28.4). The inbound payload
-    // carries three council Shamir shares of the operator-team private key;
-    // we reconstruct the key in-memory, decrypt, and immediately drop the
-    // reconstructed handle. The shares themselves were collected by the
-    // /triage/tips operator UI (Phase C10) — never persisted server-side.
-    const pk = await this.vault.read<string>('tip-portal', 'operator_team_public_key');
-
-    let reconstructedSk;
-    try {
-      reconstructedSk = shamirCombineFromBase64(env.payload.decryption_shares);
-    } catch (e) {
-      logger.error({ err: e, tip_id: tip.id }, 'shamir-combine-failed');
-      return { kind: 'dead-letter', reason: 'shamir-combine-failure' };
-    }
-
-    let plaintext: Uint8Array;
-    try {
-      // sealedBoxDecrypt expects base64-encoded keys/ciphertexts; the
-      // reconstructed Shamir bytes are the libsodium private key, so we
-      // re-encode through Secret<string> wrapping to keep the unwrap
-      // surface narrow.
-      const skBytes = expose(reconstructedSk);
-      const skB64 = wrapSecret(toBase64(skBytes));
-      plaintext = await sealedBoxDecrypt(
-        toBase64(tip.body_ciphertext as unknown as Uint8Array),
-        expose(pk),
-        skB64,
-      );
-    } catch (e) {
-      logger.error({ err: e }, 'tip-decrypt-failed');
-      return { kind: 'dead-letter', reason: 'decrypt-failure' };
-    }
-    const text = new TextDecoder().decode(plaintext);
-
-    // LLM paraphrase pass — Block-B A2 migration: routes through
-    // SafeLlmRouter so the doctrine system preamble + canary +
-    // call-record audit + prompt-version pin apply uniformly.
-    try {
-      const outcome = await this.safe.call<z.infer<typeof zParaphrase>>({
-        findingId: null,
-        assessmentId: null,
-        promptName: 'tip-triage.paraphrase',
-        task: TIP_PARAPHRASE_TASK,
-        sources: [{ id: `tip:${tip.id}`, label: 'tip-body', text: text.slice(0, 4000) }],
-        responseSchema: zParaphrase,
+  protected async handle(env: Envelope<TipTriagePayload>): Promise<HandlerOutcome> {
+    return handleTip(
+      {
+        tipRepo: this.tipRepo,
+        vault: this.vault,
+        safe: this.safe,
         modelId: this.modelId,
-      });
-      logger.info({ tip_id: tip.id, severity: outcome.value.severity_hint }, 'tip-paraphrased');
-      // Update disposition + paraphrase notes (encrypted at rest with the same operator-team key)
-      await this.tipRepo.setDisposition(tip.id, 'IN_TRIAGE', 'worker-tip-triage');
-    } catch (e) {
-      logger.error({ err: e }, 'paraphrase-failed');
-      return { kind: 'retry', reason: 'llm-failure', delay_ms: 60_000 };
-    }
-    return { kind: 'ack' };
+        logger,
+      },
+      env,
+    );
   }
 }
 

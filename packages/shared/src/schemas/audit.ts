@@ -16,6 +16,15 @@ export const zAuditAction = z.enum([
   'system.bootstrap',
   'system.shutdown',
   'system.health_degraded',
+  // Sentinel-quorum outage. Distinct from system.health_degraded
+  // (which is the general TAL-PA category-J / calibration-audit
+  // signal); sentinel.quorum_outage is the specific 2-of-3 sentinel
+  // attestation that the dashboard / Hetzner ingestion VPS is
+  // unreachable from outside the host network. Per BLOCK-E E.0
+  // (architect signoff 2026-05-02): one-enum-add; existing rows
+  // keep their legacy 'system.health_degraded' value (audit-chain
+  // values are immutable).
+  'sentinel.quorum_outage',
 
   // Vault
   'vault.unsealed',
@@ -133,7 +142,10 @@ export const zAnchorCommitment = z.object({
   audit_event_seq_to: z.number().int().nonnegative(),
   root_hash: zSha256Hex,
   committed_at: zIsoInstant,
-  polygon_tx_hash: z.string().regex(/^0x[a-f0-9]{64}$/i).nullable(),
+  polygon_tx_hash: z
+    .string()
+    .regex(/^0x[a-f0-9]{64}$/i)
+    .nullable(),
   polygon_block_number: z.number().int().positive().nullable(),
   polygon_confirmed_at: zIsoInstant.nullable(),
 });

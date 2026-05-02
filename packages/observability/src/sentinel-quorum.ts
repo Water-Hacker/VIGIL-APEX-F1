@@ -4,7 +4,7 @@
  * Per TRUTH §B: 3 sentinel VPS (Helsinki, Tokyo, NYC) probe the Yaoundé
  * dashboard + Hetzner ingestion VPS independently. If two of three report
  * "down" within the same 5-minute window, the on-host coordinator
- * declares an outage and emits a `system.health_degraded` audit-of-audit
+ * declares an outage and emits a `sentinel.quorum_outage` audit-of-audit
  * row.
  *
  * The pure `quorumDecide` lives here with the orchestration helpers
@@ -143,7 +143,7 @@ export async function emitOutageAuditRow(
   socketPath: string = process.env.AUDIT_BRIDGE_SOCKET ?? '/run/vigil/audit-bridge.sock',
 ): Promise<void> {
   const payload = JSON.stringify({
-    action: 'system.health_degraded',
+    action: 'sentinel.quorum_outage',
     actor: 'system:sentinel-quorum',
     subject_kind: 'system',
     subject_id: target,
@@ -194,7 +194,7 @@ export interface RunSentinelQuorumResult {
 
 /**
  * Probe each endpoint, reduce to a 2-of-3 quorum, and (if `down`) emit a
- * `system.health_degraded` audit-of-audit row to the audit-bridge UDS.
+ * `sentinel.quorum_outage` audit-of-audit row to the audit-bridge UDS.
  *
  * Dependencies are injectable so the integration test can run against
  * localhost mocks without touching the production audit-bridge socket.

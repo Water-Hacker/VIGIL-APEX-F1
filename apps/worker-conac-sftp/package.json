@@ -2,7 +2,7 @@
   "name": "worker-conac-sftp",
   "version": "0.1.0",
   "private": true,
-  "description": "CONAC SFTP delivery worker \u2014 manifest, ACK loop, format-adapter layer (W-25).",
+  "description": "CONAC SFTP delivery worker — manifest, ACK loop, format-adapter layer (W-25).",
   "license": "UNLICENSED",
   "type": "module",
   "main": "dist/index.js",
@@ -11,6 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
     "start": "node dist/index.js",
     "clean": "rimraf dist .turbo"
   },
@@ -29,6 +30,7 @@
     "@types/ssh2-sftp-client": "^9.0.4",
     "rimraf": "^6.0.1",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
   }
 }

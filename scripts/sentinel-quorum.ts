@@ -5,7 +5,7 @@
 // Per TRUTH §B: 3 sentinel VPS (Helsinki, Tokyo, NYC) probe the Yaoundé
 // dashboard + Hetzner ingestion VPS independently. If two of three report
 // "down" within the same 5-minute window, the on-host coordinator
-// declares an outage and emits a `system.health_degraded` audit-of-audit
+// declares an outage and emits a `sentinel.quorum_outage` audit-of-audit
 // row.
 //
 // All logic lives in `@vigil/observability`. This file is the systemd
