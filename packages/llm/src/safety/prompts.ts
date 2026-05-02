@@ -2,9 +2,32 @@
  * Canonical adversarial-pipeline prompt templates — AI-SAFETY-DOCTRINE-v1
  * §B.2, §B.4, §B.8, §B.9.
  *
- * Each template is registered with `globalPromptRegistry` on module load.
- * The registry's snapshot hash is captured on every certainty assessment
- * via `Schemas.CertaintyAssessment.prompt_registry_hash` so a future
+ * SCOPE — DOCTRINE-LEVEL ONLY.
+ *
+ *   This file is for doctrine-level prompts shared across all workers
+ *   (canaries, devil's-advocate, secondary-review, anchoring/order-
+ *   effects). Per-worker prompts live in
+ *   `apps/worker-{name}/src/prompts.ts`.
+ *
+ *   The distinction matters: doctrine-level prompts are the canonical
+ *   set checked by `Safety.adversarialPromptsRegistered()` at every
+ *   worker startup; their registration is part of the @vigil/llm
+ *   package's public surface. Worker-level prompts are private to
+ *   their worker, registered as a side-effect when the worker's
+ *   index.ts imports its `./prompts.js`. Adding a new worker prompt
+ *   here would force every other worker to inherit the registration
+ *   transitively, which conflates audit ownership and makes per-
+ *   worker template versioning harder to reason about.
+ *
+ *   When in doubt: if exactly one worker uses the prompt, it goes
+ *   in that worker's `apps/worker-{name}/src/prompts.ts`. If two or
+ *   more workers + the certainty-engine substrate use it, it goes
+ *   here.
+ *
+ * Each template below is registered with `globalPromptRegistry` on
+ * module load. The registry's snapshot hash is captured on every
+ * certainty assessment via
+ * `Schemas.CertaintyAssessment.prompt_registry_hash` so a future
  * reviewer can confirm exactly which prompt set was in use when the
  * assessment was produced.
  *
@@ -145,36 +168,10 @@ globalPromptRegistry.register({
   },
 });
 
-// 5) Entity resolution — alias clustering. Distinct from finding-shaping
-//    extraction: there are no source documents to cite; the call disambiguates
-//    person/company/public_body aliases. Registered here so worker-entity
-//    can run through SafeLlmRouter (prompt versioning + call-record audit
-//    trail + low-temperature default + canary). See SRD §15.5.1.
-globalPromptRegistry.register({
-  name: 'entity.resolve-aliases',
-  version: 'v1.0.0',
-  description:
-    'Alias clustering for Cameroonian person / company / public-body names across FR + EN. Output validated by zErResp; no verbatim-grounding requirement (this prompt does not cite source documents).',
-  render: (input) => {
-    const i = input as { aliases?: ReadonlyArray<string> } | undefined;
-    const aliases = i?.aliases ?? [];
-    return {
-      system:
-        NEUTRAL_FRAMING_HEADER +
-        '\n\nYou disambiguate Cameroonian person and company aliases across French and English. ' +
-        'You receive a list of name strings; output their canonical clusters with a confidence score.\n\n' +
-        'Rules:\n' +
-        "- Treat 'Jean-Paul MBARGA', 'J.P. Mbarga', 'Mbarga J.' as the same person if context permits.\n" +
-        '- Companies with identical RCCM numbers are the same company; otherwise treat them as distinct.\n' +
-        '- Confidence < 0.70 → output as separate single-element clusters (let the review queue handle it).\n' +
-        '- If you cannot disambiguate, return {"status":"insufficient_evidence","reason":"..."}.',
-      user:
-        'Aliases:\n' +
-        aliases.map((a, idx) => `${idx + 1}. ${a}`).join('\n') +
-        '\n\nOutput JSON: {"clusters":[{"canonical":"<name>","aliases":["..."],"kind":"person|company|public_body","confidence":<0..1>}]}.',
-    };
-  },
-});
+// `entity.resolve-aliases` was registered here pre-Block-D; lifted to
+// `apps/worker-entity/src/prompts.ts` per the doctrine-level / worker-
+// level scope rule documented in the file header. See the
+// SAFELLM-COVERAGE-INVENTORY architect call for context.
 
 export const ADVERSARIAL_PROMPT_NAMES = [
   'extract.cited-claims',
