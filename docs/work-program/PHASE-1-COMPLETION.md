@@ -693,10 +693,26 @@ D7-extension.
 
 ## TRACK E — Security
 
-### E1. Snyk Pro vulnerability scan
+### E1. Snyk Pro vulnerability scan — 🟩 (Block-E E.6)
 
-Per OPERATIONS §4 CI gates. Wire Snyk into CI; blocking on Critical,
-warning on High.
+Per OPERATIONS §4 CI gates. Wired in
+[.github/workflows/security.yml](../../.github/workflows/security.yml)
+`snyk` job: `--all-projects --severity-threshold=critical
+--fail-on=upgradable --policy-path=.snyk-policy.yaml`. Daily cron
+(05:23 UTC), per-PR, per-push to main, manual dispatch. SARIF
+uploaded to GitHub code-scanning. The `if: env.SNYK_TOKEN != ''`
+guard makes the job a no-op until the architect provisions the
+secret.
+
+[.snyk-policy.yaml](../../.snyk-policy.yaml) — empty seed. Architect-
+only writes; every `ignore` entry MUST carry a `reason` + ISO-8601
+`expires` ≤ 90 days; indefinite suppressions explicitly forbidden;
+each Critical allowlist entry mirrors a decision-log entry per
+DECISION-N convention. File-header doctrine documents the editing
+rules; on first SNYK_TOKEN-enabled run, any pre-existing Critical
+that is not auto-upgradable becomes a halt-and-surface event for
+architect classification (allowlist with rationale + expiry, OR
+upgrade, OR architect-acknowledged risk).
 
 ### E2. Threat-model code-coverage matrix
 

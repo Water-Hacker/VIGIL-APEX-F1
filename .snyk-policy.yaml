@@ -1,0 +1,50 @@
+# Block-E E.6 / E1 — Snyk Pro vulnerability-scan policy.
+#
+# Per OPERATIONS §4 and BLOCK-E-PLAN §2.6 acceptance: any pre-existing
+# Critical vulnerability that is NOT auto-fixable via dependency upgrade
+# is documented HERE with rationale + expiry. Indefinite suppressions
+# are explicitly forbidden — every entry MUST carry an expires field.
+#
+# This file is read by the Snyk action via --policy-path in
+# .github/workflows/security.yml. It supplements (does not replace) the
+# Snyk service's online policy. Local-policy entries take precedence.
+#
+# Editing rules:
+#   1. Architect-only writes (no agent additions). Each entry requires
+#      conventional-commit message: `chore(snyk): allowlist <CVE-id> —
+#      <rationale-summary>`.
+#   2. Every `ignore` entry MUST include:
+#        reason     — one-paragraph rationale; cite mitigation (network
+#                     boundary, runtime guard, downstream handler, etc.)
+#        expires    — ISO-8601 absolute date; NEVER a relative
+#                     duration; NEVER absent; cap 90 days. Re-evaluate
+#                     before expiry — if still applicable, write a NEW
+#                     entry with new rationale. No silent renewals.
+#        severity   — copy verbatim from the Snyk finding
+#        path       — copy verbatim from the Snyk finding (npm path)
+#   3. Architect signs off in `docs/decisions/log.md` for every Critical
+#      allowlist entry — this file is not the system of record, the
+#      decision log is.
+#
+# Reference: Snyk policy format
+#   https://docs.snyk.io/snyk-cli/test-for-vulnerabilities/the-.snyk-file
+#
+# Seed state at E.6 commit: empty. The architect provisions SNYK_TOKEN
+# in repo secrets; on first run, any Critical surfaced that cannot be
+# upgraded is brought back here for explicit review. Until SNYK_TOKEN
+# is set, the security.yml `snyk` job is a no-op (skip via the
+# `if: env.SNYK_TOKEN != ''` guard).
+
+version: v1.25.0
+ignore: {}
+# Example shape (do not uncomment; the Snyk schema enforces the keys):
+#
+# ignore:
+#   SNYK-JS-EXAMPLE-1234567:
+#     - '* > some-dep > vulnerable-pkg':
+#         reason: >-
+#           Vulnerable function not reachable from any VIGIL APEX entry
+#           point (audited <date>); upstream patch tracked at <link>.
+#         expires: 2026-08-01T00:00:00.000Z
+#
+patch: {}
