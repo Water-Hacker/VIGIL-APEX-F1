@@ -714,11 +714,17 @@ that is not auto-upgradable becomes a halt-and-surface event for
 architect classification (allowlist with rationale + expiry, OR
 upgrade, OR architect-acknowledged risk).
 
-### E2. Threat-model code-coverage matrix
+### E2. Threat-model code-coverage matrix — 🟩 (Block-E E.7)
 
-Cross-reference `THREAT-MODEL-CMR.md` threats × code mitigations.
-Output: a CSV / matrix doc showing every threat has either a code
-mitigation or an explicit "out of scope" note.
+[docs/security/threat-coverage-matrix.md](../security/threat-coverage-matrix.md)
+swept 2026-05-02. Coverage: TTP-CMR-01..07 (all 🟩 / 🟦); SRD §05
+Tier-1/2/3 generic threats T-1.x..T-3.x (all 🟩 / 🟦); 8 actor-class
+rows from THREAT-MODEL §1; new §3 Infrastructure-realities table
+(6 rows); new cross-cutting code-quality-gates table covering
+a11y, visual regression, SafeLlmRouter chokepoint, secret-scan,
+SBOM. Block-E commit cross-links: E.0 sentinel-quorum (T-1.1),
+E.2 tip-portal privacy invariant (T-2.4), E.5 a11y + visual
+(SRD §03.5), E.6 Snyk policy (T-3.3). Zero rows uncovered.
 
 ### E3. Dependency rotation
 
