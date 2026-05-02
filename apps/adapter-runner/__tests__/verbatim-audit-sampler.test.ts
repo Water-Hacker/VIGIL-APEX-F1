@@ -77,11 +77,26 @@ describe('AUDIT-092 — uniformSample distributional uniformity', () => {
    * narrow enough that the textbook biased-shuffle skew (well-documented
    * to over- or under-represent positions by 5-15% depending on engine
    * sort impl) would fail.
+   *
+   * TRIALS originally 4_000 — at that count the per-position σ is ~27.4
+   * for p=k/n=0.25, so the ±10% tolerance (±100) is only 3.65σ from the
+   * mean. Per-position false-positive rate ≈0.026%; across 20 positions
+   * ~0.5% chance per CI run that a single position falls outside under a
+   * perfectly correct uniform sampler. CI did flake there (commit
+   * ec31764: position 8 = 893, 3.9σ from 1000, statistical noise — the
+   * implementation is correct partial Fisher-Yates over crypto.randomInt
+   * and 10/10 local re-runs pass).
+   *
+   * Bumped to 10_000: σ ≈43.3, ±10% tolerance ≈±250, safety margin ≈5.78σ
+   * → per-position FP ~4×10⁻⁹, across 20 positions ~8×10⁻⁸ per run
+   * (effectively zero). Still catches a ≥10% biased shuffle since the
+   * tolerance is the same percentage. Runtime ~2.5× original (still
+   * sub-second).
    */
   it('every input position appears with empirical freq within tolerance of k/n', () => {
     const N = 20;
     const K = 5;
-    const TRIALS = 4_000;
+    const TRIALS = 10_000;
     const input = Array.from({ length: N }, (_, i) => i);
     const counts = new Array<number>(N).fill(0);
     for (let t = 0; t < TRIALS; t++) {
