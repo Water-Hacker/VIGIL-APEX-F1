@@ -726,10 +726,22 @@ SBOM. Block-E commit cross-links: E.0 sentinel-quorum (T-1.1),
 E.2 tip-portal privacy invariant (T-2.4), E.5 a11y + visual
 (SRD §03.5), E.6 Snyk policy (T-3.3). Zero rows uncovered.
 
-### E3. Dependency rotation
+### E3. Dependency rotation — 🟩 (Block-E E.8)
 
-Quarterly dependency audit; renovate-bot config; blocking on Critical
-CVE within 7 days.
+[`renovate.json`](../../renovate.json) — renovate-bot config:
+weekly Mon-AM cadence (`schedule: ["before 5am on monday"]`),
+quarterly review for Tier-1 crypto + smart-contract + Anthropic
+SDK deps via per-package soak windows (14 / 7 / 3 days), workspace
+pins explicitly ignored, vulnerabilityAlerts always-on with
+immediate PR creation. Auto-merge disabled across the board so
+every dependency change enters the TAL-PA audit chain via the
+operator's manual review row (DECISION-012 contract). The 7-day
+SLA on Critical-CVE PRs is enforced by the architect's quarterly
+review pass; runbook
+[`docs/runbooks/dependency-rotation.md`](../runbooks/dependency-rotation.md)
+spells out the SLA table, the triage flow, the failure-modes,
+and the audit-emission contract for every Critical-class
+decision.
 
 ### E4. Pre-commit secret scan
 
