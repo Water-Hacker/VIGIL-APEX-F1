@@ -59,6 +59,32 @@ log "ipfs cluster pin export"
 docker exec vigil-ipfs-cluster ipfs-cluster-ctl pin ls --enc=json \
   > "${DEST}/ipfs-pinset.json"
 
+# 4b. Vault raft snapshot (Block-E E.12 / C9 backup gap 1).
+#     Btrfs-of-/srv/vigil/vault captures the on-disk raft data, but a
+#     `vault operator raft snapshot save` produces the canonical
+#     restore artefact (consistent point-in-time across all raft peers,
+#     restorable via `vault operator raft snapshot restore`).
+#     Token custody: VAULT_BACKUP_TOKEN is a scoped token with the
+#     SINGLE policy `vigil-backup-snapshot` — read-only access to
+#     `sys/storage/raft/snapshot` and nothing else. Quarterly rotation
+#     per docs/runbooks/backup.md §"Vault snapshot token rotation".
+#     If the token isn't provisioned, log a warning and continue —
+#     the btrfs snapshot is still useful, just not the canonical
+#     restore artefact.
+log "vault operator raft snapshot save"
+if [ -n "${VAULT_BACKUP_TOKEN:-}" ]; then
+  if VAULT_TOKEN="${VAULT_BACKUP_TOKEN}" \
+     docker exec -e VAULT_TOKEN="${VAULT_BACKUP_TOKEN}" vigil-vault \
+       vault operator raft snapshot save - > "${DEST}/vault-raft.snap"; then
+    log "vault snapshot OK ($(stat -c%s "${DEST}/vault-raft.snap") bytes)"
+  else
+    log "[warn] vault snapshot failed — token may be expired or revoked; archive continues"
+    rm -f "${DEST}/vault-raft.snap"
+  fi
+else
+  log "[warn] VAULT_BACKUP_TOKEN unset — skipping canonical raft snapshot (btrfs covers the on-disk data); see docs/runbooks/backup.md"
+fi
+
 # 5. Signed manifest — sha256 of every file, then architect-GPG signature.
 log "manifest + signature"
 (cd "${DEST}" && find . -type f ! -name MANIFEST.sha256 \

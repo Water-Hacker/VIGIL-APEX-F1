@@ -550,13 +550,13 @@ emit yellow warnings (not hard errors) so the gap is visible in CI
 without blocking. Each row points the operator at
 docs/runbooks/backup.md for the architect-action context.
 
-| Spec item                   | Current                             | Gap                                                 | Action             |
-| --------------------------- | ----------------------------------- | --------------------------------------------------- | ------------------ |
-| Vault snapshot              | btrfs-of-/srv/vigil/vault           | no `vault operator raft snapshot save` (raft-aware) | M0c week           |
-| Git repo backup             | none on backup host                 | source on github + architect's working tree only    | M0c week           |
-| Audit-chain explicit export | inside postgres dump only           | no separate signed CSV/JSONL of audit.actions       | M0c week           |
-| Encrypted-at-rest archive   | manifest signed, contents plaintext | NAS stores plaintext basebackup + dumps             | M0c week           |
-| Hetzner archive mirror      | only Synology rclone target         | no second-region mirror                             | Phase-2 (post-MOU) |
+| Spec item                   | Current                                                                                                                                                                                                    | Gap                                              | Action                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------ |
+| Vault snapshot              | 🟩 `vault operator raft snapshot save` step + scoped policy [`infra/vault-policies/backup-snapshot.hcl`](../../infra/vault-policies/backup-snapshot.hcl) + quarterly token-rotation runbook (Block-E E.12) | n/a                                              | quarterly token rotation |
+| Git repo backup             | 🟡 (Block-E E.15 — landing)                                                                                                                                                                                | source on github + architect's working tree only | Block-E E.15             |
+| Audit-chain explicit export | 🟡 (Block-E E.13 — landing)                                                                                                                                                                                | no separate signed CSV/JSONL of audit.actions    | Block-E E.13 (HALT)      |
+| Encrypted-at-rest archive   | 🟡 (Block-E E.14 — landing)                                                                                                                                                                                | NAS stores plaintext basebackup + dumps          | Block-E E.14 (HALT)      |
+| Hetzner archive mirror      | only Synology rclone target                                                                                                                                                                                | no second-region mirror                          | Phase-2 (post-MOU)       |
 
 These are defence-in-depth additions, not blockers — the current
 pipeline meets the 6-hour RTO target for host loss + btrfs

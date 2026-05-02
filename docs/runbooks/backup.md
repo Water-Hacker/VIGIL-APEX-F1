@@ -85,13 +85,13 @@ Synology destination. Five spec items are NOT yet implemented; the
 verifier surfaces them as warnings, and the table below records each
 with an architect-decision pointer.
 
-| Spec item                   | Current state                       | Gap                                                                | Architect-action   |
-| --------------------------- | ----------------------------------- | ------------------------------------------------------------------ | ------------------ |
-| Vault snapshot              | btrfs-of-`/srv/vigil/vault`         | no `vault operator raft snapshot save` (raft-aware export)         | M0c hardening week |
-| Git repo backup             | none on backup host                 | source resides on github + the architect's working tree only       | M0c hardening week |
-| Audit-chain explicit export | inside Postgres dump only           | no separate signed CSV/JSONL of `audit.actions` for offline verify | M0c hardening week |
-| Encrypted-at-rest archive   | manifest signed, contents plaintext | NAS stores plaintext basebackup + dumps                            | M0c hardening week |
-| Hetzner archive mirror      | only Synology rclone target         | no second-region mirror; Synology loss = total backup loss         | Phase-2 (post-MOU) |
+| Spec item                   | Current state                                                                                                                                                           | Gap                                                                | Architect-action               |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------ |
+| Vault snapshot              | 🟩 `vault operator raft snapshot save` step + scoped policy [`infra/vault-policies/backup-snapshot.hcl`](../../infra/vault-policies/backup-snapshot.hcl) (Block-E E.12) | n/a                                                                | quarterly token rotation       |
+| Git repo backup             | 🟡 (Block-E E.15 — landing)                                                                                                                                             | source resides on github + the architect's working tree only       | Block-E E.15 (low-priority)    |
+| Audit-chain explicit export | 🟡 (Block-E E.13 — landing)                                                                                                                                             | no separate signed CSV/JSONL of `audit.actions` for offline verify | Block-E E.13 (HALT for review) |
+| Encrypted-at-rest archive   | 🟡 (Block-E E.14 — landing)                                                                                                                                             | NAS stores plaintext basebackup + dumps                            | Block-E E.14 (HALT for review) |
+| Hetzner archive mirror      | only Synology rclone target                                                                                                                                             | no second-region mirror; Synology loss = total backup loss         | Phase-2 (post-MOU)             |
 
 **These are gaps, not blockers.** The current pipeline meets the
 6-hour RTO target for the failure modes RESTORE.md is written for
@@ -103,6 +103,68 @@ resource (Hetzner Storage Box) the architect controls.
 
 When a gap is closed, update the table above and move the warning
 from the verifier into a hard-error check.
+
+---
+
+## Vault snapshot token rotation (Block-E E.12)
+
+The nightly archive's `vault operator raft snapshot save` step
+authenticates with `VAULT_BACKUP_TOKEN` — a scoped, single-policy
+token attached to `vigil-backup-snapshot`
+([`infra/vault-policies/backup-snapshot.hcl`](../../infra/vault-policies/backup-snapshot.hcl)).
+The policy grants `read` on `sys/storage/raft/snapshot` and
+nothing else.
+
+**Custody:**
+
+- Token lives in `/etc/vigil/backup.env` on the host running the
+  systemd `vigil-backup.timer`. Mode 0600, owner root.
+- The architect's YubiKey-PIV-protected Vault root token is the
+  only thing that can mint a new `VAULT_BACKUP_TOKEN`.
+- The token is **non-orphan** (parented to the architect token at
+  creation) — if the architect token is revoked, the backup token
+  cascades. This is intentional: a compromised architect must
+  invalidate downstream credentials in one step.
+
+**Rotation cadence:** quarterly (March / June / September /
+December, week 2). Rotation procedure:
+
+1. Open a Vault session with the architect token (YubiKey-PIV
+   unlock).
+2. Verify the policy still matches the file:
+   ```
+   diff <(vault policy read vigil-backup-snapshot) \
+        infra/vault-policies/backup-snapshot.hcl
+   ```
+   Any divergence is a halt-for-review event — the policy must
+   never accumulate capabilities.
+3. Mint a new token:
+   ```
+   vault token create -policy=vigil-backup-snapshot \
+     -ttl=2160h -period=2160h \
+     -display-name="vigil-backup-snapshot-$(date -u +%Y-Q%q)"
+   ```
+4. Update `/etc/vigil/backup.env`:
+   ```
+   VAULT_BACKUP_TOKEN=<new-token>
+   ```
+   Mode stays 0600, owner root.
+5. Run `vigil-backup` once manually to verify the new token works
+   (`vault-raft.snap` non-empty in the new archive directory).
+6. Revoke the prior token: `vault token revoke <old-token>`.
+7. Audit-of-audit log entry: `audit.security_decision` with
+   action `vault_backup_token_rotated`, the new
+   `display_name`, and the architect's signing-key id (TAL-PA
+   category J).
+
+**Failure modes:**
+
+| Symptom                                            | Likely cause                                      | Recovery                                                                                                                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vault snapshot failed — token may be expired`     | quarterly rotation missed                         | Mint a new token immediately; the btrfs snapshot continues to cover on-disk data so RTO is not impacted by one missed snapshot.                                                                       |
+| `[warn] VAULT_BACKUP_TOKEN unset`                  | `/etc/vigil/backup.env` missing or unreadable     | Check `/etc/vigil/backup.env` exists, mode 0600, owner root. Re-run `vault token create` if needed.                                                                                                   |
+| Snapshot file 0 bytes                              | docker exec succeeded but Vault returned an error | Check `vigil-vault` container logs for the timestamp of the failed call. Common causes: Vault sealed, raft cluster lost quorum.                                                                       |
+| Policy diverges from `infra/vault-policies/...hcl` | unauthorised in-Vault edit                        | This is a security event — investigate via Vault audit log (`vault audit list`); the in-file policy is the single source of truth, restore it via `vault policy write`. Do NOT proceed with rotation. |
 
 ---
 
