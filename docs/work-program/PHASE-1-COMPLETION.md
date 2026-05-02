@@ -761,9 +761,19 @@ Three-layer chain shipped:
 No new code shipped in E.9; E.4 was complete-on-arrival per
 BLOCK-E-PLAN §2.9.
 
-### E5. SBOM generation
+### E5. SBOM generation — 🟩 (Block-E E.10)
 
-Software Bill of Materials per package; generated on release; signed.
+[`.github/workflows/security.yml`](../../.github/workflows/security.yml)
+`sbom` job: Syft generates CycloneDX 1.5 + SPDX SBOMs on every
+push / PR / schedule (90-day artefact retention) plus the
+workspace dependency map via
+[`scripts/generate-sbom-summary.ts`](../../scripts/generate-sbom-summary.ts).
+Block-E E.10 added the release-time chain: tag-push events
+(`v*.*.*`) trigger GPG-detach-sign of the three SBOMs against the
+architect's signing subkey (`GPG_SIGNING_KEY` + `GPG_PASSPHRASE`
+secrets — required at tag-push time, fail-loudly if absent so a
+release never ships unsigned SBOMs); softprops/action-gh-release
+attaches both `*.json` and `*.json.asc` to the GitHub release.
 
 ---
 
