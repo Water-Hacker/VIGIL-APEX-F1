@@ -109,14 +109,23 @@ prior pass.
   test name; fails the job if the test doesn't appear in the output
   OR appears with a skip marker.
 
-**A5 deferred follow-up (Block E scope, architect-confirmed 2026-05-01).**
-Salt-collision CI alert: when two consecutive
-`audit.public_export.salt_fingerprint` values match, the operator
-forgot the quarterly rotation. The
+**A5 deferred follow-up — 🟩 (Block-E E.11).**
+Salt-collision CI alert shipped:
+[`apps/adapter-runner/src/triggers/salt-collision-check.ts`](../../apps/adapter-runner/src/triggers/salt-collision-check.ts)
+queries the
 [`audit.public_export_salt_collisions`](../../packages/db-postgres/drizzle/0012_audit_export_salt_fingerprint.sql)
-view exists; the CI alert that fires on a non-empty result is
-**deferred-not-dropped**, target Block E. No urgency — quarterly
-cron only, 90-day detection window before the next export.
+view on a quarterly cron (06:00 day-2 of Jan / Apr / Jul / Oct
+Africa/Douala — runs the morning AFTER the quarterly export so the
+just-written row is included in the search). Logs structured
+`event: audit.public_export.salt_collision`, sets the
+`vigil_audit_salt_collisions_total` Prometheus gauge, and throws
+`SaltCollisionError` so the scheduler error path fires. Two new
+alert rules in
+[`infra/docker/prometheus/alerts/vigil.yml`](../../infra/docker/prometheus/alerts/vigil.yml):
+`AuditSaltCollision` (critical, fires immediately on > 0) and
+`AuditSaltCollisionCheckStale` (warning, fires when the gauge
+hasn't been refreshed in > 100 days — the cron itself is broken).
+5 unit tests pin the trigger contract.
 
 ### A6. DECISION-012 PROVISIONAL → FINAL — agent prep done; A6.5 🟦 architect-blocked
 

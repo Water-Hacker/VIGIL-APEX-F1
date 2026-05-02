@@ -318,6 +318,21 @@ export const neo4jMirrorStateTotal = new Gauge({
   registers: [registry],
 });
 
+/**
+ * Block-E E.11 / A5.4 — quarterly salt-collision count.
+ *
+ * The TAL-PA quarterly export's salt rotation is observed via the view
+ * `audit.public_export_salt_collisions`. The salt-collision-check trigger
+ * sets this gauge to the row-count it observes; alertmanager fires when
+ * `> 0` for any sustained interval. Cardinality is 0 (no labels) — it's
+ * a global health gauge.
+ */
+export const auditSaltCollisionsTotal = new Gauge({
+  name: 'vigil_audit_salt_collisions_total',
+  help: 'Pairs of consecutive audit.public_export rows sharing salt_fingerprint (forgotten-rotation indicator)',
+  registers: [registry],
+});
+
 export type Labels<T extends string> = LabelValues<T>;
 
 /** Start a tiny HTTP server that serves /metrics. */
