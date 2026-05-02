@@ -12,7 +12,7 @@
 
 ## Snapshot of state
 
-**Last refreshed: 2026-05-02 (Block-E E.0).** Counts move with every
+**Last refreshed: 2026-05-02 (Block-E E.5).** Counts move with every
 commit; the prior hand-maintained "46 packages / 712 tests" snapshot
 drifted. The numbers below come from a fresh sweep of the live tree.
 
@@ -605,44 +605,89 @@ on every Block-D commit.
 
 ## TRACK D — Test quality (additional integration / E2E)
 
-### D1. Council vote ceremony E2E
+### D1. Council vote ceremony E2E — 🟩 (Block-E E.1, commit `8be5960`)
 
-Mock 5 council members, run a 3-of-5 escalation vote, assert: vote
-events emitted, posterior crosses 0.85, dossier render enqueued, all
-high-sig events anchored individually.
+[apps/worker-governance/**tests**/council-vote-e2e.test.ts](../../apps/worker-governance/__tests__/council-vote-e2e.test.ts)
+mounts the full ceremony handler set via `bindWatch` and exercises 10
+cases: full proposal-open → vote-cast → escalate flow, prior-routing
+short-circuit, recommended_recipient_body propagation, projection-lag
+fallback, missing-finding fail-closed, recuse path, default-recipient
+fallback, and bindWatch shape + error-isolation.
 
-### D2. Tip portal Tor flow E2E
+### D2. Tip portal Tor flow E2E — 🟩 (Block-E E.2, commit `41bff18`)
 
-Submit a tip via a Tor SOCKS proxy, assert: ciphertext stored,
-council 3-of-5 decryption works, paraphrase generated, raw text never
-crosses the council boundary.
+[apps/worker-tip-triage/**tests**/tor-flow-e2e.test.ts](../../apps/worker-tip-triage/__tests__/tor-flow-e2e.test.ts)
+walks a libsodium-sealed-box ciphertext through the council 3-of-5
+quorum decryption path, paraphrase generation, and CallRecordRepo
+sink. The plaintext-leak privacy invariant
+(`assertPlaintextLeakOnlyInSafeCallSources`) walks every mock-call
+argument and asserts plaintext appears only inside a SafeLlmRouter
+`sources[].text` block — never in DB writes, queue messages, or
+audit records. SafeLlmRouter is decoupled via a structural
+`SafeLlmRouterLike` adapter (mirrors worker-extractor) so vitest
+does not need to resolve the broken bedrock-sdk `./core` exports map.
 
-### D3. CONAC SFTP delivery E2E
+### D3. CONAC SFTP delivery E2E — 🟩 (Block-E E.3, commit `1860b16`)
 
-Spin a local SFTP server, render a dossier, deliver, ack, assert
-audit rows + delivery row + receipt row + Polygon anchor.
+[apps/worker-conac-sftp/**tests**/sftp-delivery-e2e.test.ts](../../apps/worker-conac-sftp/__tests__/sftp-delivery-e2e.test.ts)
+asserts manifest correctness for all 5 recipient bodies (CONAC,
+COUR_DES_COMPTES, MINFI, ANIF, CDC), env-driven delivery target
+resolution, and the DECISION-008 Tier-1 boot guard. Byte-level SFTP
+transport is intentionally NOT in scope (production verification
+covered under AT-M3-03 with a real SFTP daemon — same posture as
+Block-D D.5 Falco rules).
 
-### D4. Federation stream E2E
+### D4. Federation stream E2E — 🟩 (Block-E E.3, commit `1860b16`)
 
-Sign an envelope on the agent, replay protection check, signature
-verification, region-prefix enforcement, payload-cap rejection.
+[packages/federation-stream/**tests**/envelope-e2e.test.ts](../../packages/federation-stream/__tests__/envelope-e2e.test.ts)
+adds the orthogonal coverage to `src/sign.test.ts` (which already
+covers REGION_MISMATCH / KEY_UNKNOWN / REPLAY_WINDOW backward /
+PAYLOAD_TOO_LARGE / SIGNATURE_INVALID per-function): a parameterised
+rejection-code table walking all 5 codes through
+`verifyEnvelopeWithPolicy`, the forward-window symmetry case, and
+signature-uniqueness assertions proving canonical signing differs
+when payload or observedAtMs differ even under shared dedupKey.
 
-### D5. WebAuthn → secp256k1 path
+### D5. WebAuthn → secp256k1 path — 🟩 (Block-E E.4, commit `949495b`)
 
 Per W-10. The native libykcs11 helper is deferred to M3-M4; the
-WebAuthn fallback path is shipped and needs an E2E test asserting
-the fallback works for a sample council member.
+WebAuthn fallback (FIDO2/ES256K, COSE alg -47) is the path Phase-1
+ships with.
+[apps/dashboard/**tests**/webauthn-fallback-e2e.test.ts](../../apps/dashboard/__tests__/webauthn-fallback-e2e.test.ts)
+exercises POST /api/council/vote end-to-end (happy path; counter
+not bumped when assertion counter equals stored — W3C WebAuthn
+§6.1.1 clone-detection contract; every documented failure branch);
+a structural assertion proves the route + `packages/security/src/fido.ts`
+have zero `from '...libykcs11'` imports (after stripping doc
+comments — both files mention libykcs11 in the W-10 rationale,
+which is expected); fido.ts advertises -47 in
+`supportedAlgorithmIDs`; vote-ceremony page documents
+W-10 + vigil-polygon-signer explicitly.
 
-### D6. Dashboard a11y CI
+### D6. Dashboard a11y CI — 🟩 (already in CI; Block-E E.5 expansion)
 
-Per OPERATIONS, a11y is enforced. Wire `playwright test tests/a11y/`
-into `.github/workflows/ci.yml` (currently the dashboard `test`
-target only runs vitest).
+Per OPERATIONS, a11y is enforced.
+[.github/workflows/ci.yml](../../.github/workflows/ci.yml) `a11y` job
+runs `playwright test tests/a11y/` on every PR with zero violations
+of `axe-core` "critical" or "serious" levels (lower-severity findings
+are surfaced in the HTML report but not blocking — the runway to
+tighten over time without breaking the build today). 5 public-surface
+pages covered today; operator surfaces (with mock-JWT cookie) are a
+follow-up under D6-extension.
 
-### D7. Visual regression tests
+### D7. Visual regression tests — 🟡 PARTIAL (Block-E E.5, harness only)
 
-Per SRD §03.5 (UI consistency). Snapshot the 19 dashboard pages on a
-canonical fixture; fail on visual diff > threshold.
+Per SRD §03.5 (UI consistency). Harness landed in Block-E E.5:
+
+- [apps/dashboard/playwright-visual.config.ts](../../apps/dashboard/playwright-visual.config.ts) — separate config, deterministic 1280×800 viewport, per-test clock pinning + animation disable.
+- [apps/dashboard/tests/visual/public-surfaces.spec.ts](../../apps/dashboard/tests/visual/public-surfaces.spec.ts) — 5 public-surface pages snapshotted at `maxDiffPixelRatio: 0.001` (>0.1% pixel diff fails).
+- `.github/workflows/ci.yml` `visual` job — Postgres-backed, `continue-on-error: true` until baselines are stamped.
+
+**Architect-side baseline-stamp pass pending** before the CI job is
+flipped to hard-blocking. Procedure documented in the
+playwright-visual.config.ts header. The remaining 14 authenticated
+pages need a mock-JWT fixture and are tracked as a follow-up under
+D7-extension.
 
 ---
 

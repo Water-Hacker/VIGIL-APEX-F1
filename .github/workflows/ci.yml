@@ -246,6 +246,59 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  visual:
+    name: visual regression (dashboard, public surfaces)
+    needs: [install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # continue-on-error during baseline-bring-up: the harness lands in
+    # E.5 but the 5 baseline PNGs must be stamped against the
+    # canonical e2e-fixture stack (see playwright-visual.config.ts
+    # header) and committed under
+    # `apps/dashboard/tests/visual/public-surfaces.spec.ts-snapshots/`
+    # before this job is flipped to hard-blocking. Tracked under
+    # PHASE-1-COMPLETION D7 (baselines pending).
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16.2-alpine
+        env:
+          POSTGRES_USER: vigil
+          POSTGRES_PASSWORD: vigil_test_password
+          POSTGRES_DB: vigil_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vigil -d vigil_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter dashboard exec playwright install --with-deps chromium
+      - run: pnpm run build
+      - name: Apply DB migrations
+        run: pnpm --filter @vigil/db-postgres run migrate
+        env:
+          POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
+      - name: Run visual regression suite
+        run: pnpm --filter dashboard exec playwright test --config=playwright-visual.config.ts
+        env:
+          POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
+          CI: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-visual-report
+          path: apps/dashboard/playwright-visual-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
   docker-build:
     name: docker-build
     needs: build
