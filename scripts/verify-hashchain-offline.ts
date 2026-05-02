@@ -7,25 +7,36 @@
  * a Postgres connection. Used at restore time, in a court hearing, or by
  * any reviewer who has the archive but not the running cluster.
  *
- * Bit-identical-parity guarantee (architect E.13 hold-point option a):
- * the verify function is in `packages/audit-chain/src/offline-verify.ts`,
- * which imports `bodyHash` / `rowHash` from the SAME `canonical.ts`
- * module the in-Postgres `HashChain.verify()` uses. There is no second
- * copy of the canonicalisation algorithm — the two paths are
+ * Bit-identical-parity guarantee (architect E.13 hold-point option a +
+ * E.13.c review #1): the verify function is in
+ * `packages/audit-chain/src/offline-verify.ts`, which imports
+ * `bodyHash` / `rowHash` from the SAME `canonical.ts` module the
+ * in-Postgres `HashChain.verify()` uses. The two paths are
  * byte-for-byte identical by construction.
+ *
+ * Verifier semantics (architect E.13.c review #4):
+ *   - Identifies the first row where the chain breaks.
+ *   - Continues scanning past that point and collects every
+ *     subsequent independent divergence (cascade-suppressed via the
+ *     recomputed-rh rolling-pointer trick).
+ *   - Emits a deterministic, GPG-signable verification report on
+ *     stdout. The architect signs the report bytes via
+ *     `gpg --detach-sign` to attest "I ran this verifier on this
+ *     CSV and got this result".
+ *
+ * Exit code contract (architect E.13.c review #5):
+ *   0 — chain intact (zero divergences)
+ *   1 — chain has divergences (report listed)
+ *   2 — input error (CSV malformed, header invalid, payload not JSON)
  *
  * Usage:
  *   pnpm tsx scripts/verify-hashchain-offline.ts <archive-dir>/audit-chain.csv
- *
- * Exit codes:
- *   0 — chain verifies (every row's recomputed body_hash matches stored)
- *   1 — first break encountered (printed: seq, expected, actual)
- *   2 — input format error (csv parse, missing column, bad encoding)
+ *   pnpm tsx scripts/verify-hashchain-offline.ts <csv> | gpg --detach-sign --armor -o report.sig
  */
 import { readFileSync } from 'node:fs';
-import { exit, argv } from 'node:process';
+import { exit, argv, stdout } from 'node:process';
 
-import { parseRows, verify } from '@vigil/audit-chain';
+import { parseRows, renderReport, verify } from '@vigil/audit-chain';
 
 function main(): void {
   const path = argv[2];
@@ -48,14 +59,9 @@ function main(): void {
     exit(2);
   }
   const result = verify(rows);
-  if (result.status === 'ok') {
-    console.log(`OK: ${result.rowsVerified} rows verified`);
-    exit(0);
-  }
-  console.error(
-    `BREAK at seq ${result.break_!.seq} (${result.break_!.field}): expected ${result.break_!.expected}, actual ${result.break_!.actual}`,
-  );
-  exit(1);
+  // Emit the deterministic, GPG-signable report on stdout.
+  stdout.write(renderReport(rows.length, result));
+  exit(result.status === 'ok' ? 0 : 1);
 }
 
 main();

@@ -21,7 +21,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { bodyHash, rowHash } from '../src/canonical.js';
-import { parseCsv, parseRows, verify } from '../src/offline-verify.js';
+import { parseCsv, parseRows, renderReport, verify } from '../src/offline-verify.js';
 
 import type { Schemas } from '@vigil/shared';
 
@@ -174,13 +174,13 @@ describe('Block-E E.13 — offline hash-chain verifier (bit-identical parity)', 
 
   describe('verify — happy paths', () => {
     it('verifies an empty chain (0 rows)', () => {
-      expect(verify([])).toEqual({ status: 'ok', rowsVerified: 0 });
+      expect(verify([])).toEqual({ status: 'ok', rowsVerified: 0, divergences: [] });
     });
     it('verifies a 1-row chain', () => {
       const chain = buildChain(1);
       const csv = renderCsv(chain);
       const parsed = parseRows(csv);
-      expect(verify(parsed)).toEqual({ status: 'ok', rowsVerified: 1 });
+      expect(verify(parsed)).toEqual({ status: 'ok', rowsVerified: 1, divergences: [] });
     });
     it('verifies a 100-row deterministic chain', () => {
       const chain = buildChain(100);
@@ -193,9 +193,13 @@ describe('Block-E E.13 — offline hash-chain verifier (bit-identical parity)', 
   });
 
   describe('verify — break detection', () => {
-    it('detects body_hash tampering at row N', () => {
+    it('detects body_hash tampering at row N (continue-and-collect)', () => {
       const chain = buildChain(10);
-      // Tamper row 5's body_hash by flipping one hex char.
+      // Tamper row 5's body_hash by flipping one hex char. Per E.13.c
+      // continue-and-collect semantics, the rolling `prev` advances to
+      // the row's stored body_hash so subsequent rows (6-10) remain
+      // valid as a continuation from the broken point — and rowsVerified
+      // counts every row whose body_hash check passed (9 of 10).
       const tampered = chain.map((r) =>
         r.seq === 5
           ? { ...r, body_hash: r.body_hash.replace(/^./, (c) => (c === '0' ? '1' : '0')) }
@@ -207,8 +211,10 @@ describe('Block-E E.13 — offline hash-chain verifier (bit-identical parity)', 
       expect(result.status).toBe('break');
       expect(result.break_!.field).toBe('body_hash');
       expect(result.break_!.seq).toBe(5);
-      // The first 4 rows verified before the break.
-      expect(result.rowsVerified).toBe(4);
+      // Exactly one divergence — row 5 only; rows 6-10 stay clean
+      // because rolling prev advances to row-5's stored body_hash.
+      expect(result.divergences).toHaveLength(1);
+      expect(result.rowsVerified).toBe(9);
     });
 
     it('detects prev_hash tampering (stored prev_hash diverges from rolling pointer)', () => {
@@ -242,6 +248,98 @@ describe('Block-E E.13 — offline hash-chain verifier (bit-identical parity)', 
       expect(result.break_!.field).toBe('seq_gap');
       expect(result.break_!.seq).toBe(6);
       expect(result.break_!.expected).toBe('5');
+    });
+
+    it('continue-and-collect: reports two independent body_hash tampers in a single pass (architect E.13.c #4)', () => {
+      // Tamper rows 3 AND 7. Pre-E.13.c the verifier stopped at row 3
+      // and the row-7 tamper was hidden until the operator fixed
+      // row 3 and re-ran. Continue-and-collect surfaces both in one
+      // report — the court-defensible failure mode.
+      const chain = buildChain(10);
+      const flip = (s: string): string => s.replace(/^./, (c) => (c === '0' ? '1' : '0'));
+      const tampered = chain.map((r) =>
+        r.seq === 3 || r.seq === 7 ? { ...r, body_hash: flip(r.body_hash) } : r,
+      );
+      const csv = renderCsv(tampered);
+      const parsed = parseRows(csv);
+      const result = verify(parsed);
+      expect(result.status).toBe('break');
+      expect(result.divergences).toHaveLength(2);
+      expect(result.divergences[0]!.seq).toBe(3);
+      expect(result.divergences[0]!.field).toBe('body_hash');
+      expect(result.divergences[1]!.seq).toBe(7);
+      expect(result.divergences[1]!.field).toBe('body_hash');
+      // Rows 1, 2, 4, 5, 6, 8, 9, 10 verified — row 3 and 7 failed
+      // body_hash check; rolling prev advanced to each row's stored
+      // body_hash so cascade is suppressed.
+      expect(result.rowsVerified).toBe(8);
+    });
+
+    it('continue-and-collect: reports body_hash and prev_hash divergences from different rows', () => {
+      const chain = buildChain(10);
+      const flip = (s: string): string => s.replace(/^./, (c) => (c === '0' ? '1' : '0'));
+      const tampered = chain.map((r) => ({ ...r }));
+      // Row 3: body_hash break.
+      tampered[2]!.body_hash = flip(tampered[2]!.body_hash);
+      // Row 7: prev_hash break (body_hash untouched, but prev_hash
+      // pointed elsewhere).
+      tampered[6]!.prev_hash = '1'.repeat(64);
+      const csv = renderCsv(tampered);
+      const parsed = parseRows(csv);
+      const result = verify(parsed);
+      expect(result.status).toBe('break');
+      expect(result.divergences).toHaveLength(2);
+      expect(result.divergences[0]!.seq).toBe(3);
+      expect(result.divergences[0]!.field).toBe('body_hash');
+      expect(result.divergences[1]!.seq).toBe(7);
+      expect(result.divergences[1]!.field).toBe('prev_hash');
+    });
+  });
+
+  describe('renderReport — court-signable verification report (architect E.13.c #4(c))', () => {
+    it('clean chain produces a deterministic OK report', () => {
+      const chain = buildChain(3);
+      const csv = renderCsv(chain);
+      const parsed = parseRows(csv);
+      const r = renderReport(parsed.length, verify(parsed));
+      // Byte-deterministic content (no timestamps, no random ids) so
+      // re-running the verifier on the same CSV produces the same
+      // report bytes — making the operator's GPG signature stable.
+      expect(r).toBe(
+        [
+          'vigil-audit-chain-verifier v1',
+          'csv-format: audit-chain.csv v1 (10 columns)',
+          'rows-input: 3',
+          'rows-verified: 3',
+          'status: OK',
+          '---',
+          '',
+        ].join('\n'),
+      );
+    });
+    it('broken chain produces a BREAK report listing every divergence', () => {
+      const chain = buildChain(10);
+      const flip = (s: string): string => s.replace(/^./, (c) => (c === '0' ? '1' : '0'));
+      const tampered = chain.map((r) =>
+        r.seq === 3 || r.seq === 7 ? { ...r, body_hash: flip(r.body_hash) } : r,
+      );
+      const csv = renderCsv(tampered);
+      const parsed = parseRows(csv);
+      const result = verify(parsed);
+      const r = renderReport(parsed.length, result);
+      expect(r).toContain('status: BREAK (2 divergences)');
+      expect(r).toContain('seq=3 field=body_hash');
+      expect(r).toContain('seq=7 field=body_hash');
+      expect(r).toContain('rows-input: 10');
+      expect(r).toContain('rows-verified: 8');
+    });
+    it('report bytes are stable across reruns (signable property)', () => {
+      const chain = buildChain(10);
+      const csv = renderCsv(chain);
+      const parsed = parseRows(csv);
+      const a = renderReport(parsed.length, verify(parsed));
+      const b = renderReport(parsed.length, verify(parsed));
+      expect(a).toBe(b);
     });
   });
 

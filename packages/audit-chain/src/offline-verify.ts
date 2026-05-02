@@ -134,38 +134,64 @@ export function parseRows(text: string): ParsedRow[] {
   return out;
 }
 
+export interface Divergence {
+  /** Row sequence number where the divergence was observed. */
+  seq: number;
+  /** Which check fired. */
+  field: 'body_hash' | 'prev_hash' | 'seq_gap';
+  /** Hash / value the verifier expected. */
+  expected: string;
+  /** Hash / value found in the CSV. */
+  actual: string;
+}
+
 export interface VerifyResult {
   status: 'ok' | 'break';
   rowsVerified: number;
-  break_?: {
-    seq: number;
-    expected: string;
-    actual: string;
-    field: 'body_hash' | 'prev_hash' | 'seq_gap';
-  };
+  /**
+   * EVERY divergence found, in seq order. The legacy `break_` field
+   * is `divergences[0]` if non-empty (kept for back-compat with
+   * pre-E.13.c callers — the test suite reads this field directly).
+   * Architect E.13 review request #4 (continue-and-collect).
+   */
+  divergences: Divergence[];
+  /** First divergence — convenience accessor (= divergences[0] or undefined). */
+  break_?: Divergence;
 }
 
 /**
  * Bit-identical mirror of `HashChain.verify()` in
  * `packages/audit-chain/src/hash-chain.ts`. Rebuilds prev_hash chain
  * from CSV input only — no Postgres connection needed.
+ *
+ * Architect E.13.c review:
+ *   - Continues scanning past every break (does NOT stop at the first
+ *     divergence) so the caller sees the full divergence surface, not
+ *     a single hint that gets re-fired on every subsequent row.
+ *   - When body_hash mismatches, the rolling `prev` pointer advances
+ *     to the row's STORED body_hash (treating downstream rows as a
+ *     continuation from the broken point) — this surfaces independent
+ *     divergences cleanly without flooding the report with cascade-
+ *     errors.
+ *   - When prev_hash mismatches, the rolling pointer continues from
+ *     the row's stored body_hash for the same reason.
  */
 export function verify(rows: ParsedRow[]): VerifyResult {
+  const divergences: Divergence[] = [];
   let prev: string | null = null;
   let seqExpected = rows.length > 0 ? rows[0]!.seq : 1;
   let verified = 0;
   for (const row of rows) {
     if (row.seq !== seqExpected) {
-      return {
-        status: 'break',
-        rowsVerified: verified,
-        break_: {
-          seq: row.seq,
-          expected: String(seqExpected),
-          actual: String(row.seq),
-          field: 'seq_gap',
-        },
-      };
+      divergences.push({
+        seq: row.seq,
+        field: 'seq_gap',
+        expected: String(seqExpected),
+        actual: String(row.seq),
+      });
+      // Re-anchor the seq tracker to this row so subsequent rows are
+      // checked against THEIR own seq+1, not the gap-extended count.
+      seqExpected = row.seq;
     }
     const bh = bodyHash({
       seq: row.seq,
@@ -177,28 +203,84 @@ export function verify(rows: ParsedRow[]): VerifyResult {
       payload: row.payload,
     });
     const rh = rowHash(prev, bh);
+    let bodyHashOk = true;
     if (rh !== row.body_hash) {
-      return {
-        status: 'break',
-        rowsVerified: verified,
-        break_: { seq: row.seq, expected: rh, actual: row.body_hash, field: 'body_hash' },
-      };
+      divergences.push({
+        seq: row.seq,
+        field: 'body_hash',
+        expected: rh,
+        actual: row.body_hash,
+      });
+      bodyHashOk = false;
     }
     if ((row.prev_hash ?? null) !== prev) {
-      return {
-        status: 'break',
-        rowsVerified: verified,
-        break_: {
-          seq: row.seq,
-          expected: prev ?? '<null>',
-          actual: row.prev_hash ?? '<null>',
-          field: 'prev_hash',
-        },
-      };
+      divergences.push({
+        seq: row.seq,
+        field: 'prev_hash',
+        expected: prev ?? '<null>',
+        actual: row.prev_hash ?? '<null>',
+      });
     }
-    prev = row.body_hash;
+    // Advance rolling prev to the RECOMPUTED row hash (not the stored
+    // body_hash) so a single broken row doesn't cascade-fail every
+    // subsequent row. The rolling pointer thereby represents "what
+    // the chain SHOULD look like at this point" — independent partial-
+    // tampering events at row N+k surface as fresh divergences instead
+    // of being masked by the row-N break propagating downstream.
+    prev = rh;
     seqExpected = row.seq + 1;
-    verified++;
+    if (bodyHashOk) verified++;
   }
-  return { status: 'ok', rowsVerified: verified };
+  if (divergences.length === 0) {
+    return { status: 'ok', rowsVerified: verified, divergences };
+  }
+  const result: VerifyResult = {
+    status: 'break',
+    rowsVerified: verified,
+    divergences,
+  };
+  if (divergences[0]) result.break_ = divergences[0];
+  return result;
+}
+
+/**
+ * Render a deterministic, GPG-signable verification report.
+ *
+ * Architect E.13.c review #4(c): the report itself must be signable so
+ * a court can verify the verification result is the result the script
+ * actually produced. Output is byte-deterministic (no timestamps, no
+ * random ids) so re-running the verifier on the same CSV produces the
+ * same report bytes — making the GPG signature stable across reruns.
+ *
+ * Format:
+ *   line 1: "vigil-audit-chain-verifier v1"
+ *   line 2: "csv-format: audit-chain.csv v1 (10 columns)"
+ *   line 3: "rows-input: <n>"
+ *   line 4: "rows-verified: <n>"
+ *   line 5: "status: OK" or "status: BREAK (<m> divergences)"
+ *   line 6: "---"
+ *   per divergence (if any):
+ *     "seq=<n> field=<f> expected=<hex|str> actual=<hex|str>"
+ *
+ * The reviewer pipes this through `gpg --clearsign` or writes to
+ * disk and `gpg --detach-sign`s it. The architect's signature on the
+ * report attests "I ran this verifier on this CSV and got this
+ * result" — the verifier itself does not call gpg.
+ */
+export function renderReport(rowsInput: number, result: VerifyResult): string {
+  const lines: string[] = [];
+  lines.push('vigil-audit-chain-verifier v1');
+  lines.push('csv-format: audit-chain.csv v1 (10 columns)');
+  lines.push(`rows-input: ${rowsInput}`);
+  lines.push(`rows-verified: ${result.rowsVerified}`);
+  if (result.status === 'ok') {
+    lines.push('status: OK');
+  } else {
+    lines.push(`status: BREAK (${result.divergences.length} divergences)`);
+  }
+  lines.push('---');
+  for (const d of result.divergences) {
+    lines.push(`seq=${d.seq} field=${d.field} expected=${d.expected} actual=${d.actual}`);
+  }
+  return lines.join('\n') + '\n';
 }
