@@ -16,3 +16,4 @@ export * from './hash-chain.js';
 export * from './polygon-anchor.js';
 export * from './verifier.js';
 export * from './canonical.js';
+export * from './offline-verify.js';

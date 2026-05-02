@@ -85,6 +85,79 @@ else
   log "[warn] VAULT_BACKUP_TOKEN unset — skipping canonical raft snapshot (btrfs covers the on-disk data); see docs/runbooks/backup.md"
 fi
 
+# 4c. Audit-chain explicit export (Block-E E.13 / C9 backup gap 3).
+#     The Postgres basebackup at step 1 already includes `audit.actions`
+#     + `audit.user_action_event` inside the cluster snapshot, but that
+#     form requires a working Postgres to inspect. The court-defensible
+#     artefact-of-record convention says you produce the document
+#     itself, not the means of producing it — i.e. a plaintext CSV
+#     that any reviewer can hash-walk WITHOUT a running database.
+#
+#     The COPY format is the bit-identical-parity input that
+#     `scripts/verify-hashchain-offline.ts` consumes. The timestamp
+#     is forced to ISO-8601 millisecond precision via `to_char` so
+#     the recomputed body_hash matches the one a JS Date.toISOString()
+#     would have produced at write time (architect E.13 hold-point
+#     option (a) — strict bit-identical parity).
+#
+#     Both files get the same GPG detach-sign treatment as the
+#     manifest; the manifest itself records each .csv's sha256 too,
+#     so tampering at the NAS layer is visible at multiple
+#     overlapping levels.
+log "audit-chain CSV export (audit.actions)"
+docker exec vigil-postgres psql -U vigil -d vigil -At -X -c "\\copy (
+  SELECT
+    id::text,
+    seq::text,
+    action,
+    actor,
+    subject_kind,
+    subject_id,
+    to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at,
+    payload::text AS payload,
+    encode(prev_hash, 'hex') AS prev_hash,
+    encode(body_hash, 'hex') AS body_hash
+  FROM audit.actions
+  ORDER BY seq
+) TO STDOUT WITH CSV HEADER" > "${DEST}/audit-chain.csv"
+
+log "audit-chain CSV export (audit.user_action_event)"
+docker exec vigil-postgres psql -U vigil -d vigil -At -X -c "\\copy (
+  SELECT
+    event_id::text,
+    global_audit_id::text,
+    event_type,
+    category,
+    to_char(timestamp_utc AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS timestamp_utc,
+    actor_id,
+    actor_role,
+    coalesce(actor_yubikey_serial, '') AS actor_yubikey_serial,
+    coalesce(actor_ip, '') AS actor_ip,
+    coalesce(actor_device_fingerprint, '') AS actor_device_fingerprint,
+    coalesce(session_id::text, '') AS session_id,
+    target_resource,
+    action_payload::text AS action_payload,
+    result_status,
+    coalesce(prior_event_id::text, '') AS prior_event_id,
+    coalesce(correlation_id::text, '') AS correlation_id,
+    coalesce(digital_signature, '') AS digital_signature,
+    coalesce(chain_anchor_tx, '') AS chain_anchor_tx,
+    record_hash,
+    high_significance::text AS high_significance
+  FROM audit.user_action_event
+  ORDER BY timestamp_utc, event_id
+) TO STDOUT WITH CSV HEADER" > "${DEST}/audit-user-actions.csv"
+
+# Sign each audit-chain CSV separately so a court reviewer can verify
+# either file in isolation without trusting the manifest.
+gpg --batch --yes --local-user "${GPG_FP}" \
+    --output "${DEST}/audit-chain.csv.sig" \
+    --detach-sign "${DEST}/audit-chain.csv"
+gpg --batch --yes --local-user "${GPG_FP}" \
+    --output "${DEST}/audit-user-actions.csv.sig" \
+    --detach-sign "${DEST}/audit-user-actions.csv"
+log "audit-chain CSVs signed"
+
 # 5. Signed manifest — sha256 of every file, then architect-GPG signature.
 log "manifest + signature"
 (cd "${DEST}" && find . -type f ! -name MANIFEST.sha256 \
