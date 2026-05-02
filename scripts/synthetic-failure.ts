@@ -227,6 +227,41 @@ const cases: Case[] = [
       },
     };
   })(),
+
+  // ─────────────────────────────────────────────────────────────────
+  // 6. check-safellm-coverage — add a worker file that uses the bare
+  //    LlmRouter without pairing it with SafeLlmRouter (no `new
+  //    SafeLlmRouter` in the same file). The lint must reject this
+  //    as a chokepoint bypass per AI-SAFETY-DOCTRINE-v1 §B.
+  // ─────────────────────────────────────────────────────────────────
+  ((): Case => {
+    const rel = 'apps/worker-tip-triage/src/_synthetic-bypass.ts';
+    return {
+      name: 'check-safellm-coverage',
+      lint: 'scripts/check-safellm-coverage.ts',
+      mutate: () => {
+        if (existsSync(join(REPO_ROOT, rel))) {
+          throw new Error(`mutation precondition: ${rel} already exists`);
+        }
+        writeFileSync(
+          join(REPO_ROOT, rel),
+          '// synthetic-failure: bare LlmRouter, NOT paired with SafeLlmRouter\n' +
+            '// in this file. Cleaned up by harness. The lint must reject this.\n' +
+            "import { LlmRouter } from '@vigil/llm';\n" +
+            "import { wrapSecret } from '@vigil/security';\n" +
+            "export const router = new LlmRouter({ anthropicApiKey: wrapSecret('') });\n",
+          'utf8',
+        );
+      },
+      restore: () => {
+        try {
+          unlinkSync(join(REPO_ROOT, rel));
+        } catch {
+          /* already gone */
+        }
+      },
+    };
+  })(),
 ];
 
 interface CaseResult {

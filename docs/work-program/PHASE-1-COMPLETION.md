@@ -43,17 +43,20 @@ Target: 200 rows. **Live state (2026-05-01):** 224 rows in
 [packages/llm/**tests**/synthetic-hallucinations.jsonl](../../packages/llm/__tests__/synthetic-hallucinations.jsonl) — surpasses target.
 Closed during a prior pass (no Block-B commit needed).
 
-### A2. SafeLlmRouter per-worker migration — 🟩
+### A2. SafeLlmRouter per-worker migration — 🟩 (with permanent CI guard)
 
-All five workers covered. The doctrine chokepoint wraps every
-direct LlmRouter call so the 12 AI-SAFETY-DOCTRINE-v1 layers apply
-uniformly.
+All workers covered. The doctrine chokepoint wraps every direct
+LlmRouter call so the 12 AI-SAFETY-DOCTRINE-v1 layers apply
+uniformly. **Going forward, this is a permanent CI guard, not a
+one-time migration** — see A2.7 below.
 
 - A2.1 🟩 [apps/worker-extractor/](../../apps/worker-extractor/) — already migrated (SafeLlmRouterLike adapter at `src/llm-extractor.ts`).
 - A2.2 🟩 [apps/worker-counter-evidence/](../../apps/worker-counter-evidence/) — already migrated (`this.safe.call(...)` at `src/index.ts:189`).
 - A2.3 🟩 [apps/worker-pattern/](../../apps/worker-pattern/) — N/A (deterministic dispatcher, no Claude calls).
 - A2.4 🟩 [apps/worker-tip-triage/](../../apps/worker-tip-triage/) — Block-B B.4 commit: registered `tip-triage.paraphrase` prompt; `safe.call` with PII-stripping `task` field; closed-context source for tip body; CallRecordRepo sink.
 - A2.5 🟩 [apps/worker-adapter-repair/](../../apps/worker-adapter-repair/) — Block-B B.4 commit: registered `adapter-repair.selector-rederive` prompt; `safe.call` with conservative-selector `task`; closed-context source for old/new HTML; CallRecordRepo sink.
+- A2.6 🟩 [apps/worker-entity/](../../apps/worker-entity/) — Block-D follow-up commit `c69a523`: lifted `entity.resolve-aliases` from `packages/llm/src/safety/prompts.ts` (doctrine-level) to `apps/worker-entity/src/prompts.ts` (per-worker, matches the established pattern); aliases migrated from inline `task` field to closed-context `<source_document id="aliases-pending-resolution">` per architect's L4-(B) call. 9 source-grep regression tests pin the surface.
+- **A2.7 🟩 Permanent CI guard** — [scripts/check-safellm-coverage.ts](../../scripts/check-safellm-coverage.ts) wired into [phase-gate.yml](../../.github/workflows/phase-gate.yml). Asserts that every direct `LlmRouter` reference in `apps/` + `packages/` (excluding `packages/llm/` itself and `__tests__/`) is structurally paired with a `new SafeLlmRouter` in the same file. `LlmRouter.call(` and `.llm.call(` patterns are unconditional drift; `new LlmRouter` paired with `new SafeLlmRouter` is the legitimate-and-required shape. Initial scan: 5 paired references, 0 drift, 0 allowlist entries. Allowlist starts empty; any addition requires architect signoff. Synthetic-failure case 6/6 pins that the lint correctly rejects a deliberate bypass (commits `c69a523` + Step 3 follow-up).
 
 Doctrine layer mapping (both new migrations):
 
@@ -310,6 +313,7 @@ Failure mode: prints last 50 log lines per unhealthy container
 so CI-log walking surfaces the cause immediately.
 
 ### C2. Vault Shamir initialization — 🟩 (with M0c-action items)
+
 ### C2. Vault Shamir initialization 🟩
 
 The `infra/host-bootstrap/03-vault-shamir-init.sh` script exists; doc +
@@ -320,7 +324,7 @@ landing.
 
 - 🟩 [infra/host-bootstrap/03-vault-shamir-init.sh](infra/host-bootstrap/03-vault-shamir-init.sh) — present.
 - 🟩 [docs/runbooks/vault-shamir-init.md](docs/runbooks/vault-shamir-init.md) — execution checklist for the architect.
- main
+  main
 
 [docs/runbooks/vault-shamir-init.md](../runbooks/vault-shamir-init.md)
 exists. Block-D D.2 added a "Verification status" section
