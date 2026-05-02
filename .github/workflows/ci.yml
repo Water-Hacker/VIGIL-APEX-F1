@@ -251,14 +251,13 @@ jobs:
     needs: [install]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # continue-on-error during baseline-bring-up: the harness lands in
-    # E.5 but the 5 baseline PNGs must be stamped against the
-    # canonical e2e-fixture stack (see playwright-visual.config.ts
-    # header) and committed under
+    # Self-protecting: skips gracefully (exit 0) until the architect
+    # stamps baselines under
     # `apps/dashboard/tests/visual/public-surfaces.spec.ts-snapshots/`
-    # before this job is flipped to hard-blocking. Tracked under
-    # PHASE-1-COMPLETION D7 (baselines pending).
-    continue-on-error: true
+    # against the canonical e2e-fixture stack — see
+    # playwright-visual.config.ts header for the procedure. Once
+    # baselines land, the `Check baselines` step's `if` flips on and
+    # the job becomes hard-blocking against pixel diff > 0.1%.
     services:
       postgres:
         image: postgres:16.2-alpine
@@ -275,24 +274,42 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      - name: Check baselines exist
+        id: baselines
+        run: |
+          DIR="apps/dashboard/tests/visual/public-surfaces.spec.ts-snapshots"
+          if [ -d "$DIR" ] && [ -n "$(ls -A "$DIR" 2>/dev/null)" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "Baselines present in $DIR — visual regression will run."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Visual-regression baselines not yet stamped (Block-E E.5 D7 pending architect-side run); skipping playwright + reporting OK."
+          fi
       - uses: pnpm/action-setup@v4
+        if: steps.baselines.outputs.present == 'true'
         with: { version: 9.7.0 }
       - uses: actions/setup-node@v4
+        if: steps.baselines.outputs.present == 'true'
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
+        if: steps.baselines.outputs.present == 'true'
       - run: pnpm --filter dashboard exec playwright install --with-deps chromium
+        if: steps.baselines.outputs.present == 'true'
       - run: pnpm run build
+        if: steps.baselines.outputs.present == 'true'
       - name: Apply DB migrations
+        if: steps.baselines.outputs.present == 'true'
         run: pnpm --filter @vigil/db-postgres run migrate
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
       - name: Run visual regression suite
+        if: steps.baselines.outputs.present == 'true'
         run: pnpm --filter dashboard exec playwright test --config=playwright-visual.config.ts
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
           CI: '1'
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.baselines.outputs.present == 'true'
         with:
           name: playwright-visual-report
           path: apps/dashboard/playwright-visual-report/
