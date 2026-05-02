@@ -1,0 +1,139 @@
+{
+  "title": "VIGIL — LLM",
+  "uid": "vigil-llm",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "tags": ["vigil", "llm", "cost", "safety"],
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "description": "Block-D C4 dashboard #3 — daily cost, daily call count, hallucination flag rate, provider tier distribution, schema-validation failure rate. Per architect signoff 2026-05-01.",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Cost — last 24h (USD)",
+      "targets": [{ "expr": "sum(increase(vigil_llm_cost_usd_total[24h]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Calls — last 24h",
+      "targets": [{ "expr": "sum(increase(vigil_llm_calls_total[24h]))" }],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Hallucination flag rate (last 1h)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_errors_total{code=\"LLM_HALLUCINATION_REJECTED\"}[1h])) / clamp_min(sum(increase(vigil_llm_calls_total[1h])), 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Schema-validation failure rate (last 1h)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_errors_total{code=\"VALIDATION_ERROR\", service=~\".*llm.*|worker-extractor|worker-counter-evidence|worker-tip-triage|worker-adapter-repair\"}[1h])) / clamp_min(sum(increase(vigil_llm_calls_total[1h])), 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.02 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Daily cost timeseries (24h trailing)",
+      "targets": [
+        {
+          "expr": "sum(rate(vigil_llm_cost_usd_total[5m])) * 86400",
+          "legendFormat": "USD/day projected"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cost by model",
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(vigil_llm_cost_usd_total[5m]))",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Provider tier distribution (calls/min)",
+      "targets": [
+        {
+          "expr": "sum by (provider) (rate(vigil_llm_calls_total[5m]))",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Token volume by direction",
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(vigil_llm_tokens_total[5m]))",
+          "legendFormat": "{{direction}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Circuit-breaker state (LLM + Bedrock)",
+      "targets": [
+        {
+          "expr": "sum by (provider) (increase(vigil_llm_calls_total{outcome=\"error\"}[5m]))",
+          "legendFormat": "{{provider}} errors / 5m"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 8 }
+    }
+  ]
+}

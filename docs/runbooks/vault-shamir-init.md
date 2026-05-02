@@ -121,3 +121,69 @@
 > architect must commit to memory: Vault root token (one-time recoverable
 > from `/etc/vigil/vault-init.json`, then deleted), the 5 share encrypted
 > blobs (recoverable from the YubiKeys), and the distribution map.
+
+---
+
+## Verification status (Block-D D.2 / 2026-05-01)
+
+**Static walk only — end-to-end verification deferred to architect-driven M0c ceremony.**
+
+The agent cannot run `vault operator init` against a dev Vault from
+the sandbox (no Vault container reachable). The architect runs the
+EE walk during M0c per EXEC §43.2.
+
+### Drift identified between this runbook and the live script
+
+This runbook (Procedure step 2 above) describes invoking
+`infra/host-bootstrap/03-vault-shamir-init.sh` with `--recipient
+share1=age1yubikey1...` flags. **The live script does NOT accept
+those flags.** It takes no flags; it just runs `vault operator
+init -key-shares=5 -key-threshold=3 -format=json`, writes the
+plaintext shares to `/run/vigil/shamir/unseal-shares.json`, and
+PRINTS manual `age -R yk01-recipient.txt < ...` commands for the
+operator to run by hand.
+
+This is real drift; the runbook prose is aspirational versus what
+the script does. Two paths to resolve, **architect call**:
+
+- **(A) Match runbook to script** — simpler. Rewrite Procedure
+  step 2 to describe the manual-age-encrypt operator workflow the
+  script actually requires. Operator runs the script, then runs
+  the printed `age -R ...` commands themselves. Lower automation
+  but the script is short and audit-friendly.
+
+- **(B) Match script to runbook** — better operational ergonomics.
+  Extend `03-vault-shamir-init.sh` to accept `--recipient
+share<N>=<recipient>` flags + perform the age encryption
+  in-script. Plaintext shares never touch disk (encrypted directly
+  to recipient's age public key). Operator runs ONE command per
+  share-encryption pair. Larger change; needs an updated test.
+
+**Default (if unspecified):** the architect picks during M0c walk-
+through; documenting the drift here is the agent's deliverable.
+
+### Other static observations
+
+- Procedure step 5 (initial unseal test) references
+  `yubikey:share$i.identity` as an age identity scheme. Verify
+  `age-plugin-yubikey` v0.5+ supports this exact syntax in the
+  M0c environment (release notes; pin the version in
+  `infra/host-bootstrap/00-prerequisites.sh` per the failure-mode
+  table's third row).
+- Procedure step 7 mentions appending DECISION-013 — that decision
+  ID is already in use (Post-DECISION-012 work program closure +
+  Anthropic SDK bump). The next free DECISION number at the time
+  of M0c will be the architect's call.
+- Procedure step 6 emits `vault.unsealed` + `vault.sealed`
+  audit-of-audit rows. Verify these event-types are in
+  `KNOWN_EVENT_TYPES` (`packages/shared/src/schemas/audit-log.ts`)
+  before the ceremony so audit-bridge accepts them.
+
+### Architect action
+
+- [ ] EE walk against dev Vault in M0c week 1.
+- [ ] Pick (A) or (B) for the script/runbook drift; agent ships
+      the chosen delta in a follow-up commit.
+- [ ] Confirm DECISION-NNN reservation for the ceremony.
+- [ ] Confirm `vault.unsealed` / `vault.sealed` are in
+      KNOWN_EVENT_TYPES (or add them).

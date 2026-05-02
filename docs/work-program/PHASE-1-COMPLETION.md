@@ -153,12 +153,29 @@ Both files exist and the audit-coverage doc is shipped:
 NO enumerated tests; only §30.8 has named tests (CT-01..CT-06).
 The fixture covers what it can within a 5-second synthetic run.
 
-**A8 follow-up (Block D scope, architect-confirmed 2026-05-01).**
-The agent drafts the SRD §30.1–§30.7 enumeration in Block D based
-on the inferred mapping in
-[E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping).
-Architect reviews and edits in place. Until then the fixture
-operates against the inferred list.
+**A8 follow-up (Block D scope, architect-confirmed 2026-05-01) — 🟩
+draft shipped.**
+
+Block-D D.11 / 2026-05-01: agent drafted the SRD §30.1–§30.7
+enumeration at
+[docs/source/SRD-30-enumeration-draft.md](../source/SRD-30-enumeration-draft.md).
+Per architect signoff option (b) "detailed draft" with [INFERRED]
+markers vs citation separation: every test entry tagged exactly
+one of `[CITED Table N]` (verbatim from SRD-v3 Tables 186-192),
+`[INFERRED §29.X]` (agent inference from milestone narrative), or
+`[INFERRED — agent recommendation]` (industry-standard milestone-
+gate practice).
+
+Counts: §30.1=4 CITED + 5 INFERRED; §30.2=4+4; §30.3=7+4;
+§30.4=6+2; §30.5=8+0 (Table 190 renumbered); §30.6=2+3; §30.7=2+2;
+§30.8=6+0 (unchanged). Total: 39 CITED + 20 INFERRED = 59 if all
+accepted. Architect may accept all / partial / reject INFERRED.
+
+Until architect resolution, the fixture operates against the
+inferred list in
+[E2E-FIXTURE-COVERAGE.md §3](./E2E-FIXTURE-COVERAGE.md#3-inferred-phase-1-milestone-gates--fixture-step-mapping)
+which the draft's 20 `[INFERRED]` entries supersede with explicit
+naming.
 
 ### A9. Production-placeholder sweep
 
@@ -264,14 +281,35 @@ cross-reference completeness on top of link-validity.)
 
 ## TRACK C — Operational readiness
 
-### C1. Compose stack smoke test
+### C1. Compose stack smoke test — 🟩
 
-`docker compose up -d && wait-for-healthy.sh && smoke-tests.sh`. Verifies
-every container reaches healthy and the dashboard returns 200 on
-`/api/health`.
+Block-D D.1 ships [scripts/smoke-stack.sh](../../scripts/smoke-stack.sh).
+Brings the stack up via `infra/docker/docker-compose.yaml`, waits
+up to 5 minutes (`--timeout-s` overridable) for every
+healthcheck-declaring container to report `healthy`, then probes
+five dashboard edge surfaces:
 
-- File: [scripts/smoke-stack.sh](scripts/smoke-stack.sh)
+- `GET /api/health` → 200
+- `GET /api/audit/public?limit=5` → 200
+- `GET /public/audit` → 200
+- `GET /tip` → 200
+- `GET /verify` → 200
 
+fix/blockA-worker-entity-postgres-write-and-rulepass
+Soft pre-flight warning when Tier-1 critical env vars
+(`GPG_FINGERPRINT`, `TIP_OPERATOR_TEAM_PUBKEY`,
+`AUDIT_PUBLIC_EXPORT_SALT`, `POLYGON_ANCHOR_CONTRACT`) are
+PLACEHOLDER — affected workers refuse to boot per Block-A A9 /
+Block-B B.2, so the script flags the cause-of-failure before the
+healthcheck stage.
+
+Modes: default = full bring-up + verify + leave running for inspection.
+`--no-up` = verify only against an already-running stack.
+`--down` = teardown on success.
+Failure mode: prints last 50 log lines per unhealthy container
+so CI-log walking surfaces the cause immediately.
+
+### C2. Vault Shamir initialization — 🟩 (with M0c-action items)
 ### C2. Vault Shamir initialization 🟩
 
 The `infra/host-bootstrap/03-vault-shamir-init.sh` script exists; doc +
@@ -282,65 +320,269 @@ landing.
 
 - 🟩 [infra/host-bootstrap/03-vault-shamir-init.sh](infra/host-bootstrap/03-vault-shamir-init.sh) — present.
 - 🟩 [docs/runbooks/vault-shamir-init.md](docs/runbooks/vault-shamir-init.md) — execution checklist for the architect.
+ main
 
-### C3. Tor onion service health monitor
+[docs/runbooks/vault-shamir-init.md](../runbooks/vault-shamir-init.md)
+exists. Block-D D.2 added a "Verification status" section
+documenting:
 
-`/tip` is Tor-native (W-09 🟩). Add a sentinel that pings the .onion
-hourly from the Hetzner sentinel monitors and alerts if down for
+- Static walk only — EE verification deferred to architect-driven M0c ceremony per EXEC §43.2.
+- **Drift identified**: runbook describes `--recipient` flags the live `03-vault-shamir-init.sh` doesn't accept. Architect picks (A) match runbook to script OR (B) extend script to match runbook during M0c walk-through.
+- Other observations: age-plugin-yubikey version pin, DECISION-013 reuse warning, audit-bridge event-type registration check.
 
-> 30 min.
+Architect-action items captured at the end of the runbook for the
+M0c ceremony.
 
-- File: [apps/sentinel-monitor/src/checks/tor-tip-onion.ts](apps/sentinel-monitor/src/checks/tor-tip-onion.ts)
+### C3. Tor onion service health monitor — 🟩
 
-### C4. Grafana dashboards (JSON)
+Stack:
 
-Phase 1 dashboards: ingestion-throughput, pattern-fire-rate,
-calibration-bands, audit-chain-tail, polygon-anchor-cost,
-council-vote-lag, tip-volume, llm-cost-per-finding.
+- [scripts/sentinel-tor-check.ts](../../scripts/sentinel-tor-check.ts) — hourly probe via SOCKS5h to the local Tor daemon; emits `vigil_tor_onion_up{target}` to the Prometheus pushgateway. Targets: `tip`, `verify` (via env `TIP_ONION_HOSTNAME` / `VERIFY_ONION_HOSTNAME`).
+- [infra/host-bootstrap/systemd/vigil-sentinel-tor.service](../../infra/host-bootstrap/systemd/vigil-sentinel-tor.service) + [.timer](../../infra/host-bootstrap/systemd/vigil-sentinel-tor.timer) — `OnCalendar=*:23:00` (hourly at :23 to avoid colliding with anchor + replication bursts on the hour).
+- Block-D D.3 added two Prometheus alerts in [infra/docker/prometheus/alerts/vigil.yml](../../infra/docker/prometheus/alerts/vigil.yml):
+  - `TorOnionDown` — `vigil_tor_onion_up == 0` for 30m → warning.
+  - `TorOnionStale` — `absent(vigil_tor_onion_up)` for 2h → warning (catches sentinel-cron-itself-down distinct from onion-down).
 
-- 8 dashboards under [infra/observability/grafana/dashboards/](infra/observability/grafana/dashboards/)
+### C4. Grafana dashboards — 🟩
 
-### C5. Falco rules
+Block-D D.4a + D.4b + D.4c shipped the architect's 6 spec'd
+dashboards (option (c) map+add+archive). Canonical set under
+`infra/docker/grafana/dashboards/`:
 
-Custom rules for: vault-binary-execed, yubikey-removed-mid-session,
-unsigned-commit-on-main, postgres-from-non-app, audit-actions-direct-write.
+1. [vigil-data-plane.json](../../infra/docker/grafana/dashboards/vigil-data-plane.json) — Postgres + Neo4j + Redis + IPFS health/saturation.
+2. [vigil-workers.json](../../infra/docker/grafana/dashboards/vigil-workers.json) — per-worker queue lag, throughput, error rates (templated by `$worker`).
+3. [vigil-llm.json](../../infra/docker/grafana/dashboards/vigil-llm.json) — daily cost, calls, hallucination rate, provider tier, schema-validation failure rate.
+4. [vigil-findings-pipeline.json](../../infra/docker/grafana/dashboards/vigil-findings-pipeline.json) — detection rate, scoring tier, counter-evidence hold, action-queue depth, posterior + pattern-strength distributions.
+5. [vigil-governance.json](../../infra/docker/grafana/dashboards/vigil-governance.json) — proposal lifecycle, vote distribution, pillar activity, recusal rate.
+6. [vigil-operator-overview.json](../../infra/docker/grafana/dashboards/vigil-operator-overview.json) — KPIs across the 5 detail dashboards with deep-link panels.
 
-- File: [infra/observability/falco/vigil-rules.yaml](infra/observability/falco/vigil-rules.yaml)
+The previous 14 dashboards moved to
+[infra/docker/grafana/dashboards/archive-from-block-d/](../../infra/docker/grafana/dashboards/archive-from-block-d/)
+with [README.md](../../infra/docker/grafana/dashboards/archive-from-block-d/README.md)
+listing per-file justification (superseded / out-of-scope-for-MVP /
+Phase-2-only). Architect-required single source of truth for "why
+isn't there a dashboard for X?" questions.
 
-### C6. Sentinel quorum check
+### C5. Falco rules — 🟩
+
+11 rules at [infra/observability/falco/vigil-rules.yaml](../../infra/observability/falco/vigil-rules.yaml).
+Block-D D.5 work (architect signoff option (e)→ii + (a)→α + 3 NEW):
+
+Refactored (NOT delete-and-readd):
+
+- `shell_in_vigil_container` — same matcher + output + priority; fresher comment naming the generic threat (AUDITABLE-OPERATOR-PRESENCE; Cameroon TTPs are infrastructure/social, not container-runtime).
+- `privilege_escalation_in_container` — broadened scope from `vigil_app_containers OR vigil_db_containers` to `container.id != host` (any container — picks up keycloak/tor/caddy/fabric-peer infra previously missed).
+
+Added (NEW per architect spec):
+
+- `worker_outbound_to_non_allowlisted_host` (b) — DATA-EXFILTRATION-OR-C2. Allowlist: vigil-internal subnet + vault + anthropic.com + bedrock-runtime.\* + polygon RPC. adapter-runner exempt (its outbound is the adapter contract).
+- `cross_container_secret_read` (c) — CREDENTIAL-THEFT. Per-secret container ownership map (anthropic_api_key → LLM workers; postgres_password → postgres; etc.).
+- `data_volume_write_from_non_owner` (d) — DATA-TAMPERING-OR-PERSISTENCE. /srv/vigil/{postgres,neo4j,ipfs}/data/ — only the owning store's container may write.
+
+Tests: [infra/observability/falco/RULE-TESTS.md](../../infra/observability/falco/RULE-TESTS.md).
+Per-rule trigger + expected log line documented. 2 of 11 sandbox-
+testable; 9 require host-side bind mounts / privileged Falco /
+real network egress allowlist — production-only verification per
+architect spec, walked during M0c hardening week.
+
+### C6. Sentinel quorum check — 🟩
 
 3 VPS (Helsinki, Tokyo, NYC), 2-of-3 quorum for outage attestation.
-Verify the existing `apps/sentinel-monitor/` actually wires this and
-emit a `sentinel.quorum_outage` audit row when 2-of-3 say down.
 
-- Integration test gated on three sentinel ports.
+Status, Block-D D.6 / 2026-05-01:
 
-### C7. Phase-gate CI workflow validation
+- The wiring is via systemd timer, not an `apps/` workspace —
+  `infra/host-bootstrap/systemd/vigil-sentinel-quorum.{service,timer}`
+  fires `scripts/sentinel-quorum.ts` every 5 min (offset 47s from the
+  wall-clock minute boundary so it doesn't collide with the high-sig
+  anchor's 5s tick). No `apps/sentinel-monitor/` is needed.
+- The orchestration moved from `scripts/sentinel-quorum.ts` into
+  [packages/observability/src/sentinel-quorum.ts](../../packages/observability/src/sentinel-quorum.ts)
+  so the integration test can drive `runSentinelQuorum` against
+  localhost mocks without spawning a subprocess. The script becomes
+  a thin CLI shim. Pure `quorumDecide` already lived in the package
+  (9 unit tests).
+- Integration test:
+  [packages/observability/\_\_tests\_\_/sentinel-quorum-integration.test.ts](../../packages/observability/__tests__/sentinel-quorum-integration.test.ts)
+  spins up 3 ephemeral-port HTTP servers (sentinel mocks) + 1 UDS
+  socket (audit-bridge mock) and runs 6 cases:
+  - 3-of-3 down → emits `system.health_degraded` to UDS
+  - 2-of-3 down → emits, attesting_sites = [helsinki, tokyo]
+  - 2-of-3 up → no emit
+  - 1 up + 1 down + 1 unknown → inconclusive, no emit
+  - sentinel returns 503 → mapped to `unknown`
+  - skip-suite guard if any of the 4 binds fail (sandboxed CI runners)
 
-`.github/workflows/phase-gate.yml` exists per OPERATIONS §8. Verify it
-reads the current phase from the decision log and enforces.
+Architect-spec drift acknowledged: the spec said
+`sentinel.quorum_outage` but the live action enum
+([packages/shared/src/schemas/audit.ts:18](../../packages/shared/src/schemas/audit.ts#L18))
+has `system.health_degraded`. Block-D commits the live name; if the
+architect prefers the spec name, the rename is a one-enum-add + one
+script-change in a follow-up.
 
-- C7.1 Read [.github/workflows/phase-gate.yml](.github/workflows/phase-gate.yml).
-- C7.2 Add a test that mutates a Phase-2 file in a Phase-1 PR and asserts the workflow rejects.
+### C7. Phase-gate CI workflow validation — 🟩
 
-### C8. PR template + commitlint config
+`.github/workflows/phase-gate.yml` exists per OPERATIONS §8 — 10 lints
+gating every PR (current-phase reader; DRY-RUN-DECISION GO check;
+check-decisions; audit-decision-log; check-pattern-coverage;
+check-weaknesses-index; check-migration-pairs;
+check-test-coverage-floor; check-source-count; check-llm-pricing;
+generate-pattern-catalogue --check; check-decision-cross-links).
 
-- C8.1 [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) (verify).
-- C8.2 `commitlint.config.cjs` enforces Conventional Commits.
+Status, Block-D D.7 / 2026-05-01:
 
-### C9. Backup script verification
+- C7.1 🟩 Phase-gate workflow walked end-to-end; 10 lints documented
+  in the workflow comments are the live set. The workflow reads
+  `**Current phase: Phase-N**` from `docs/decisions/log.md` and gates
+  via `DRY-RUN-DECISION.md`. (No code change needed.)
+- C7.2 🟩 Architect-spec'd option (b) on-the-fly mutation harness:
+  [scripts/synthetic-failure.ts](../../scripts/synthetic-failure.ts) +
+  [.github/workflows/synthetic-failure.yml](../../.github/workflows/synthetic-failure.yml).
+  Five mutually-different mutation surfaces (markdown append, single-
+  line text patch, JSON edit, src-file add, src-file add) drive the
+  five lints chosen for cross-coverage of mutation kind:
+  1. `check-decision-cross-links` — DECISION-099 with no AUDIT/W/sha
+  2. `check-source-count` — TRUTH.md "29 sources" → "30 sources"
+  3. `check-llm-pricing` — pricing.json models map emptied
+  4. `check-pattern-coverage` — `p-a-999-synthetic.ts` with no fixture
+  5. `check-migration-pairs` — `9999_synthetic.sql` with no `_down.sql`
 
-`infra/host-bootstrap/10-vigil-backup.sh` runs nightly. Verify it
-backs up Postgres + Vault snapshot + IPFS pinset + git repo +
-audit-chain export, all encrypted with the architect's GPG key, all
-mirrored to NAS-replica + Hetzner archive.
+  Each case mutates → spawns the lint → restores in a try/finally so
+  the working tree is clean even on harness failure. Verified locally
+  2026-05-01: 5/5 REJECTED with exit 1, working tree restored,
+  baseline lints still pass. The harness exits 1 on any ESCAPED case
+  (lint passed on broken input) so the workflow fails loud if a gate
+  silently breaks.
 
-### C10. Secret-scan baseline
+  Workflow triggers: PR-on-touch (the lint scripts, the harness, or
+  any of the input surfaces); weekly cron (Monday 04:00 UTC); manual
+  `workflow_dispatch`. Per-gate REJECTED log line per architect spec:
+  `[<gate-name>] ✓ REJECTED (exit 1)`.
 
-`gitleaks` baseline plus pre-commit hook plus CI step. No exceptions.
+  Architect-action item recorded in the harness header: when a future
+  phase-gate lint joins the batch, also add a synthetic-failure case.
+  The 1:1 invariant (every lint has a synthetic-failure case) is the
+  unit-test of the gate itself.
 
-- File: [.gitleaks.toml](.gitleaks.toml)
-- Hook: [.husky/pre-commit](.husky/pre-commit)
+### C8. PR template + commitlint config — 🟩
+
+Status, Block-D D.8 / 2026-05-01:
+
+- C8.1 🟩 [.github/PULL_REQUEST_TEMPLATE.md](../../.github/PULL_REQUEST_TEMPLATE.md)
+  ships: ring (0..5) + scope, description, 10-item self-critique
+  checklist (SRD compliance, input validation, Vault-only secrets,
+  idempotency, structured logging, ≥80% coverage, non-root container,
+  audit trail, fabrication-resistance, YAGNI), AT-?-?? acceptance-
+  test pointer, DECISION-???: pointer, architect sign-off line.
+  Block-D fixed the broken `IMPLEMENTATION-PLAN.md` ref to point at
+  `docs/IMPLEMENTATION-PLAN.md`.
+- C8.2 🟩 [commitlint.config.cjs](../../commitlint.config.cjs)
+  declares 12 allowed types (feat / fix / docs / chore / refactor /
+  perf / test / build / ci / security / deps / revert) and a closed
+  scope-enum (top-level + every package + every worker app + the 6
+  ring-level scopes + 3 Phase-2 MOU-gated adapter scopes). Subject
+  rules: never upper/pascal/start-case, never empty, never
+  trailing-period, header ≤100 chars, body ≤100 chars per line.
+- C8.3 🟩 [.husky/commit-msg](../../.husky/commit-msg) runs
+  `pnpm exec commitlint --edit "$1"` on every commit; rejects on any
+  rule violation.
+- C8.4 🟩 [.husky/pre-commit](../../.husky/pre-commit) blocks
+  staging of `personal/{calibration-seed,council-candidates,prompts/
+*.local.md}` and any `.env` file (whitelist `.env.example`); runs
+  `lint-staged` + `gitleaks protect --staged` if available.
+
+Verified Block-D D.8 / 2026-05-01: smoke-tested commitlint locally
+against four cases — bad type ✓ rejects with `[type-enum]`; bad
+scope ✓ rejects with `[scope-enum]`; header >100 chars ✓ rejects
+with `[header-max-length]`; valid commit ✓ silent pass.
+
+### C9. Backup script verification — 🟩 (verified + gaps documented)
+
+`infra/host-bootstrap/10-vigil-backup.sh` runs nightly under systemd
+timer `vigil-backup.timer` at 02:30 Africa/Douala (RandomizedDelaySec
+±10 min).
+
+Status, Block-D D.9 / 2026-05-01:
+
+- C9.1 🟩 [scripts/verify-backup-config.sh](../../scripts/verify-backup-config.sh)
+  walked end-to-end (CI mode `CI=1`): all hard-error checks pass —
+  bootstrap script present + executable; vigil-backup.service +
+  vigil-backup.timer wired; pg_basebackup / btrfs / neo4j-admin /
+  ipfs / GPG_FINGERPRINT / synology coverage; .env.example
+  documents the 4 required env vars; backup pipeline referenced in
+  decision log.
+- C9.2 🟩 [docs/runbooks/backup.md](../runbooks/backup.md) authored:
+  what the pipeline writes (per-step source / how / output file
+  table); pre-flight verification commands (gpg --verify +
+  sha256sum -c MANIFEST.sha256); architect-spec coverage gap table;
+  what the runbook does NOT cover (cross-references to RESTORE.md,
+  dr-rehearsal.md, R6, EXEC §34.6).
+
+**Architect-spec coverage gaps (5 items, surfaced as warnings).**
+The verifier was extended with five `[architect-spec]` checks that
+emit yellow warnings (not hard errors) so the gap is visible in CI
+without blocking. Each row points the operator at
+docs/runbooks/backup.md for the architect-action context.
+
+| Spec item                   | Current                             | Gap                                                 | Action             |
+| --------------------------- | ----------------------------------- | --------------------------------------------------- | ------------------ |
+| Vault snapshot              | btrfs-of-/srv/vigil/vault           | no `vault operator raft snapshot save` (raft-aware) | M0c week           |
+| Git repo backup             | none on backup host                 | source on github + architect's working tree only    | M0c week           |
+| Audit-chain explicit export | inside postgres dump only           | no separate signed CSV/JSONL of audit.actions       | M0c week           |
+| Encrypted-at-rest archive   | manifest signed, contents plaintext | NAS stores plaintext basebackup + dumps             | M0c week           |
+| Hetzner archive mirror      | only Synology rclone target         | no second-region mirror                             | Phase-2 (post-MOU) |
+
+These are defence-in-depth additions, not blockers — the current
+pipeline meets the 6-hour RTO target for host loss + btrfs
+corruption + Postgres corruption (the failure modes RESTORE.md is
+written for). None can be silently extended by the build agent;
+each touches a key the architect controls (Vault root token, GPG
+passphrase) or a paid resource (Hetzner Storage Box).
+
+### C10. Secret-scan baseline — 🟩
+
+`gitleaks` baseline + pre-commit hook + CI workflow. No exceptions.
+
+Status, Block-D D.10 / 2026-05-01:
+
+- C10.1 🟩 [.gitleaks.toml](../../.gitleaks.toml) extends the default
+  ruleset (Anthropic, AWS, GitHub PAT, Stripe, Slack, generic high-
+  entropy) and ships 6 allowlist blocks covering: synthetic IPFS
+  CIDs in the anti-hallucination corpus; deterministic placeholder
+  hashes / hex strings under `**/__tests__/`; PLACEHOLDER markers
+  in `.env.example` + `docs/` + `*.md`; architect / sample emails
+  in docs; **NEW Block-D** EU sanctions list public token (European
+  Commission open-data portal); **NEW Block-D** Vault path
+  references in k8s ExternalSecrets manifests (`key: vigil/...`
+  lines name paths, not secret values); repo-wide path exclusions
+  (`node_modules/`, lockfiles, `dist/`, `build/`, `.next/`,
+  `.turbo/`, `graphify-out/`).
+- C10.2 🟩 [.husky/pre-commit](../../.husky/pre-commit) runs
+  `gitleaks protect --staged --redact -v --no-banner` if the
+  binary is available. Verified end-to-end during D.6/D.7/D.8/D.9
+  commit pre-flight (every staged-files commit logged
+  `[pre-commit] OK` after gitleaks scan).
+- C10.3 🟩 [.github/workflows/secret-scan.yml](../../.github/workflows/secret-scan.yml)
+  runs two scanners on every push + every PR + daily at 03:17 UTC:
+  - `gitleaks/gitleaks-action@v2` against full git history with
+    artifact upload + actor notification
+  - `trufflesecurity/trufflehog@main` with `--only-verified` (live
+    secret check via vendor APIs — very low false-positive rate)
+- C10.4 🟩 False-positive triage:
+  - `apps/adapter-runner/src/adapters/eu-sanctions.ts:21` —
+    `?token=dG9rZW4tMjAxNw` is the EU sanctions list public download
+    token (published in EU open-data documentation; access controlled
+    by IP allowlist + rate limit, not the token). Allowlisted.
+  - `infra/k8s/charts/vigil-apex/templates/externalsecret-workers.yaml:23`
+    — `key: vigil/vault-tokens/worker` is a Vault path identifier,
+    not a secret value (ExternalSecrets resolves the value at runtime).
+    Allowlisted with a path-scoped regex covering all
+    `infra/k8s/charts/**/*.{yaml,yml}` ExternalSecrets manifests.
+
+Verified Block-D D.10 / 2026-05-01:
+`gitleaks detect --no-git --redact -v` → 0 leaks (was 2 before
+the Block-D allowlist extension); pre-commit gitleaks scan green
+on every Block-D commit.
 
 ---
 

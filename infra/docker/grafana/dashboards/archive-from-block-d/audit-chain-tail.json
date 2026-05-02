@@ -1,0 +1,101 @@
+{
+  "uid": "vigil-audit-chain",
+  "title": "Audit-chain tail",
+  "description": "Postgres hash-chain seq tip + Polygon anchor lag.",
+  "tags": ["vigil", "audit", "chain"],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "Africa/Douala",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Audit chain seq",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vigil_audit_chain_seq"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Polygon anchors (1h)",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vigil_polygon_anchor_total{status=\"ok\"}[1h]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Anchor success rate (5m)",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "vigil-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(vigil_polygon_anchor_total[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table"
+        }
+      }
+    }
+  ],
+  "editable": true
+}

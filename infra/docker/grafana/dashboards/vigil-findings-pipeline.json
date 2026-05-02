@@ -1,0 +1,146 @@
+{
+  "title": "VIGIL — Findings pipeline",
+  "uid": "vigil-findings-pipeline",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "tags": ["vigil", "findings", "scoring"],
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "description": "Block-D C4 dashboard #4 — detection rate, scoring tier distribution (action_queue / investigation_queue / log_only), counter-evidence hold rate, action-queue depth. Per architect signoff 2026-05-01.",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Findings detected (last 24h)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_events_emitted_total{stream=\"vigil:pattern:detect\"}[24h]))"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Action-queue depth (now)",
+      "targets": [
+        {
+          "expr": "sum(vigil_redis_stream_pel_length{stream=\"vigil:counter:evidence\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Counter-evidence hold rate (last 24h)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_finding_hold_total{reason=\"counter_evidence\"}[24h])) / clamp_min(sum(increase(vigil_finding_total[24h])), 1)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "ECE overall",
+      "targets": [{ "expr": "max(vigil_calibration_ece_overall)" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Detection rate (per pattern, 5m rate)",
+      "targets": [
+        {
+          "expr": "sum by (pattern_id) (rate(vigil_pattern_strength_count[5m]))",
+          "legendFormat": "{{pattern_id}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Scoring tier distribution (5m rate)",
+      "targets": [
+        {
+          "expr": "sum(rate(vigil_certainty_assessment_total{tier=\"action_queue\"}[5m]))",
+          "legendFormat": "action_queue"
+        },
+        {
+          "expr": "sum(rate(vigil_certainty_assessment_total{tier=\"investigation_queue\"}[5m]))",
+          "legendFormat": "investigation_queue"
+        },
+        {
+          "expr": "sum(rate(vigil_certainty_assessment_total{tier=\"log_only\"}[5m]))",
+          "legendFormat": "log_only"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Posterior distribution (histogram bins)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(vigil_finding_posterior_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vigil_finding_posterior_bucket[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vigil_finding_posterior_bucket[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pattern strength distribution (per-pattern p99)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (pattern_id, le) (rate(vigil_pattern_strength_bucket[5m])))",
+          "legendFormat": "{{pattern_id}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "MINFI score-band distribution (when DECISION-010 routes by body)",
+      "targets": [
+        {
+          "expr": "sum by (band) (rate(vigil_minfi_score_band_total[5m]))",
+          "legendFormat": "{{band}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 8 }
+    }
+  ]
+}

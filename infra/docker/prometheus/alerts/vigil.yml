@@ -129,3 +129,30 @@ groups:
         annotations:
           summary: 'entity.canonical pending Neo4j mirror backlog ({{ $value }} rows for >30m)'
           description: 'Sustained pending-mirror backlog. Either Neo4j is unreachable or the worker-entity mirror retry path is throttled. Check Neo4j connectivity and worker-entity logs.'
+
+      # Block-D D.3 / C3 — Tor onion service health.
+      # scripts/sentinel-tor-check.ts runs hourly from the Hetzner
+      # sentinel monitors and pushes vigil_tor_onion_up{target} to
+      # the Prometheus pushgateway. Stale or zero values indicate
+      # the .onion is unreachable from outside the host network —
+      # affects /tip submissions (W-09) and any other public hidden
+      # service. Spec: alert if down for > 30 min.
+      - alert: TorOnionDown
+        expr: vigil_tor_onion_up == 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Tor hidden service "{{ $labels.target }}" unreachable for > 30 min'
+          description: 'sentinel-tor-check reports vigil_tor_onion_up{target="{{ $labels.target }}"}=0. Possible causes: Tor daemon down on the host, hidden-service descriptor expired, ISP blocking Tor. Check vigil-tor container + tor logs; confirm hidden-service hostname matches TIP_ONION_HOSTNAME / VERIFY_ONION_HOSTNAME envs.'
+
+      - alert: TorOnionStale
+        # Pushgateway metric ages out as `vigil_tor_onion_up` stops
+        # being refreshed. If the metric vanishes for > 2 h, the
+        # sentinel-tor-check cron itself is the problem (the check
+        # didn't fire), distinct from the onion being down.
+        expr: absent(vigil_tor_onion_up)
+        for: 2h
+        labels: { severity: warning }
+        annotations:
+          summary: 'sentinel-tor-check has not pushed in > 2 h'
+          description: 'No vigil_tor_onion_up metric in pushgateway for the last 2 hours — sentinel cron likely not firing. Check Hetzner sentinel monitor logs; verify the hourly cron is registered.'

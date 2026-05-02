@@ -2824,7 +2824,7 @@ phase gate per EXEC §43.2.
 - The Anthropic SDK bump's 1h cache TTL is a forecast, not a measurement
   — actual savings will be observed via `vigil_llm_cost_usd_total`
   per-model on the new cost dashboard
-  ([`infra/docker/grafana/dashboards/llm-cost-per-finding.json`](../../infra/docker/grafana/dashboards/llm-cost-per-finding.json))
+  ([`infra/docker/grafana/dashboards/archive-from-block-d/llm-cost-per-finding.json`](../../infra/docker/grafana/dashboards/archive-from-block-d/llm-cost-per-finding.json))
   once production traffic accumulates.
 
 **What this decision does NOT do.**

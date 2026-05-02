@@ -2,10 +2,7 @@
   "uid": "vigil-calibration",
   "title": "Calibration reliability bands",
   "description": "DECISION-011 / W-14 \u2014 predicted vs observed by reliability band.",
-  "tags": [
-    "vigil",
-    "calibration"
-  ],
+  "tags": ["vigil", "calibration"],
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",

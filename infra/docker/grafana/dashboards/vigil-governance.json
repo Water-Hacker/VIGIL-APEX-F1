@@ -1,0 +1,138 @@
+{
+  "title": "VIGIL — Governance",
+  "uid": "vigil-governance",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "tags": ["vigil", "governance", "council"],
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": { "list": [] },
+  "description": "Block-D C4 dashboard #5 — proposal lifecycle states, vote distribution, pillar activity, recusal rate. Per architect signoff 2026-05-01.",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active pillars",
+      "targets": [
+        {
+          "expr": "max(vigil_council_active_pillars_total)",
+          "legendFormat": "active"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 4 },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Open proposals (now)",
+      "targets": [
+        {
+          "expr": "max(vigil_governance_proposal_state_total{state=\"open\"})"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Recusal rate (last 30d)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_council_vote_total{choice=\"RECUSE\"}[30d])) / clamp_min(sum(increase(vigil_council_vote_total[30d])), 1)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.15 },
+              { "color": "red", "value": 0.4 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Auto-archive rate (14d expiry)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_governance_proposal_state_total{state=\"auto_archived\"}[30d]))"
+        }
+      ],
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Proposal lifecycle states (current snapshot)",
+      "targets": [
+        {
+          "expr": "sum by (state) (vigil_governance_proposal_state_total)",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Vote distribution by choice",
+      "targets": [
+        {
+          "expr": "sum by (choice) (rate(vigil_council_vote_total[1d]))",
+          "legendFormat": "{{choice}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Vote distribution by pillar",
+      "targets": [
+        {
+          "expr": "sum by (pillar) (rate(vigil_council_vote_total[1d]))",
+          "legendFormat": "{{pillar}}"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pillar activity (votes cast per pillar / 7d)",
+      "targets": [
+        {
+          "expr": "sum by (pillar) (increase(vigil_council_vote_total[7d]))",
+          "legendFormat": "{{pillar}}"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Council vote-to-tally lag (seconds)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(vigil_council_vote_lag_seconds_bucket[1h]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(vigil_council_vote_lag_seconds_bucket[1h]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 8 }
+    }
+  ]
+}

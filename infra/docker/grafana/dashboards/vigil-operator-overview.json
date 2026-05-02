@@ -1,0 +1,233 @@
+{
+  "title": "VIGIL — Operator overview",
+  "uid": "vigil-operator-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["vigil", "overview", "operator"],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "description": "Block-D C4 dashboard #6 — KPIs across the 5 detail dashboards, linked. Architect's home page; clicking a panel jumps to the detail dashboard for that domain. Per architect signoff 2026-05-01.",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Stack health",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Workers stalled",
+      "targets": [
+        {
+          "expr": "count(time() - vigil_worker_last_tick_seconds > 3600)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ Workers detail", "url": "/d/vigil-workers" }],
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Postgres pool waiting",
+      "targets": [{ "expr": "max(vigil_db_pool_waiting)" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ Data plane detail", "url": "/d/vigil-data-plane" }],
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Neo4j mirror failed",
+      "targets": [
+        {
+          "expr": "max(vigil_neo4j_mirror_state_total{state=\"failed\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ Data plane detail", "url": "/d/vigil-data-plane" }],
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Audit chain seq head",
+      "targets": [{ "expr": "max(vigil_audit_chain_seq)" }],
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 4 }
+    },
+    {
+      "type": "row",
+      "title": "Findings + LLM",
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Findings detected (1h)",
+      "targets": [
+        {
+          "expr": "sum(increase(vigil_events_emitted_total{stream=\"vigil:pattern:detect\"}[1h]))"
+        }
+      ],
+      "links": [{ "title": "→ Findings pipeline detail", "url": "/d/vigil-findings-pipeline" }],
+      "gridPos": { "x": 0, "y": 6, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Action queue depth",
+      "targets": [
+        {
+          "expr": "sum(vigil_redis_stream_pel_length{stream=\"vigil:counter:evidence\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ Findings pipeline detail", "url": "/d/vigil-findings-pipeline" }],
+      "gridPos": { "x": 6, "y": 6, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "LLM cost — last 24h (USD)",
+      "targets": [{ "expr": "sum(increase(vigil_llm_cost_usd_total[24h]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ LLM detail", "url": "/d/vigil-llm" }],
+      "gridPos": { "x": 12, "y": 6, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "ECE overall",
+      "targets": [{ "expr": "max(vigil_calibration_ece_overall)" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ Findings pipeline detail", "url": "/d/vigil-findings-pipeline" }],
+      "gridPos": { "x": 18, "y": 6, "w": 6, "h": 4 }
+    },
+    {
+      "type": "row",
+      "title": "Governance + ingest",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Active pillars (5 = green)",
+      "targets": [{ "expr": "max(vigil_council_active_pillars_total)" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 4 },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        }
+      },
+      "links": [{ "title": "→ Governance detail", "url": "/d/vigil-governance" }],
+      "gridPos": { "x": 0, "y": 11, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Open proposals",
+      "targets": [
+        {
+          "expr": "max(vigil_governance_proposal_state_total{state=\"open\"})"
+        }
+      ],
+      "links": [{ "title": "→ Governance detail", "url": "/d/vigil-governance" }],
+      "gridPos": { "x": 6, "y": 11, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Adapter runs (1h)",
+      "targets": [{ "expr": "sum(increase(vigil_adapter_runs_total[1h]))" }],
+      "gridPos": { "x": 12, "y": 11, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Adapter failure rate (1h)",
+      "targets": [
+        {
+          "expr": "sum(rate(vigil_adapter_runs_total{outcome=\"failed\"}[1h])) / clamp_min(sum(rate(vigil_adapter_runs_total[1h])), 0.001)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 18, "y": 11, "w": 6, "h": 4 }
+    }
+  ]
+}
