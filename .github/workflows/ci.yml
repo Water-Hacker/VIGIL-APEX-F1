@@ -169,7 +169,12 @@ jobs:
         run: pnpm --filter @vigil/patterns test
       # DECISION-012 — pattern source ↔ fixture-test 1:1 coverage gate.
       - name: pattern fixture coverage gate
-        run: node_modules/.pnpm/node_modules/.bin/tsx scripts/check-pattern-coverage.ts
+        # The hardcoded `node_modules/.pnpm/node_modules/.bin/tsx` path
+        # was unreliable across pnpm versions (only populated under
+        # specific hoisting configs). Use `pnpm exec tsx` now that tsx
+        # is declared as a workspace-root devDependency (commit 94235d4)
+        # — pnpm 9 symlinks it to `node_modules/.bin/tsx` reliably.
+        run: pnpm exec tsx scripts/check-pattern-coverage.ts
       - uses: actions/upload-artifact@v4
         with:
           name: coverage
