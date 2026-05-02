@@ -2441,10 +2441,20 @@ OPERATIONS.md §3, then flip Status to FINAL.
 
 ## DECISION-012 TAL-PA — Total Action Logging with Public Anchoring
 
-**Status:** PROVISIONAL — promote to FINAL after architect read-through of
-[`docs/source/TAL-PA-DOCTRINE-v1.md`](../source/TAL-PA-DOCTRINE-v1.md).
+**Status:** FINAL
 
 **Date:** 2026-04-29.
+
+**Promoted to FINAL:** 2026-05-02
+
+**Architect:** Junior Thuram Nana, Sovereign Architect.
+
+**Read-through caveats (architect-action items, none blocking):**
+
+- §4 Polygon mainnet acceptable for Phase 1; revisit at Phase 2 entry whether Base or Arbitrum has equivalent institutional recognition in francophone Africa.
+- §5 Public `/api/audit/public` auth-free contract requires Cameroonian counsel review before M6 public launch. Add to ANTIC declaration counsel scope.
+- §10 Institutional commitments to CONAC / Cour des Comptes / MINFI / ANIF depend on engagement letters being countersigned. Tracked under PHASE-1-COMPLETION.md institutional carry items.
+  **Date:** 2026-04-29.
 
 **Principle.** Every privileged action on the platform produces an
 immutable, signed, dual-anchored audit row that is observable — in
