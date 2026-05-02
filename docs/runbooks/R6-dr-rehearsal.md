@@ -40,6 +40,11 @@ A full host loss. Specifically:
 - `DR_REHEARSAL_POSTGRES_URL` env set to the dr-test Postgres
   connection (NOT production). The script refuses to query
   Postgres without it.
+- **Architect's primary YubiKey present + GPG passphrase known**
+  (Block-E E.14 precondition). Without these the encrypted-at-rest
+  archive cannot be decrypted at step 3.5 and the rehearsal
+  cannot proceed. If the architect is unavailable, the backup
+  architect's YubiKey is the secondary path (HSK-v1 §6.2).
 
 ## Procedure
 
@@ -58,16 +63,26 @@ DR_REHEARSAL_POSTGRES_URL=postgres://... \
 pnpm exec tsx scripts/dr-rehearsal.ts --dry-run
 ```
 
-The script walks 10 steps:
+The script walks 11 steps (step 3.5 added in Block-E E.14):
 
 1. **Baseline capture** — counts canonicals, audit seq head, findings.
 2. **Snapshot** — pg_basebackup + Vault raft snapshot to NAS-test mount.
 3. **Bring DR-test stack up fresh** — separate compose profile, no data.
+   3.5. **Decrypt the archive** (Block-E E.14, ~15 min) — every `.gpg`
+   in the archive is unwrapped; YubiKey + GPG passphrase required.
+   Procedure: [`docs/RESTORE.md` Phase 0.5](../RESTORE.md). The
+   rehearsal exercises the smoke test
+   [`scripts/test-encrypt-roundtrip.sh`](../../scripts/test-encrypt-roundtrip.sh)
+   on a dr-test fixture before touching the real archive — this is
+   the binding "restore-actually-decrypts" gate.
 4. **Restore Postgres** — apply snapshot, time it.
 5. **Restore IPFS** — rclone from NAS mirror, time it.
 6. **Restore Vault + unseal** — raft snapshot + mock 3-share unseal.
 7. **Workers up + time-to-first-event** — the SLA datapoint.
-8. **Audit-verifier chain walk** — MUST be clean.
+8. **Audit-verifier chain walk** — MUST be clean. The offline
+   verifier ([`scripts/verify-hashchain-offline.ts`](../../scripts/verify-hashchain-offline.ts),
+   Block-E E.13) runs against the decrypted CSV from step 3.5 and
+   the report is captured for the rehearsal record.
 9. **Baseline comparison** — restored counts within RPO tolerance.
 10. **Teardown** — `docker compose down -v` on the dr-test profile.
 

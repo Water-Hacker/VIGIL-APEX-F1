@@ -29,7 +29,45 @@ DATE_TAG="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 DEST="${ARCHIVE_ROOT}/${DATE_TAG}"
 GPG_FP="${GPG_FINGERPRINT:?GPG_FINGERPRINT not set}"
 
+# Block-E E.14 / C9 backup gap 4 — encrypted-at-rest archive.
+# Architect-confirmed encrypt-subkey fingerprint: 0F8B9DEA4366A7880CFE76D4232E1B0F846B6151
+# (HSK-v1 estate; long-form fingerprint required so gpg picks the
+# encrypt subkey, not the master signing key). Each archive output
+# file is wrapped via `gpg --encrypt --recipient $GPG_ENCRYPT_RECIPIENT`
+# before manifest computation; the plaintext is removed from disk so
+# the NAS never holds unencrypted state. The manifest signature still
+# attests "the architect's hardware key authored this archive at
+# this time"; the chain integrity is provable post-decryption via
+# scripts/verify-hashchain-offline.ts (Block-E E.13).
+GPG_ENCRYPT_RECIPIENT="${GPG_ENCRYPT_RECIPIENT:?GPG_ENCRYPT_RECIPIENT not set — refusing to write plaintext to NAS (Block-E E.14)}"
+
 log() { printf '[%s] %s\n' "$(date -uIs)" "$*"; }
+
+# Encrypt a single file in-place: <file> → <file>.gpg, then unlink
+# the plaintext. Aborts the whole backup on encryption failure (the
+# alternative — silent skip — would land plaintext on the NAS,
+# defeating the contract).
+encrypt_at_rest() {
+  local f="$1"
+  if [ ! -f "$f" ] && [ ! -d "$f" ]; then
+    log "[warn] encrypt_at_rest: $f not present, skipping"
+    return 0
+  fi
+  if [ -d "$f" ]; then
+    # Tar the directory first so gpg has a single input. Removes the
+    # directory tree on success.
+    log "tar $f → $f.tar"
+    tar -cf "$f.tar" -C "$(dirname "$f")" "$(basename "$f")"
+    rm -rf "$f"
+    f="$f.tar"
+  fi
+  log "gpg --encrypt → $f.gpg"
+  gpg --batch --yes --trust-model always \
+      --recipient "${GPG_ENCRYPT_RECIPIENT}" \
+      --output "$f.gpg" \
+      --encrypt "$f"
+  rm -f "$f"
+}
 
 mkdir -p "${DEST}"
 chmod 0700 "${DEST}"
@@ -149,7 +187,10 @@ docker exec vigil-postgres psql -U vigil -d vigil -At -X -c "\\copy (
 ) TO STDOUT WITH CSV HEADER" > "${DEST}/audit-user-actions.csv"
 
 # Sign each audit-chain CSV separately so a court reviewer can verify
-# either file in isolation without trusting the manifest.
+# either file in isolation without trusting the manifest. The detached
+# signatures are produced over the PLAINTEXT (before encryption), so a
+# reviewer who decrypts the .gpg can verify the architect-authored
+# plaintext directly via the .sig.
 gpg --batch --yes --local-user "${GPG_FP}" \
     --output "${DEST}/audit-chain.csv.sig" \
     --detach-sign "${DEST}/audit-chain.csv"
@@ -157,6 +198,23 @@ gpg --batch --yes --local-user "${GPG_FP}" \
     --output "${DEST}/audit-user-actions.csv.sig" \
     --detach-sign "${DEST}/audit-user-actions.csv"
 log "audit-chain CSVs signed"
+
+# 4d. Encrypt every plaintext archive output IN-PLACE before the
+#     manifest step (Block-E E.14 / C9 backup gap 4). The .gpg
+#     extension is what lands on the NAS; plaintext is removed.
+#     `.sig` files (architect-authored signatures over plaintext)
+#     stay in place — they're already-public attestations, not
+#     content secrets, and the reviewer needs them to verify the
+#     plaintext authenticity after decryption.
+encrypt_at_rest "${DEST}/postgres"
+encrypt_at_rest "${DEST}/srv-vigil.btrfs.zst"
+encrypt_at_rest "${DEST}/neo4j"
+encrypt_at_rest "${DEST}/ipfs-pinset.json"
+encrypt_at_rest "${DEST}/audit-chain.csv"
+encrypt_at_rest "${DEST}/audit-user-actions.csv"
+if [ -f "${DEST}/vault-raft.snap" ]; then
+  encrypt_at_rest "${DEST}/vault-raft.snap"
+fi
 
 # 5. Signed manifest — sha256 of every file, then architect-GPG signature.
 log "manifest + signature"
