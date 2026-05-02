@@ -2,7 +2,7 @@
   "name": "worker-governance",
   "version": "0.1.0",
   "private": true,
-  "description": "Polygon contract event watcher \u2192 Postgres projection of proposals/votes/members.",
+  "description": "Polygon contract event watcher → Postgres projection of proposals/votes/members.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
     "start": "node dist/index.js",
     "clean": "rimraf dist .turbo"
   },
@@ -26,6 +27,7 @@
     "@types/node": "^20.16.5",
     "rimraf": "^6.0.1",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
   }
 }
