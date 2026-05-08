@@ -89,6 +89,23 @@ const CORE_RULES = {
   'prefer-const': 'error',
   eqeqeq: ['error', 'always'],
   curly: ['error', 'multi-line'],
+  // HARDEN-#7 — `Math.random()` is non-cryptographic, biases shuffles
+  // (AUDIT-029, AUDIT-092), and leaks predictable values into IDs we
+  // sometimes carry into audit rows. The repo policy is `randomInt` /
+  // `randomBytes` / `randomUUID` from `node:crypto` for any value that
+  // ships into a chain, audit, or sample. The three legacy non-crypto
+  // sites (worker.ts instanceId, anthropic.ts customId, toast.tsx
+  // ephemeral toast id) carry per-file overrides below; everything
+  // else fails CI.
+  'no-restricted-syntax': [
+    'error',
+    {
+      selector:
+        "CallExpression[callee.type='MemberExpression'][callee.object.name='Math'][callee.property.name='random']",
+      message:
+        'Math.random() is non-cryptographic and biased for shuffles. Use crypto.randomInt / randomBytes / randomUUID. See HARDEN-#7 + AUDIT-029 + AUDIT-092. The 3-site allowlist (worker.ts instanceId, anthropic.ts customId, toast.tsx) is in eslint.config.mjs overrides.',
+    },
+  ],
 };
 
 export default [
@@ -191,6 +208,22 @@ export default [
     files: ['contracts/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+  // HARDEN-#7 — closed allowlist of files that may use Math.random().
+  // Adding a fourth file requires architect approval and a new audit
+  // entry per AUDIT-092 precedent. k6 load tests run outside the Node
+  // runtime that ships our audit-bearing IDs; their non-crypto random
+  // is acceptable for synthetic load shaping.
+  {
+    files: [
+      'packages/queue/src/worker.ts',
+      'packages/llm/src/providers/anthropic.ts',
+      'apps/dashboard/src/components/toast.tsx',
+      'load-tests/**/*.js',
+    ],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   // Prettier compatibility — must come last.
