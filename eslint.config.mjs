@@ -89,14 +89,27 @@ const CORE_RULES = {
   'prefer-const': 'error',
   eqeqeq: ['error', 'always'],
   curly: ['error', 'multi-line'],
+  // HARDEN-#7 + HARDEN-#8 — both rules use `no-restricted-syntax` and
+  // share per-file override blocks declared further down in this config
+  // to exempt their respective closed allowlists.
+  //
   // HARDEN-#7 — `Math.random()` is non-cryptographic, biases shuffles
   // (AUDIT-029, AUDIT-092), and leaks predictable values into IDs we
   // sometimes carry into audit rows. The repo policy is `randomInt` /
   // `randomBytes` / `randomUUID` from `node:crypto` for any value that
   // ships into a chain, audit, or sample. The three legacy non-crypto
   // sites (worker.ts instanceId, anthropic.ts customId, toast.tsx
-  // ephemeral toast id) carry per-file overrides below; everything
-  // else fails CI.
+  // ephemeral toast id) carry per-file overrides below.
+  //
+  // HARDEN-#8 — `<resp>.body.text()` / `<resp>.body.json()` consume an
+  // undici response body with no size cap and no headers/body timeout.
+  // A hostile source returning a multi-GB chunked body or a slow-loris
+  // stall can exhaust adapter heap or hang the trigger indefinitely.
+  // AUDIT-093 closed this for `_helpers.ts` by extracting
+  // `boundedRequest` + `boundedBodyText` into `_bounded-fetch.ts`.
+  // AUDIT-095 documents the remaining unmigrated call sites; each is
+  // pinned in the override block below until its migration lands.
+  // Future adapters MUST go through `boundedBodyText(resp.body, {...})`.
   'no-restricted-syntax': [
     'error',
     {
@@ -104,6 +117,18 @@ const CORE_RULES = {
         "CallExpression[callee.type='MemberExpression'][callee.object.name='Math'][callee.property.name='random']",
       message:
         'Math.random() is non-cryptographic and biased for shuffles. Use crypto.randomInt / randomBytes / randomUUID. See HARDEN-#7 + AUDIT-029 + AUDIT-092. The 3-site allowlist (worker.ts instanceId, anthropic.ts customId, toast.tsx) is in eslint.config.mjs overrides.',
+    },
+    {
+      selector:
+        "CallExpression[callee.type='MemberExpression'][callee.property.name='text'][callee.object.type='MemberExpression'][callee.object.property.name='body']",
+      message:
+        '<resp>.body.text() consumes an undici response with no size cap and no body timeout. Use boundedBodyText(resp.body, { sourceId, url, maxBytes? }) from apps/adapter-runner/src/adapters/_bounded-fetch.ts. See HARDEN-#8 + AUDIT-093 + AUDIT-095.',
+    },
+    {
+      selector:
+        "CallExpression[callee.type='MemberExpression'][callee.property.name='json'][callee.object.type='MemberExpression'][callee.object.property.name='body']",
+      message:
+        '<resp>.body.json() consumes an undici response with no size cap. Use boundedBodyText then JSON.parse, or extend _bounded-fetch.ts with a typed JSON helper. See HARDEN-#8 + AUDIT-093 + AUDIT-095.',
     },
   ],
 };
@@ -224,6 +249,53 @@ export default [
     ],
     rules: {
       'no-restricted-syntax': 'off',
+    },
+  },
+  // HARDEN-#8 — closed allowlist of files that may consume undici
+  // response bodies with `<resp>.body.text()` / `<resp>.body.json()`.
+  // Each entry below is pinned by AUDIT-095 awaiting migration to
+  // `boundedBodyText(resp.body, { sourceId, url })`. The allowlist may
+  // ONLY shrink: a new adapter or worker that calls `.body.text()` /
+  // `.body.json()` directly fails CI. `_bounded-fetch.ts` itself is
+  // intentionally excluded (helper definition references body shape
+  // in comments only).
+  {
+    files: [
+      // adapter-runner sectoral adapters — all sister-shape to the
+      // `_helpers.ts` migration AUDIT-093 already landed.
+      'apps/adapter-runner/src/adapters/anif-amlscreen.ts',
+      'apps/adapter-runner/src/adapters/beac-payments.ts',
+      'apps/adapter-runner/src/adapters/cour-des-comptes.ts',
+      'apps/adapter-runner/src/adapters/dgi-attestations.ts',
+      'apps/adapter-runner/src/adapters/eu-sanctions.ts',
+      'apps/adapter-runner/src/adapters/minfi-bis.ts',
+      'apps/adapter-runner/src/adapters/ofac-sdn.ts',
+      'apps/adapter-runner/src/adapters/opensanctions.ts',
+      'apps/adapter-runner/src/adapters/un-sanctions.ts',
+      'apps/adapter-runner/src/adapters/worldbank-sanctions.ts',
+      // worker-adapter-repair selector-derivation HTTP probes.
+      'apps/worker-adapter-repair/src/index.ts',
+      'apps/worker-adapter-repair/src/shadow-test.ts',
+      // worker-federation-receiver pulls signing-key JWKS over HTTPS;
+      // the JWKS endpoint is operator-controlled but the body cap
+      // still belongs there.
+      'apps/worker-federation-receiver/src/key-resolver.ts',
+      // sentinel-quorum operational script.
+      'scripts/sentinel-quorum.ts',
+    ],
+    rules: {
+      // We narrow only the body-read selectors; Math.random remains
+      // banned for these files. Express the override by re-declaring
+      // the rule with just the Math.random selector retained.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.object.name='Math'][callee.property.name='random']",
+          message:
+            'Math.random() is non-cryptographic and biased for shuffles. Use crypto.randomInt / randomBytes / randomUUID. See HARDEN-#7 + AUDIT-029 + AUDIT-092.',
+        },
+      ],
     },
   },
   // Prettier compatibility — must come last.
