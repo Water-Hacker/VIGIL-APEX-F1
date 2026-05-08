@@ -10,6 +10,10 @@
 **Promoted to FINAL on:** **\*\***\_**\*\***
 **Architect signature:** **\*\***\_**\*\***
 
+> **AUDIT-023** is the audit-trail anchor for this checklist. Once every
+> box is signed, AUDIT-023 in [`AUDIT.md`](../../AUDIT.md) flips from
+> `blocked-on-architect-decision` to `fixed`.
+
 ---
 
 ## §1 Principle
@@ -77,6 +81,22 @@
 
 - [ ] Every file path in §11 exists in tree at the cited path. (Run [`scripts/check-decision-log.ts`](../../scripts/check-decision-log.ts) to mechanically verify.)
 - [ ] Every test surface in §11 actually runs in CI.
+
+## §12 AUDIT findings against TAL-PA components since the checklist opened
+
+These are findings filed against components TAL-PA depends on. None
+need to block promotion — each is either fixed or has an explicit
+deferral path — but the architect should know they exist and confirm
+the deferral choices.
+
+- [ ] **AUDIT-094** (medium, open) — `worker-anchor` PLACEHOLDER address guard + `worker-governance` null-address default. Filed 2026-04-30 during the A9 PLACEHOLDER sweep on the worker-satellite NICFI fix; both worker-anchor and worker-governance are on the umbrella restricted list. Confirm: deferring the umbrella half until the architect explicitly authorises is the right read.
+- [ ] **AUDIT-098** (high, open) — high-significance anchor lag has no SLO and no Prometheus alert. Filed 2026-05-01 during the Tier-3 review (REVIEW-3). UMBRELLA-RISK on worker-anchor; the fix proper requires architect approval before landing. Confirm: the SLO numbers proposed in the row (P95 ≤ 60 s normal / 300 s degraded) are acceptable, or override.
+- [ ] **AUDIT-099** (medium, fixed in commit f26d57a) — calibration ECE power analysis is a cross-cut against DECISION-011 rather than DECISION-012, but the addendum at [`docs/source/CALIBRATION-ECE-POWER-ANALYSIS.md`](../source/CALIBRATION-ECE-POWER-ANALYSIS.md) directly affects the public claim TAL-PA's quarterly export will eventually carry. Confirm: the `N ≥ 200` headline-claim threshold and the `CALIBRATION_POWER_WAIVED` env-waiver path are acceptable.
+
+## §13 Cross-decision compatibility
+
+- [ ] **DECISION-017** (PROVISIONAL — legacy migration doctrine) does not conflict with DECISION-012. The migrations TAL-PA introduces (`0010_tal_pa.sql`, `0012_audit_export_salt_fingerprint.sql`) all ship paired `_down.sql` files and post-date the cutover declared in DECISION-017 §2. Confirm: no dependency in either direction blocks promotion.
+- [ ] **DECISION-016** (Tip retention guarantee + UI, PROVISIONAL) — TAL-PA's `tip.received` audit-event-type is in the same enum used by DECISION-016's tip-disposition flow. Confirm: the TAL-PA event taxonomy and DECISION-016's `tipDisposition` state machine compose correctly when the operator marks a tip received-then-redacted-by-court-order (TAL-PA category I → category B).
 
 ---
 
