@@ -1,0 +1,8 @@
+{
+  "working_tree_scan": "0 leaks found",
+  "tool": "gitleaks",
+  "version": "(repo build)",
+  "scan_date": "2026-05-10",
+  "config": ".gitleaks.toml",
+  "exit_code": 0
+}
