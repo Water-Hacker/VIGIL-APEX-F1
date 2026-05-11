@@ -35,18 +35,32 @@ jobs:
     name: snyk
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ env.SNYK_TOKEN != '' }}
+    # GitHub Actions does NOT expose `env` or `secrets` as named-values
+    # in JOB-level `if:` expressions (only step-level conditions can read
+    # `env`). The canonical pattern to skip a job when a secret is
+    # missing is to hoist the secret into a job-level `env:` mapping
+    # (where the `secrets.*` context IS valid because `env` mappings
+    # are evaluated at job-resolution time, not at workflow parse) and
+    # then gate each STEP on `env.SNYK_TOKEN != ''`. Cheap to read,
+    # cheap to maintain, and avoids the workflow-parse error that the
+    # prior `if: ${{ env.SNYK_TOKEN != '' }}` form raised at line 38
+    # (fixed 2026-05-11).
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - if: env.SNYK_TOKEN != ''
+        uses: actions/checkout@v4
+      - if: env.SNYK_TOKEN != ''
+        uses: pnpm/action-setup@v4
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - if: env.SNYK_TOKEN != ''
+        uses: actions/setup-node@v4
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
-      - run: pnpm install --frozen-lockfile
+      - if: env.SNYK_TOKEN != ''
+        run: pnpm install --frozen-lockfile
       - name: Snyk monorepo open-source test
+        if: env.SNYK_TOKEN != ''
         uses: snyk/actions/node@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           # `--all-projects` walks the workspace; severity threshold
           # blocks only Critical to keep the gate signal-rich (High +
@@ -60,7 +74,7 @@ jobs:
           # documented exception listed there is honoured by the gate.
           args: --all-projects --severity-threshold=critical --fail-on=upgradable --policy-path=.snyk-policy.yaml
       - name: Upload Snyk SARIF
-        if: always()
+        if: env.SNYK_TOKEN != '' && always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
