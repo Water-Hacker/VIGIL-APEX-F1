@@ -1,8 +1,6 @@
 import { getDb } from '@vigil/db-postgres';
-import { createLogger, type Logger } from '@vigil/observability';
+import { boundedBodyText, boundedRequest, createLogger, type Logger } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
-import { request } from 'undici';
-
 
 import type { CandidateSelector } from './types.js';
 
@@ -35,8 +33,8 @@ export async function runShadowTest(args: ShadowTestArgs, logger: Logger = log):
   let oldOutput: unknown | null = null;
   let newOutput: unknown | null = null;
   try {
-    const r = await request(args.pageUrl, { method: 'GET', maxRedirections: 5 });
-    const body = await r.body.text();
+    const r = await boundedRequest(args.pageUrl, { method: 'GET', maxRedirections: 5 });
+    const body = await boundedBodyText(r.body, { sourceId: args.sourceId, url: args.pageUrl });
     oldOutput = args.applyOld(body);
     newOutput = args.applyNew(body, args.candidate);
   } catch (e) {

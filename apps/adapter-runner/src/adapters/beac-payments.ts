@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 
 import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 import { z } from 'zod';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 
 /**
  * beac-payments — Banque des États de l'Afrique Centrale, payment-system
@@ -90,7 +91,7 @@ class BeacPaymentsAdapter extends Adapter {
     const baseUrl = process.env.BEAC_BASE_URL ?? DEFAULT_BASE_URL;
     const token = await this.getAccessToken();
     const url = `${baseUrl}/digest/latest`;
-    const r = await request(url, {
+    const r = await boundedRequest(url, {
       method: 'GET',
       headers: {
         authorization: `Bearer ${token}`,
@@ -108,7 +109,7 @@ class BeacPaymentsAdapter extends Adapter {
       throw new Errors.SourceUnavailableError(SOURCE_ID, r.statusCode, { url });
     }
 
-    const text = await r.body.text();
+    const text = await boundedBodyText(r.body, { sourceId: SOURCE_ID, url });
     const responseSha = createHash('sha256').update(text).digest('hex');
     const parsed = zBeacDigest.safeParse(JSON.parse(text));
     if (!parsed.success) {
@@ -181,7 +182,7 @@ class BeacPaymentsAdapter extends Adapter {
       client_secret: clientSecret,
       scope: 'payments.read sanctions.read',
     });
-    const resp = await request(tokenUrl, {
+    const resp = await boundedRequest(tokenUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
@@ -189,7 +190,8 @@ class BeacPaymentsAdapter extends Adapter {
     if (resp.statusCode !== 200) {
       throw new Errors.SourceBlockedError(SOURCE_ID, { url: tokenUrl, status: resp.statusCode });
     }
-    const parsed = zBeacToken.parse(JSON.parse(await resp.body.text()));
+    const tokenText = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url: tokenUrl });
+    const parsed = zBeacToken.parse(JSON.parse(tokenText));
     this.cachedToken = {
       token: parsed.access_token,
       expiresAt: now + parsed.expires_in * 1000,

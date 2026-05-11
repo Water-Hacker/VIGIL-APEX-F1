@@ -1,13 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  pickFingerprint,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, pickFingerprint, type AdapterRunContext } from '@vigil/adapters';
 import { Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 
 /**
  * cour-des-comptes — Cameroon's audit court. Annual public reports + observations.
@@ -30,7 +26,7 @@ class CourDesComptesAdapter extends Adapter {
   }> {
     const fp = pickFingerprint(SOURCE_ID);
     const url = `${BASE_URL}/rapports-publics`;
-    const resp = await request(url, {
+    const resp = await boundedRequest(url, {
       method: 'GET',
       headers: {
         'user-agent': fp.userAgent,
@@ -43,7 +39,7 @@ class CourDesComptesAdapter extends Adapter {
     if (resp.statusCode >= 500) {
       throw new Errors.SourceUnavailableError(SOURCE_ID, resp.statusCode, { url });
     }
-    const html = await resp.body.text();
+    const html = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url });
     const respSha = createHash('sha256').update(html).digest('hex');
 
     // Extract PDF links — naive but resilient regex; first-contact triggers if 0 hits

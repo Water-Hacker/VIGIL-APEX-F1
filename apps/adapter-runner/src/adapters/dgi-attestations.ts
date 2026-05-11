@@ -1,14 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  pickFingerprint,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, pickFingerprint, type AdapterRunContext } from '@vigil/adapters';
 import { Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 import { provenance } from './_helpers.js';
 
 /**
@@ -29,18 +24,22 @@ class DgiAdapter extends Adapter {
     fetchedPages: number;
   }> {
     const fp = pickFingerprint(SOURCE_ID);
-    const resp = await request(URL, { method: 'GET', headers: { 'user-agent': fp.userAgent } });
+    const resp = await boundedRequest(URL, {
+      method: 'GET',
+      headers: { 'user-agent': fp.userAgent },
+    });
     if (resp.statusCode === 403 || resp.statusCode === 451) {
       throw new Errors.SourceBlockedError(SOURCE_ID, { url: URL, status: resp.statusCode });
     }
     if (resp.statusCode >= 500) {
       throw new Errors.SourceUnavailableError(SOURCE_ID, resp.statusCode, { url: URL });
     }
-    const html = await resp.body.text();
+    const html = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url: URL });
     const sha = createHash('sha256').update(html).digest('hex');
 
     // Heuristic extraction — recent NIU + status pairs from the verifier page
-    const re = /NIU\s*:?\s*([A-Z0-9]{6,20}).{1,80}?(\b(?:à jour|en règle|non[- ]?à[- ]?jour|défaillant)\b)/gi;
+    const re =
+      /NIU\s*:?\s*([A-Z0-9]{6,20}).{1,80}?(\b(?:à jour|en règle|non[- ]?à[- ]?jour|défaillant)\b)/gi;
     const events: Schemas.SourceEvent[] = [];
     let m: RegExpExecArray | null;
     while ((m = re.exec(html)) !== null) {

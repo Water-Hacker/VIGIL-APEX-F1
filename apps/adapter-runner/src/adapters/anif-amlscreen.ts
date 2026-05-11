@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 
 import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 import { z } from 'zod';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 
 /**
  * anif-amlscreen — Agence Nationale d'Investigation Financière (Cameroon FIU)
@@ -97,7 +98,7 @@ class AnifAmlScreenAdapter extends Adapter {
     }
 
     const url = `${baseUrl}/delta/latest`;
-    const r = await request(url, {
+    const r = await boundedRequest(url, {
       method: 'GET',
       headers: {
         'X-ANIF-Key': apiKey,
@@ -113,7 +114,7 @@ class AnifAmlScreenAdapter extends Adapter {
       throw new Errors.SourceUnavailableError(SOURCE_ID, r.statusCode, { url });
     }
 
-    const text = await r.body.text();
+    const text = await boundedBodyText(r.body, { sourceId: SOURCE_ID, url });
     const responseSha = createHash('sha256').update(text).digest('hex');
     const parsed = zAnifDelta.safeParse(JSON.parse(text));
     if (!parsed.success) {

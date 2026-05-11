@@ -251,53 +251,18 @@ export default [
       'no-restricted-syntax': 'off',
     },
   },
-  // HARDEN-#8 — closed allowlist of files that may consume undici
-  // response bodies with `<resp>.body.text()` / `<resp>.body.json()`.
-  // Each entry below is pinned by AUDIT-095 awaiting migration to
-  // `boundedBodyText(resp.body, { sourceId, url })`. The allowlist may
-  // ONLY shrink: a new adapter or worker that calls `.body.text()` /
-  // `.body.json()` directly fails CI. `_bounded-fetch.ts` itself is
-  // intentionally excluded (helper definition references body shape
-  // in comments only).
-  {
-    files: [
-      // adapter-runner sectoral adapters — all sister-shape to the
-      // `_helpers.ts` migration AUDIT-093 already landed.
-      'apps/adapter-runner/src/adapters/anif-amlscreen.ts',
-      'apps/adapter-runner/src/adapters/beac-payments.ts',
-      'apps/adapter-runner/src/adapters/cour-des-comptes.ts',
-      'apps/adapter-runner/src/adapters/dgi-attestations.ts',
-      'apps/adapter-runner/src/adapters/eu-sanctions.ts',
-      'apps/adapter-runner/src/adapters/minfi-bis.ts',
-      'apps/adapter-runner/src/adapters/ofac-sdn.ts',
-      'apps/adapter-runner/src/adapters/opensanctions.ts',
-      'apps/adapter-runner/src/adapters/un-sanctions.ts',
-      'apps/adapter-runner/src/adapters/worldbank-sanctions.ts',
-      // worker-adapter-repair selector-derivation HTTP probes.
-      'apps/worker-adapter-repair/src/index.ts',
-      'apps/worker-adapter-repair/src/shadow-test.ts',
-      // worker-federation-receiver pulls signing-key JWKS over HTTPS;
-      // the JWKS endpoint is operator-controlled but the body cap
-      // still belongs there.
-      'apps/worker-federation-receiver/src/key-resolver.ts',
-      // sentinel-quorum operational script.
-      'scripts/sentinel-quorum.ts',
-    ],
-    rules: {
-      // We narrow only the body-read selectors; Math.random remains
-      // banned for these files. Express the override by re-declaring
-      // the rule with just the Math.random selector retained.
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector:
-            "CallExpression[callee.type='MemberExpression'][callee.object.name='Math'][callee.property.name='random']",
-          message:
-            'Math.random() is non-cryptographic and biased for shuffles. Use crypto.randomInt / randomBytes / randomUUID. See HARDEN-#7 + AUDIT-029 + AUDIT-092.',
-        },
-      ],
-    },
-  },
+  // HARDEN-#8 — the AUDIT-095 allowlist has been retired (2026-05-11).
+  // Every adapter + worker call site now routes through
+  // `boundedRequest` + `boundedBodyText` from `@vigil/observability`
+  // (re-exported via `apps/adapter-runner/src/adapters/_bounded-fetch.ts`
+  // for in-package consumers). Any new `<resp>.body.text()` /
+  // `<resp>.body.json()` call is a CI failure with no exemption — the
+  // global rule above is the only path.
+  //
+  // The `_bounded-fetch.ts` re-export itself does NOT touch the
+  // forbidden selectors (it imports types and helpers); no override
+  // is required.
+
   // Prettier compatibility — must come last.
   prettierConfig,
 ];

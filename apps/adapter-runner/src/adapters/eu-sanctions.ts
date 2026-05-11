@@ -1,13 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 import { provenance } from './_helpers.js';
 
 /**
@@ -29,7 +25,7 @@ class EuSanctionsAdapter extends Adapter {
     documents: ReadonlyArray<Schemas.Document>;
     fetchedPages: number;
   }> {
-    const resp = await request(URL, {
+    const resp = await boundedRequest(URL, {
       method: 'GET',
       headers: { 'user-agent': Constants.ADAPTER_DEFAULT_USER_AGENT, accept: 'application/xml' },
     });
@@ -39,7 +35,7 @@ class EuSanctionsAdapter extends Adapter {
     if (resp.statusCode >= 500) {
       throw new Errors.SourceUnavailableError(SOURCE_ID, resp.statusCode, { url: URL });
     }
-    const xml = await resp.body.text();
+    const xml = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url: URL });
     const sha = createHash('sha256').update(xml).digest('hex');
 
     const entityRe = /<sanctionEntity[^>]*\sentityId="([^"]+)"[^>]*>([\s\S]*?)<\/sanctionEntity>/g;
@@ -56,7 +52,13 @@ class EuSanctionsAdapter extends Adapter {
           dedupKey: this.dedupKey([SOURCE_ID, id]),
           payload: { name, eu_entity_id: id, sanctioning_body: 'EU' },
           publishedAt: null,
-          provenance: provenance(URL, resp.statusCode, sha, ctx, Constants.ADAPTER_DEFAULT_USER_AGENT),
+          provenance: provenance(
+            URL,
+            resp.statusCode,
+            sha,
+            ctx,
+            Constants.ADAPTER_DEFAULT_USER_AGENT,
+          ),
         }),
       );
     }

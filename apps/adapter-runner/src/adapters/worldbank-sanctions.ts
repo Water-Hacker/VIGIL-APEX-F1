@@ -1,13 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 import { z } from 'zod';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 
 /**
  * worldbank-sanctions — World Bank Group debarred-firms list (open API).
@@ -16,7 +13,8 @@ import { z } from 'zod';
  */
 
 const SOURCE_ID = 'worldbank-sanctions';
-const API_URL = 'https://apigwext.worldbank.org/dvsvc/v1.0/json/APPLICATION/ADOBE_EXPRNCE_MGR/FIRM/SANCTIONED_FIRM';
+const API_URL =
+  'https://apigwext.worldbank.org/dvsvc/v1.0/json/APPLICATION/ADOBE_EXPRNCE_MGR/FIRM/SANCTIONED_FIRM';
 
 const zRow = z.object({
   FIRM_NAME: z.string(),
@@ -42,14 +40,14 @@ class WorldBankSanctionsAdapter extends Adapter {
     documents: ReadonlyArray<Schemas.Document>;
     fetchedPages: number;
   }> {
-    const resp = await request(API_URL, {
+    const resp = await boundedRequest(API_URL, {
       method: 'GET',
       headers: { 'user-agent': Constants.ADAPTER_DEFAULT_USER_AGENT, accept: 'application/json' },
     });
     if (resp.statusCode >= 500) {
       throw new Errors.SourceUnavailableError(SOURCE_ID, resp.statusCode, { url: API_URL });
     }
-    const text = await resp.body.text();
+    const text = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url: API_URL });
     const parsed = zPayload.safeParse(JSON.parse(text));
     if (!parsed.success) {
       throw new Errors.SourceParseError(SOURCE_ID, { url: API_URL, html: text.slice(0, 100_000) });

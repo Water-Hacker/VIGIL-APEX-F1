@@ -3,8 +3,12 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 
 import { StaticKeyResolver, type KeyResolver } from '@vigil/federation-stream';
-import { federationKeysLoaded, type Logger } from '@vigil/observability';
-import { request } from 'undici';
+import {
+  boundedBodyText,
+  boundedRequest,
+  federationKeysLoaded,
+  type Logger,
+} from '@vigil/observability';
 
 /**
  * DirectoryKeyResolver — boot-time scan of a directory of PEM files.
@@ -447,18 +451,20 @@ export function certPemToPublicKeyPem(certPem: string): string | null {
   }
 }
 
-/** Default undici-backed fetcher honouring the timeoutMs budget. */
+/** Default undici-backed fetcher honouring the timeoutMs budget.
+ *  Uses boundedRequest + boundedBodyText (AUDIT-095 closure) so a
+ *  hostile or stuck Vault PKI endpoint cannot exhaust the worker. */
 const defaultUndiciFetcher: VaultFetcher = async (url, init) => {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), init.timeoutMs);
   try {
-    const res = await request(url, {
+    const res = await boundedRequest(url, {
       method: 'GET',
       headers: init.headers,
       signal: ctrl.signal,
     });
     const status = res.statusCode;
-    const text = await res.body.text();
+    const text = await boundedBodyText(res.body, { sourceId: 'vault-pki-key-resolver', url });
     return { status, body: text };
   } finally {
     clearTimeout(t);

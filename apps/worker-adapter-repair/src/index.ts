@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { CallRecordRepo, getDb } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
+  boundedBodyText,
+  boundedRequest,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -13,7 +15,6 @@ import {
 import { VaultClient } from '@vigil/security';
 import { sql } from 'drizzle-orm';
 import cron from 'node-cron';
-import { request } from 'undici';
 import { z } from 'zod';
 
 import { SELECTOR_REDERIVE_TASK, selectorRederiveUserPrompt } from './prompts.js';
@@ -172,9 +173,9 @@ async function generateProposal(
 
 async function fetchPage(url: string): Promise<string | null> {
   try {
-    const r = await request(url, { method: 'GET', maxRedirections: 5 });
+    const r = await boundedRequest(url, { method: 'GET', maxRedirections: 5 });
     if (r.statusCode >= 400) return null;
-    return await r.body.text();
+    return await boundedBodyText(r.body, { sourceId: 'worker-adapter-repair', url });
   } catch {
     return null;
   }

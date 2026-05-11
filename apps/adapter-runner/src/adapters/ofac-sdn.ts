@@ -1,13 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 import { provenance } from './_helpers.js';
 
 /**
@@ -26,7 +22,7 @@ class OfacAdapter extends Adapter {
     documents: ReadonlyArray<Schemas.Document>;
     fetchedPages: number;
   }> {
-    const resp = await request(URL, {
+    const resp = await boundedRequest(URL, {
       method: 'GET',
       headers: { 'user-agent': Constants.ADAPTER_DEFAULT_USER_AGENT, accept: 'application/xml' },
       maxRedirections: 5,
@@ -37,11 +33,10 @@ class OfacAdapter extends Adapter {
     if (resp.statusCode >= 500) {
       throw new Errors.SourceUnavailableError(SOURCE_ID, resp.statusCode, { url: URL });
     }
-    const xml = await resp.body.text();
+    const xml = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url: URL });
     const sha = createHash('sha256').update(xml).digest('hex');
 
-    const entryRe =
-      /<sdnEntry>([\s\S]*?)<\/sdnEntry>/g;
+    const entryRe = /<sdnEntry>([\s\S]*?)<\/sdnEntry>/g;
     const uidRe = /<uid>(\d+)<\/uid>/;
     const firstNameRe = /<firstName>([^<]+)<\/firstName>/;
     const lastNameRe = /<lastName>([^<]+)<\/lastName>/;
@@ -62,7 +57,13 @@ class OfacAdapter extends Adapter {
           dedupKey: this.dedupKey([SOURCE_ID, uid ?? name]),
           payload: { name, ofac_uid: uid, sdn_type: type, sanctioning_body: 'OFAC' },
           publishedAt: null,
-          provenance: provenance(URL, resp.statusCode, sha, ctx, Constants.ADAPTER_DEFAULT_USER_AGENT),
+          provenance: provenance(
+            URL,
+            resp.statusCode,
+            sha,
+            ctx,
+            Constants.ADAPTER_DEFAULT_USER_AGENT,
+          ),
         }),
       );
     }

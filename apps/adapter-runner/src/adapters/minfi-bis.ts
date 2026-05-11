@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs';
 
 import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { Agent, request } from 'undici';
+import { Agent } from 'undici';
 import { z } from 'zod';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 
 /**
  * minfi-bis — MINFI Budget Information System (Phase-2-prep placeholder).
@@ -109,7 +111,7 @@ class MinfiBisAdapter extends Adapter {
     let pages = 0;
     do {
       const url: string = `${baseUrl}/payments${cursor ? `?cursor=${cursor}` : since}`;
-      const r = await request(url, {
+      const r = await boundedRequest(url, {
         method: 'GET',
         headers: {
           'user-agent': Constants.getAdapterUserAgent(),
@@ -125,7 +127,7 @@ class MinfiBisAdapter extends Adapter {
         throw new Errors.SourceUnavailableError(SOURCE_ID, r.statusCode, { url });
       }
 
-      const text = await r.body.text();
+      const text = await boundedBodyText(r.body, { sourceId: SOURCE_ID, url });
       const responseSha = createHash('sha256').update(text).digest('hex');
       const parsed = zMinfiPaymentPage.safeParse(JSON.parse(text));
       if (!parsed.success) {

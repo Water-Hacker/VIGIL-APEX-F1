@@ -1,13 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import {
-  Adapter,
-  registerAdapter,
-  type AdapterRunContext,
-} from '@vigil/adapters';
+import { Adapter, registerAdapter, type AdapterRunContext } from '@vigil/adapters';
 import { Constants, Errors, type Schemas } from '@vigil/shared';
-import { request } from 'undici';
 import { z } from 'zod';
+
+import { boundedBodyText, boundedRequest } from './_bounded-fetch.js';
 
 /**
  * opensanctions — aggregator API; reference adapter for the Aleph/OpenCorporates
@@ -40,14 +37,14 @@ class OpenSanctionsAdapter extends Adapter {
     fetchedPages: number;
   }> {
     const url = `${API_URL}?countries=cm&limit=200`;
-    const resp = await request(url, {
+    const resp = await boundedRequest(url, {
       method: 'GET',
       headers: { 'user-agent': Constants.ADAPTER_DEFAULT_USER_AGENT, accept: 'application/json' },
     });
     if (resp.statusCode >= 500) {
       throw new Errors.SourceUnavailableError(SOURCE_ID, resp.statusCode, { url });
     }
-    const text = await resp.body.text();
+    const text = await boundedBodyText(resp.body, { sourceId: SOURCE_ID, url });
     const parsed = zResponse.safeParse(JSON.parse(text));
     if (!parsed.success) {
       throw new Errors.SourceParseError(SOURCE_ID, { url, html: text.slice(0, 100_000) });
