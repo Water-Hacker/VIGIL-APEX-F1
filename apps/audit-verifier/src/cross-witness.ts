@@ -20,7 +20,17 @@ import type { Pool } from 'pg';
 
 export interface CrossWitnessReport {
   readonly checked: number;
-  readonly missingFromFabric: ReadonlyArray<string>; // seq
+  /** Seqs present in Postgres but absent from Fabric. Recoverable
+   *  (republish via fabric-bridge queue). */
+  readonly missingFromFabric: ReadonlyArray<string>;
+  /** Seqs present in Fabric but absent from Postgres. NON-RECOVERABLE
+   *  in the normal direction (Postgres is source of truth); a non-empty
+   *  list means either Fabric was written directly (bug or adversary)
+   *  or Postgres was rolled back. Closes FIND-013 from
+   *  whole-system-audit doc 10. */
+  readonly missingFromPostgres: ReadonlyArray<string>;
+  /** Seqs where Postgres and Fabric disagree on body_hash for the same
+   *  seq. NON-RECOVERABLE. */
   readonly divergentSeqs: ReadonlyArray<{
     seq: string;
     pgBodyHash: string;
@@ -51,8 +61,16 @@ export async function verifyCrossWitness(
   const fabBySeq = new Map<string, FabricCommitment>();
   for (const c of fabRows) fabBySeq.set(c.seq, c);
 
+  // Postgres-side hash lookup for the reverse scan (FIND-013).
+  const pgBySeq = new Map<string, string>();
+  for (const r of pgRes.rows) {
+    pgBySeq.set(r.seq, r.body_hash.toString('hex').toLowerCase());
+  }
+
   const missing: string[] = [];
-  const divergent: CrossWitnessReport['divergentSeqs'] extends ReadonlyArray<infer T> ? T[] : never = [];
+  const divergent: CrossWitnessReport['divergentSeqs'] extends ReadonlyArray<infer T>
+    ? T[]
+    : never = [];
   for (const row of pgRes.rows) {
     const pgHash = row.body_hash.toString('hex').toLowerCase();
     const fab = fabBySeq.get(row.seq);
@@ -69,9 +87,26 @@ export async function verifyCrossWitness(
     }
   }
 
+  // FIND-013 closure: reverse scan. Any Fabric commitment in the range
+  // that has no corresponding Postgres row is a defence-in-depth red
+  // flag — Postgres is the source of truth and should always be written
+  // before Fabric. If Fabric has a seq Postgres doesn't, either:
+  //   - the chaincode was called out of band (bug or adversary)
+  //   - Postgres was rolled back (backup restore that missed Fabric)
+  // Either case demands operator review; the audit chain reconciliation
+  // worker (FIND-005) will additionally surface it via a structured
+  // alert if it observes the same condition on its hourly scan.
+  const missingFromPostgres: string[] = [];
+  for (const seq of fabBySeq.keys()) {
+    if (!pgBySeq.has(seq)) missingFromPostgres.push(seq);
+  }
+  // Stable order for deterministic snapshots / log lines.
+  missingFromPostgres.sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+
   const report: CrossWitnessReport = {
     checked: pgRes.rows.length,
     missingFromFabric: missing,
+    missingFromPostgres,
     divergentSeqs: divergent,
   };
 
@@ -80,7 +115,8 @@ export async function verifyCrossWitness(
       from: range.from.toString(),
       to: range.to.toString(),
       checked: report.checked,
-      missing: missing.length,
+      missing_fabric: missing.length,
+      missing_postgres: missingFromPostgres.length,
       divergent: divergent.length,
     },
     'cross-witness-report',

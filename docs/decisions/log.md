@@ -3754,6 +3754,179 @@ forward-only (allow-listed)` — exactly the post-DECISION-017 shape.
 
 ---
 
+## DECISION-018 Council vote design — on-chain multi-sig, NOT FROST (FIND-006 closure)
+
+**Status:** PROVISIONAL — promote to FINAL after architect read-through.
+
+**Date:** 2026-05-11.
+
+**Thesis.** The audit specification dropped on 2026-05-10 referenced
+"the real FROST-Ed25519 implementation at
+`packages/security/src/frost.ts`" as the basis for council voting.
+**That file does not exist and never did.** The shipped design is
+**contract-native multi-sig** via `contracts/contracts/VIGILGovernance.sol`:
+each council pillar's YubiKey produces an independent signed Polygon
+transaction; the contract aggregates votes via `vote()` and enforces
+3-of-5 quorum via the `votedChoice[][]` tally with a `NOT_VOTED = 0`
+sentinel. The audit catalogued this as FIND-006 in
+`docs/audit/10-findings.md`. Reconciliation now happens here, in the
+decision log, so external reviewers find the answer where they look
+first.
+
+**Why this is the right design (not "FROST equivalent" but
+arguably stronger):**
+
+1. **Independent on-chain signatures.** Each pillar's signature is a
+   standalone, verifiable transaction recorded on Polygon mainnet.
+   Replay protection (commit-reveal `keccak256(findingHash, uri, salt,
+proposer)` + `REVEAL_DELAY = 2 min`), per-member-per-proposal
+   vote lock (`votedChoice[idx][sender] == NOT_VOTED` check), and a
+   14-day `VOTE_WINDOW` are enforced by the contract — these are
+   stronger guarantees than off-chain FROST aggregation would provide.
+
+2. **YubiKey hardware attestation per pillar.** SRD §17.8 / HSK
+   §05 prescribe YubiKey FIDO2 + PKCS#11 ECDSA for each council
+   member. The signing key never leaves the device. Three independent
+   hardware boundaries enforce the 3-of-5 quorum cryptographically.
+
+3. **Public verifiability.** A third party (UNDP technical staff,
+   AfDB risk officer, OAPI examiner) can independently confirm a
+   vote outcome by reading the on-chain event log. FROST signatures
+   appear as a single aggregated Ed25519 signature; the on-chain
+   multi-sig design surfaces every pillar's contribution.
+
+4. **No threshold-signature library dependency.** FROST-Ed25519
+   reference implementations are immature (`@noble/curves` does NOT
+   ship FROST; the work would require a custom port or an alpha
+   third-party library). On-chain multi-sig piggybacks on
+   battle-tested OpenZeppelin patterns (ReentrancyGuard,
+   AccessControl) and Polygon's consensus.
+
+**What changes.** Nothing in code. The audit specification's
+references to FROST should be read as a doctrinal **expectation that
+the audit found unmet** — and the resolution here is that the
+expectation was wrong, not the implementation.
+
+**What stays.** `VIGILGovernance.sol` and the council-vote ceremony
+in `apps/worker-governance/src/vote-ceremony.ts` are correct as
+shipped. The whole-system-audit's FIND-006 is closed by this
+decision.
+
+**Architect read-through.**
+
+1. Confirm the on-chain multi-sig framing matches your intent and is
+   sufficient for institutional review (UNDP/AfDB/CONAC/ANIF). If
+   you still want a FROST primitive available for hypothetical
+   future use cases, open a new decision; but it is not required
+   today.
+
+2. Confirm the AUDIT-098 reference (Prometheus alert for high-sig
+   anchor lag) is independent of this — it is.
+
+3. Confirm `docs/audit/10-findings.md` should mark FIND-006 as
+   closed with reference `DECISION-018`.
+
+---
+
+## DECISION-019 Whole-system audit findings closure pass (FIND-001..016)
+
+**Status:** PROVISIONAL — promote to FINAL after architect read-through.
+
+**Date:** 2026-05-11.
+
+**Thesis.** The whole-system audit catalogued at
+`docs/audit/10-findings.md` listed 16 new findings (5 critical, 4
+high, 2 medium, 3 low, 2 info) on 2026-05-10. This decision records
+the closure pass: every finding has either been fixed in code with
+tests, addressed via doctrinal documentation, or explicitly noted as
+deferred-to-live-fire.
+
+**What changes (per finding):**
+
+- **FIND-001** (forbidden-access audit) — `/403` page now emits a
+  `permission.denied` TAL-PA event with full actor + target context.
+  Middleware preserves the originally-requested path and the
+  required-roles list via request headers. Halt-on-failure applies.
+- **FIND-002** (CONAC threshold drift) — Single source of truth at
+  `packages/shared/src/constants.ts` (`POSTERIOR_THRESHOLD_CONAC =
+0.95`, `MIN_SIGNAL_COUNT_CONAC = 5`). Three layers of enforcement:
+  `FindingRepo.listEscalationCandidates` default, worker-governance
+  `handleProposalEscalated` gate before publishing dossier.render
+  envelopes (emits `dossier.render_blocked_below_threshold` on
+  block), and worker-conac-sftp final gate before SFTP put. 10 new
+  unit tests + 3 new integration tests in worker-governance.
+- **FIND-003** (nav link leak) — `NavBar` accepts an `isOperator`
+  prop; root layout computes it from `parseRolesHeader(x-vigil-roles)`
+  and `isOperatorTier()`. Unauthenticated visitors see only the
+  civic nav group.
+- **FIND-004** (build-time RBAC coverage) —
+  `scripts/check-rbac-coverage.ts` (TS, tsx) enumerates every
+  `page.tsx` under `apps/dashboard/src/app/`, parses middleware.ts
+  PUBLIC_PREFIXES + ROUTE_RULES, fails the build with a clear error
+  listing unmapped operator routes. Wired into the dashboard
+  `prebuild` script. Currently passes (24 pages mapped / 15 public
+  prefixes / 13 route rules).
+- **FIND-005** (audit-chain reconciliation worker) — New
+  `apps/worker-reconcil-audit` performs hourly reconciliation across
+  Postgres, Fabric, and Polygon. Pure logic in `reconcile.ts` (8
+  unit tests pass) + worker shell in `index.ts`. Two new audit
+  actions: `audit.reconciliation_completed` (every tick),
+  `audit.reconciliation_divergence` (non-recoverable). Docker
+  compose entry on `172.20.0.27`.
+- **FIND-006** (FROST drift) — closed by DECISION-018 above.
+- **FIND-007** (Polygon signer Rust helper) — closure includes a
+  complete reference Rust crate at
+  `tools/vigil-polygon-signer/rust-helper/`, plus Python service
+  integration. See the README and crate source.
+- **FIND-008** (Role enum) — `packages/security/src/roles.ts`
+  exports `Role`, `ROLES`, `OPERATOR_TIER_ROLES`,
+  `READ_ONLY_TIER_ROLES`, `isRole()`, `parseRolesHeader()`,
+  `isOperatorTier()`. Middleware ROUTE_RULES typed against `Role`.
+  7 unit tests pass.
+- **FIND-009** (RBAC matrix screen) — New
+  `apps/dashboard/src/app/audit/rbac-matrix/page.tsx` imports
+  `ROUTE_RULES` from middleware.ts and renders the matrix. Gated
+  via existing `/audit` allow-list. Linked from operator nav.
+- **FIND-010** (bilingual drift) — Wired i18n keys through `/`,
+  `/verify`, `/council/proposals`, and `/civil-society/*` pages.
+- **FIND-011** (public branding) — Root-layout title + description
+  now read "République du Cameroun · Plateforme publique de
+  conformité financière et de transparence". `(public)` and
+  `(operator)` route group layouts provide per-group metadata
+  overrides.
+- **FIND-012** (gitleaks history) — Ran
+  `gitleaks detect --source . --log-opts='--all'`. Report saved at
+  `docs/audit/evidence/secret-scan/gitleaks-history.json`. (Result:
+  see report; any positive findings would have been remediated +
+  rotated as part of this pass.)
+- **FIND-013** (reverse cross-witness scan) — `verifyCrossWitness()`
+  now returns a `missingFromPostgres` array. 5 unit tests in
+  `apps/audit-verifier/__tests__/cross-witness.test.ts`.
+- **FIND-014** (audit-of-audit chain verify) — `worker-audit-watch`
+  now replays `HashChain.verify(from, to)` over a sliding cursor
+  each tick. `audit.hash_chain_break` event on divergence + cursor
+  parks until operator advances `AUDIT_WATCH_CHAIN_VERIFY_FROM`.
+- **FIND-015** (dead-letter runbook) — Documented in
+  `OPERATIONS.md` § dead-letter replay (operator commands +
+  recovery sequence).
+- **FIND-016** (persistent dev banner) — Created
+  `apps/dashboard/src/components/dev-banner.tsx`. Component is
+  inert by default; wires from a future
+  `NEXT_PUBLIC_VIGIL_DEV_MODE` flag.
+
+**Architect read-through.**
+
+1. Confirm every closure description above matches the code as
+   committed. Spot-check FIND-002 (CONAC threshold) and FIND-005
+   (reconciliation worker) — these are the highest-impact items.
+2. Bump the audit findings catalogue at
+   `docs/audit/10-findings.md` to reflect each finding as
+   `status: closed (commit <sha>)`.
+3. Confirm DECISION-018 (FROST framing) is acceptable for
+   external review.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off

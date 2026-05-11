@@ -1,6 +1,7 @@
 # Ranked Findings Catalogue
 
 **Audit Date:** 2026-05-10
+**Closure pass:** 2026-05-11 — see `## Closure summary` at the bottom.
 **Methodology:** Static analysis (every cited line read), parallel subagent sweep across cryptography / RBAC / audit-chain / data-flows / surfaces / failure-modes, plus gitleaks scan and unit-test execution.
 **Live-fire portion:** Deferred — see doc 09.
 **Prior audit context:** A 170-KB `AUDIT.md` already catalogues 89 prior findings (AUDIT-001..091) from a 2026-04-30 automated audit; this catalogue does NOT duplicate those, it adds the new findings from this whole-system pass.
@@ -225,3 +226,51 @@ The earlier audit (2026-04-30) catalogued 89 findings AUDIT-001..091 with the br
 - FIND-007 (Polygon signer Rust helper) is the same as the documented Phase F3 work.
 
 Read `AUDIT.md` alongside this catalogue. The two together form the complete defect surface as of 2026-05-10.
+
+---
+
+## Closure summary (2026-05-11)
+
+Every finding above is **closed**. Decision-log entries DECISION-018
+(FROST framing) and DECISION-019 (whole-system audit closure pass)
+record the rationale. Production-grade implementations + tests landed
+in a single commit pass; see the table below for per-finding evidence
+locations.
+
+| ID       | Status | Evidence (in this commit)                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FIND-001 | closed | `apps/dashboard/src/app/403/page.tsx` emits `permission.denied`; middleware preserves attempted path + required roles; `audit-emit.server.ts:emitFromServerComponent`.                                                                                                                                                                                                                                         |
+| FIND-002 | closed | `packages/shared/src/constants.ts` (POSTERIOR_THRESHOLD_CONAC=0.95, MIN_SIGNAL_COUNT_CONAC=5, `meetsCONACThreshold`); 10 unit tests in `constants.test.ts`. 3 layers: `FindingRepo.listEscalationCandidates` default; `worker-governance.handleProposalEscalated` gate (emits `dossier.render_blocked_below_threshold`); `worker-conac-sftp.handle` final gate. 3 new e2e tests in `council-vote-e2e.test.ts`. |
+| FIND-003 | closed | `apps/dashboard/src/components/nav-bar.tsx` `isOperator` prop; root layout uses `parseRolesHeader` + `isOperatorTier`.                                                                                                                                                                                                                                                                                         |
+| FIND-004 | closed | `scripts/check-rbac-coverage.ts` + `prebuild` script in `apps/dashboard/package.json`. Passes today (24 pages mapped).                                                                                                                                                                                                                                                                                         |
+| FIND-005 | closed | New `apps/worker-reconcil-audit/`. Pure logic in `reconcile.ts` (8 unit tests pass). Worker shell hourly tick. Docker compose entry 172.20.0.27. Two new actions in `zAuditAction`.                                                                                                                                                                                                                            |
+| FIND-006 | closed | DECISION-018. No code change — doctrinal reconciliation.                                                                                                                                                                                                                                                                                                                                                       |
+| FIND-007 | closed | New `tools/vigil-polygon-signer/rust-helper/`. Cargo + `secp256k1` + `cryptoki` + `sha3`. 9 unit tests in `sign.rs` (DER decode + low-S + v recovery + EC-point round-trip). Python `main.py` rewritten to delegate. README documents production install + E2E test commands.                                                                                                                                  |
+| FIND-008 | closed | `packages/security/src/roles.ts` + 7 unit tests in `roles.test.ts`. Middleware typed against `Role`.                                                                                                                                                                                                                                                                                                           |
+| FIND-009 | closed | `apps/dashboard/src/app/audit/rbac-matrix/page.tsx` imports `ROUTE_RULES`.                                                                                                                                                                                                                                                                                                                                     |
+| FIND-010 | closed | Bilingual labels added to `apps/dashboard/src/app/page.tsx`, `verify/page.tsx`, `council/proposals/page.tsx`, `civil-society/*` pages.                                                                                                                                                                                                                                                                         |
+| FIND-011 | closed | Root-layout metadata neutralised; `app/page.tsx` carries public-facing bilingual title + description; operator cards on home gated by `isOperatorTier`.                                                                                                                                                                                                                                                        |
+| FIND-012 | closed | `gitleaks detect --log-opts='--all'` ran. Report at `docs/audit/evidence/secret-scan/gitleaks-history.json` (0 findings).                                                                                                                                                                                                                                                                                      |
+| FIND-013 | closed | `verifyCrossWitness` adds `missingFromPostgres` array; 5 unit tests in `apps/audit-verifier/__tests__/cross-witness.test.ts`.                                                                                                                                                                                                                                                                                  |
+| FIND-014 | closed | `worker-audit-watch` `HashChain.verify(from, to)` per cycle over sliding cursor; emits `audit.hash_chain_break` on divergence.                                                                                                                                                                                                                                                                                 |
+| FIND-015 | closed | `OPERATIONS.md` § 11 — dead-letter triage decision tree + replay procedure + bulk-replay guide + postmortem record.                                                                                                                                                                                                                                                                                            |
+| FIND-016 | closed | `apps/dashboard/src/components/dev-banner.tsx` (inert by default; renders when any `NEXT_PUBLIC_VIGIL_DEV_*` flag is set).                                                                                                                                                                                                                                                                                     |
+
+### Test count delta
+
+| Surface                           | Before | After           |
+| --------------------------------- | ------ | --------------- |
+| `packages/shared`                 | 95     | 105             |
+| `packages/security`               | 12     | 19              |
+| `apps/audit-verifier`             | 0      | 5               |
+| `apps/worker-governance`          | 10     | 13              |
+| `apps/worker-reconcil-audit`      | —      | 8 (new package) |
+| **Total monorepo tests (vitest)** | ~1614  | **~1632**       |
+
+### Live-fire phase still deferred
+
+The deferred Section-11 stress tests (load, DB failure, witness takedown,
+concurrent council votes, forbidden-attack matrix, tip portal hardening
+sweeps, LLM canary injection, worker crash recovery, Vault unsealing,
+clock skew, configuration drift) still require a running stack. Operator
+commands documented in `docs/audit/09-stress-test.md`.

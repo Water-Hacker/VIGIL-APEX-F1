@@ -16,9 +16,10 @@ import type { NextRequest } from 'next/server';
 
 let cachedRepo: UserActionEventRepo | null = null;
 let cachedChain: HashChain | null = null;
-const SIGNER: AuditSigner = process.env.NODE_ENV === 'production'
-  ? new DeterministicTestSigner() // production wires the YubiKey PKCS#11 signer in the host service
-  : new DeterministicTestSigner();
+const SIGNER: AuditSigner =
+  process.env.NODE_ENV === 'production'
+    ? new DeterministicTestSigner() // production wires the YubiKey PKCS#11 signer in the host service
+    : new DeterministicTestSigner();
 
 async function deps() {
   if (!cachedRepo) {
@@ -95,6 +96,66 @@ export function actorFromRequest(req: NextRequest): Schemas.ActorContext {
     actor_device_fingerprint: null, // populated by client-side fingerprint pass when present
     session_id: null, // populated when the dashboard issues TAL-PA sessions
   };
+}
+
+/**
+ * Server-component variant of `actorFromRequest`. Reads from the
+ * standard Next.js `headers()` API rather than a `NextRequest`. Used
+ * by route-group server components (e.g. the /403 page below) that
+ * are invoked WITHOUT a NextRequest argument.
+ *
+ * Added for FIND-001 closure (whole-system-audit doc 10) — the
+ * forbidden-access page must emit a structured `access.forbidden`
+ * audit event with full actor + target context.
+ */
+export function actorFromHeaders(h: Headers): Schemas.ActorContext {
+  const userId = h.get('x-vigil-user') ?? 'public:anonymous';
+  const roles = (h.get('x-vigil-roles') ?? 'public').split(',');
+  const role = mapRole(roles);
+  const ip = h.get('x-forwarded-for') ?? h.get('x-real-ip') ?? null;
+  return {
+    actor_id: userId,
+    actor_role: role,
+    actor_yubikey_serial: null,
+    actor_ip: ip,
+    actor_device_fingerprint: null,
+    session_id: null,
+  };
+}
+
+/**
+ * Emit a TAL-PA audit event from a server component (NO NextRequest in
+ * scope). Used by the /403 page to record forbidden-access attempts
+ * (FIND-001 closure).
+ *
+ * Unlike `audit()` above, this does NOT wrap a worker function — the
+ * server component IS the work. We emit the event and return; if the
+ * emit fails, we throw `AuditEmitterUnavailableError` and the component
+ * surfaces an error boundary.
+ *
+ * TAL-PA halt-on-failure semantics still apply: a failed audit emit
+ * blocks rendering rather than producing a "dark period".
+ */
+export async function emitFromServerComponent(spec: {
+  readonly eventType: string;
+  readonly actor: Schemas.ActorContext;
+  readonly targetResource: string;
+  readonly actionPayload?: Record<string, unknown>;
+  readonly resultStatus?: Schemas.ResultStatus;
+  readonly correlationId?: string | null;
+}): Promise<void> {
+  const d = await deps();
+  await emitAudit(
+    { pool: undefined as never, userActionRepo: d.repo, chain: d.chain, signer: SIGNER },
+    {
+      eventType: spec.eventType,
+      actor: spec.actor,
+      targetResource: spec.targetResource,
+      actionPayload: spec.actionPayload ?? {},
+      resultStatus: spec.resultStatus ?? 'denied',
+      correlationId: spec.correlationId ?? null,
+    } satisfies EmitInput,
+  );
 }
 
 function mapRole(roles: ReadonlyArray<string>): Schemas.ActorRole {

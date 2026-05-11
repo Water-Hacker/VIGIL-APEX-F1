@@ -1,8 +1,8 @@
 {
-  "name": "audit-verifier",
+  "name": "worker-reconcil-audit",
   "version": "0.1.0",
   "private": true,
-  "description": "Hourly hash-chain integrity check (CT-01) + Polygon-anchor match (CT-02).",
+  "description": "Audit-chain reconciliation worker — closes FIND-005 from whole-system-audit doc 10. Periodically scans audit.actions vs audit.fabric_witness vs audit.anchor_commitment for gaps and resubmits missing witness writes.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "scripts": {
@@ -11,16 +11,18 @@
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
-    "verify-once": "node dist/once.js",
     "test": "vitest run",
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
     "@vigil/audit-chain": "workspace:*",
+    "@vigil/audit-log": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
     "@vigil/fabric-bridge": "workspace:*",
     "@vigil/observability": "workspace:*",
-    "ethers": "^6.13.2",
+    "@vigil/queue": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "drizzle-orm": "^0.34.0",
     "pg": "^8.13.0"
   },
   "devDependencies": {

@@ -94,6 +94,9 @@ interface MockSpies {
 interface MakeDepsOptions {
   /** If provided, override the default high-posterior finding. */
   readonly findingPosterior?: number;
+  /** If provided, override the default signal count (default = 7, above the
+   *  MIN_SIGNAL_COUNT_CONAC = 5 threshold). */
+  readonly findingSignalCount?: number;
   /** If true, getProposalByOnChainIndex returns null (projection lag). */
   readonly proposalNotProjected?: boolean;
   /** If true, findingRepo.getById returns null. */
@@ -103,7 +106,10 @@ interface MakeDepsOptions {
 }
 
 function makeDeps(opts: MakeDepsOptions = {}): { deps: VoteCeremonyDeps; spies: MockSpies } {
-  const findingPosterior = opts.findingPosterior ?? 0.92;
+  // Default to a finding ABOVE the CONAC threshold so happy-path tests pass.
+  // FIND-002 closure: the gate is posterior >= 0.95 AND signal_count >= 5.
+  const findingPosterior = opts.findingPosterior ?? 0.97;
+  const findingSignalCount = opts.findingSignalCount ?? 7;
 
   // GovernanceRepo mock
   const insertProposal = vi.fn(async (_row: Record<string, unknown>) => undefined);
@@ -119,13 +125,17 @@ function makeDeps(opts: MakeDepsOptions = {}): { deps: VoteCeremonyDeps; spies: 
   });
   const repo = { insertProposal, insertVote, getProposalByOnChainIndex } as never;
 
-  // FindingRepo mock — finding has crossed the 0.85 escalation threshold.
+  // FindingRepo mock — finding has crossed the CONAC threshold (FIND-002).
+  // Mock returns the schema-accurate field names (`posterior`, `signal_count`)
+  // so the new `Constants.meetsCONACThreshold(finding)` guard in
+  // handleProposalEscalated evaluates against real shape.
   const findingGetById = vi.fn(async (id: string) => {
     if (opts.findingMissing === true) return null;
     return {
       id,
       severity: 'high',
-      posterior_probability: String(findingPosterior),
+      posterior: findingPosterior,
+      signal_count: findingSignalCount,
       primary_pattern_id: 'p-a-001',
       recommended_recipient_body: null,
     };
@@ -291,11 +301,13 @@ describe('Block-E E.1 / D1 — council vote ceremony E2E (3-of-5 escalation)', (
     expect(spies.chainAppend.mock.calls[6]![0].action).toBe('governance.proposal_escalated');
     expect(spies.chainAppend.mock.calls[6]![0].actor).toBe('contract');
 
-    // Finding posterior was loaded; assert it's above the 0.85 threshold.
+    // Finding posterior + signal_count were loaded; assert they meet the
+    // CONAC threshold (FIND-002 closure: 0.95 AND 5).
     expect(spies.findingGetById).toHaveBeenCalledTimes(1);
     expect(spies.findingGetById).toHaveBeenCalledWith(FINDING_ID);
     const fakeFinding = await spies.findingGetById.mock.results[0]!.value;
-    expect(parseFloat(fakeFinding.posterior_probability)).toBeGreaterThan(0.85);
+    expect(fakeFinding.posterior).toBeGreaterThanOrEqual(0.95);
+    expect(fakeFinding.signal_count).toBeGreaterThanOrEqual(5);
 
     // Dossier render published — FR + EN envelopes.
     expect(spies.queuePublish).toHaveBeenCalledTimes(2);
@@ -354,10 +366,13 @@ describe('Block-E E.1 / D1 — council vote ceremony E2E (3-of-5 escalation)', (
     ({ deps, spies } = makeDeps());
 
     // Override the finding mock to return a recommended_recipient_body.
+    // Posterior + signal_count above CONAC threshold so the FIND-002 gate
+    // in handleProposalEscalated passes through to recipient-body logic.
     spies.findingGetById.mockResolvedValueOnce({
       id: FINDING_ID,
       severity: 'critical',
-      posterior_probability: '0.95',
+      posterior: 0.97,
+      signal_count: 8,
       primary_pattern_id: 'p-c-001',
       recommended_recipient_body: 'antic',
     });
@@ -389,6 +404,77 @@ describe('Block-E E.1 / D1 — council vote ceremony E2E (3-of-5 escalation)', (
       expect.objectContaining({ idx: PROPOSAL_INDEX }),
       'escalated-proposal-not-projected; skipping render publish',
     );
+  });
+
+  it('FIND-002 gate: finding below posterior threshold blocks dossier.render publish', async () => {
+    // 3-of-5 council voted YES, BUT the underlying finding has posterior=0.94,
+    // below the CONAC threshold of 0.95. Even with quorum, the system must
+    // refuse to publish a render envelope. Audit chain records the block.
+    ({ deps, spies } = makeDeps({ findingPosterior: 0.94, findingSignalCount: 7 }));
+
+    await handleProposalOpened(deps, PROPOSAL_INDEX, FINDING_HASH, PROPOSER, URI_HASH);
+    await handleProposalEscalated(deps, PROPOSAL_INDEX);
+
+    // No render envelope published.
+    expect(spies.queuePublish).not.toHaveBeenCalled();
+
+    // No setRecipientBody side effect.
+    expect(spies.setRecipientBody).not.toHaveBeenCalled();
+
+    // Audit chain rows: 1 ProposalOpened + 1 ProposalEscalated + 1
+    // dossier.render_blocked_below_threshold = 3.
+    expect(spies.chainAppend).toHaveBeenCalledTimes(3);
+    const blockRow = spies.chainAppend.mock.calls[2]![0] as Record<string, unknown>;
+    expect(blockRow.action).toBe('dossier.render_blocked_below_threshold');
+    expect(blockRow.actor).toBe('system:worker-governance');
+    expect(blockRow.subject_kind).toBe('finding');
+    expect(blockRow.subject_id).toBe(FINDING_ID);
+    const blockPayload = blockRow.payload as Record<string, unknown>;
+    expect(blockPayload.posterior).toBe(0.94);
+    expect(blockPayload.signal_count).toBe(7);
+    expect(blockPayload.threshold_posterior).toBe(0.95);
+    expect(blockPayload.threshold_signals).toBe(5);
+
+    // Loud error log so an operator notices.
+    expect(spies.loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        finding_id: FINDING_ID,
+        posterior: 0.94,
+        signal_count: 7,
+      }),
+      'finding-below-conac-threshold-held; refusing dossier.render publish',
+    );
+  });
+
+  it('FIND-002 gate: finding below signal_count threshold blocks dossier.render publish', async () => {
+    // Posterior 0.99 (well above 0.95) but only 3 signals (below 5). Same
+    // refusal logic — both criteria must be met.
+    ({ deps, spies } = makeDeps({ findingPosterior: 0.99, findingSignalCount: 3 }));
+
+    await handleProposalOpened(deps, PROPOSAL_INDEX, FINDING_HASH, PROPOSER, URI_HASH);
+    await handleProposalEscalated(deps, PROPOSAL_INDEX);
+
+    expect(spies.queuePublish).not.toHaveBeenCalled();
+    expect(spies.setRecipientBody).not.toHaveBeenCalled();
+    const blockRow = spies.chainAppend.mock.calls[2]![0] as Record<string, unknown>;
+    expect(blockRow.action).toBe('dossier.render_blocked_below_threshold');
+    const blockPayload = blockRow.payload as Record<string, unknown>;
+    expect(blockPayload.signal_count).toBe(3);
+  });
+
+  it('FIND-002 gate: a finding exactly at threshold (posterior=0.95, signals=5) IS allowed through', async () => {
+    ({ deps, spies } = makeDeps({ findingPosterior: 0.95, findingSignalCount: 5 }));
+
+    await handleProposalOpened(deps, PROPOSAL_INDEX, FINDING_HASH, PROPOSER, URI_HASH);
+    await handleProposalEscalated(deps, PROPOSAL_INDEX);
+
+    // Render envelopes published (FR + EN).
+    expect(spies.queuePublish).toHaveBeenCalledTimes(2);
+    // No render-blocked audit row.
+    const actions = spies.chainAppend.mock.calls.map(
+      (c) => (c[0] as Record<string, unknown>).action,
+    );
+    expect(actions).not.toContain('dossier.render_blocked_below_threshold');
   });
 
   it('escalation when finding is missing — logs warn, skips render publish', async () => {

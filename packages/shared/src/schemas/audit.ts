@@ -73,6 +73,13 @@ export const zAuditAction = z.enum([
   'dossier.render_enqueued',
   'dossier.recipient_body_changed',
   'dossier.downloaded',
+  // FIND-002 closure (whole-system-audit doc 10) — emitted when
+  // worker-governance refuses to publish a dossier.render envelope
+  // because the underlying finding does not meet the CONAC threshold
+  // (posterior >= 0.95 AND signal_count >= 5), AND when
+  // worker-conac-sftp dead-letters at the SFTP boundary for the same
+  // reason.
+  'dossier.render_blocked_below_threshold',
   'satellite.request_enqueued',
   'satellite.imagery_fetched',
   'satellite.recheck_requested',
@@ -97,6 +104,12 @@ export const zAuditAction = z.enum([
 
   // DECISION-012 — TAL-PA public-permanence export
   'audit.public_export_published',
+
+  // FIND-005 closure (whole-system-audit doc 10) — periodic
+  // reconciliation between Postgres, Fabric witness, and Polygon anchor.
+  // worker-reconcil-audit emits these.
+  'audit.reconciliation_completed',
+  'audit.reconciliation_divergence',
 
   // Phase / decision
   'phase.advanced',

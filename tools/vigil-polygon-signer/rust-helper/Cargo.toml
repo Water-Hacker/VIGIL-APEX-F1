@@ -1,0 +1,51 @@
+[package]
+name = "yk-secp256k1"
+version = "0.1.0"
+edition = "2021"
+description = "VIGIL APEX YubiKey PKCS#11 → Ethereum-compatible secp256k1 signer helper. Closes FIND-007 (whole-system-audit doc 10)."
+license = "UNLICENSED"
+publish = false
+
+# Single binary. Invoked via subprocess from main.py. NDJSON not used
+# here — the helper takes the message hash on stdin and writes the
+# r||s||v hex on stdout. Python wraps the protocol.
+[[bin]]
+name = "yk-secp256k1"
+path = "src/main.rs"
+
+[dependencies]
+# PKCS#11 token access. cryptoki is the maintained, audited binding.
+cryptoki = "0.7"
+
+# secp256k1 — battle-tested Bitcoin Core C library binding. We use it
+# to (1) verify our (r, s) is parseable, (2) low-S normalise, (3)
+# recover the v byte by trying both candidate keys.
+secp256k1 = { version = "0.29", features = ["recovery", "global-context"] }
+
+# Keccak-256 — Ethereum's hash function. Used here only to verify
+# that the message hash passed in matches the size we expect (32 bytes).
+# The actual hashing of tx data happens in Python (web3.py) before
+# this helper is invoked.
+sha3 = "0.10"
+
+# Hex encode/decode for the wire format.
+hex = "0.4"
+
+# Error handling.
+anyhow = "1.0"
+
+# Logging — write structured info to stderr; stdout reserved for the
+# signature output.
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+# Property-style fuzzing for the pure helpers (DER decode, low-S
+# normalisation). Only runs in `cargo test`.
+proptest = "1.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

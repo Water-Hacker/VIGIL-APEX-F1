@@ -1,3 +1,4 @@
+import { Constants } from '@vigil/shared';
 import { and, desc, eq, gte, ne, or, sql } from 'drizzle-orm';
 
 import * as findingSchema from '../schema/finding.js';
@@ -11,16 +12,40 @@ export class FindingRepo {
     await this.db.insert(findingSchema.finding).values(row);
   }
 
-  async getById(id: string): Promise<(typeof findingSchema.finding.$inferSelect) | null> {
-    const rows = await this.db.select().from(findingSchema.finding).where(eq(findingSchema.finding.id, id)).limit(1);
+  async getById(id: string): Promise<typeof findingSchema.finding.$inferSelect | null> {
+    const rows = await this.db
+      .select()
+      .from(findingSchema.finding)
+      .where(eq(findingSchema.finding.id, id))
+      .limit(1);
     return rows[0] ?? null;
   }
 
-  async listEscalationCandidates(threshold = 0.85, limit = 50) {
+  /**
+   * List findings strong enough to bring to council. The defaults are
+   * imported from @vigil/shared constants, which is the SINGLE SOURCE
+   * OF TRUTH (closes FIND-002 from whole-system-audit doc 10).
+   *
+   * Callers may pass narrower values (e.g. an operator viewing the
+   * borderline-investigation queue may want to see posterior >= 0.80),
+   * but the DEFAULT is the CONAC delivery cutoff so that any caller
+   * that doesn't think about it gets the safest answer.
+   */
+  async listEscalationCandidates(
+    posteriorMin: number = Constants.POSTERIOR_THRESHOLD_CONAC,
+    signalCountMin: number = Constants.MIN_SIGNAL_COUNT_CONAC,
+    limit = 50,
+  ) {
     return this.db
       .select()
       .from(findingSchema.finding)
-      .where(and(eq(findingSchema.finding.state, 'review'), gte(findingSchema.finding.posterior, threshold)))
+      .where(
+        and(
+          eq(findingSchema.finding.state, 'review'),
+          gte(findingSchema.finding.posterior, posteriorMin),
+          gte(findingSchema.finding.signal_count, signalCountMin),
+        ),
+      )
       .orderBy(desc(findingSchema.finding.posterior))
       .limit(limit);
   }
@@ -55,11 +80,7 @@ export class FindingRepo {
       .where(eq(findingSchema.finding.id, id));
   }
 
-  async setCounterEvidence(
-    id: string,
-    text: string,
-    nextState: string = 'review',
-  ): Promise<void> {
+  async setCounterEvidence(id: string, text: string, nextState: string = 'review'): Promise<void> {
     await this.db
       .update(findingSchema.finding)
       .set({ counter_evidence: text, state: nextState })

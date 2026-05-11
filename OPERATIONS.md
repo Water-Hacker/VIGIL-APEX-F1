@@ -60,16 +60,16 @@ Solo-architect mode (Phase 1):
 
 CI gates (must be green to merge):
 
-| Gate | Tool | Failure mode |
-|---|---|---|
-| Lint | ESLint + Prettier | non-blocking warning, blocking error |
-| Type-check | `tsc --noEmit` | blocking |
-| Test | Vitest (unit) + Playwright (e2e for UI surfaces) | blocking |
-| Schema validation | `drizzle-kit check` | blocking |
-| Secret scan | `gitleaks` | blocking — no exceptions |
-| Dependency vulnerability | Snyk Pro | blocking on Critical, warning on High |
-| Anti-hallucination corpus | nightly + on PR | blocking on PRs touching `packages/llm/` |
-| Adapter health | nightly against frozen fixtures | warning (W-19 self-heal kicks in) |
+| Gate                      | Tool                                             | Failure mode                             |
+| ------------------------- | ------------------------------------------------ | ---------------------------------------- |
+| Lint                      | ESLint + Prettier                                | non-blocking warning, blocking error     |
+| Type-check                | `tsc --noEmit`                                   | blocking                                 |
+| Test                      | Vitest (unit) + Playwright (e2e for UI surfaces) | blocking                                 |
+| Schema validation         | `drizzle-kit check`                              | blocking                                 |
+| Secret scan               | `gitleaks`                                       | blocking — no exceptions                 |
+| Dependency vulnerability  | Snyk Pro                                         | blocking on Critical, warning on High    |
+| Anti-hallucination corpus | nightly + on PR                                  | blocking on PRs touching `packages/llm/` |
+| Adapter health            | nightly against frozen fixtures                  | warning (W-19 self-heal kicks in)        |
 
 ---
 
@@ -96,6 +96,7 @@ CI gates (must be green to merge):
 
 A CI lint (`scripts/check-decisions.ts`) runs on every push to `main` and fails
 the build if:
+
 - Any `docs/decisions/log.md` entry marked `Status: FINAL` is dated within the last
   7 days but lacks a corresponding `audit_event_id` (Phase 1+ only — pre-Phase-1 entries are migrated retroactively).
 - Any decision-log entry references a phase or section that does not exist.
@@ -136,3 +137,102 @@ If the architect is unreachable for 14 consecutive days:
 - The backup architect's YubiKey can decrypt their Vault Shamir share; combined
   with the safe paper share + the institutional-partner share = 3-of-5, system unsealed.
 - No code may be merged to `main` during this window without 4-of-5 council vote.
+
+---
+
+## 11. Dead-letter queue replay (FIND-015 closure)
+
+Closes FIND-015 from whole-system-audit doc 10. Several workers
+(`worker-fabric-bridge`, `worker-conac-sftp`, `worker-anchor`,
+`worker-tip-triage`, `worker-dossier`) stop retrying a single envelope
+after 8 attempts and move it to a dead-letter Redis stream. The
+operator dashboard at `/dead-letter` lists pending entries; this
+section is the runbook for replaying them.
+
+### Symptom
+
+`/dead-letter` shows entries with `resolved=false` and the
+`reason` column names a recoverable cause (e.g. `ipfs-fetch-failed`,
+`fabric-peer-rpc-timeout`, `awaiting-sibling-language`,
+`finding-below-conac-threshold`).
+
+### Triage decision tree
+
+1. **`reason = finding-below-conac-threshold`** — this is FIND-002
+   working as intended; the underlying finding has posterior < 0.95
+   or signal_count < 5. **Do not replay.** Either wait for the
+   certainty engine to produce more evidence (preferred), or decide
+   the finding warrants delivery anyway and route via a different
+   recipient body (e.g. `MINFI` for procurement) — `CONAC` only
+   accepts findings that clear the anti-corruption-grade threshold.
+
+2. **`reason = finding-missing-at-conac-boundary`** — finding row was
+   deleted or wasn't created yet. **Investigate first**, then either
+   delete the dead-letter envelope (if intentional rollback) or
+   reconstruct the finding before replay.
+
+3. **`reason = fabric-postgres-divergence`** — non-recoverable.
+   **STOP. Do not replay.** Hash chain integrity is at risk. Open
+   `/audit/ai-safety`, run `pnpm --filter audit-verifier run
+verify-once`, and engage the architect + 4-of-5 council before
+   any further write to the chain.
+
+4. **Anything else (transient infra)** — proceed with replay below.
+
+### Replay procedure
+
+```
+# 1. Identify the envelope id and stream name
+PGPASSWORD=$PG vigil-pg psql -c \
+  "SELECT id, queue, dedup_key, reason, created_at FROM audit.dead_letter \
+    WHERE resolved=false ORDER BY created_at DESC LIMIT 20"
+
+# 2. Read the envelope payload (stored verbatim)
+PGPASSWORD=$PG vigil-pg psql -c \
+  "SELECT envelope::jsonb FROM audit.dead_letter WHERE id='<id>'"
+
+# 3. Republish to the original stream
+ENVELOPE='...'  # the JSONB body from step 2
+echo "$ENVELOPE" | docker exec -i vigil-redis redis-cli -a $REDIS_PASS \
+  XADD vigil:<stream-name> '*' envelope -
+
+# 4. Mark the dead-letter row resolved
+PGPASSWORD=$PG vigil-pg psql -c \
+  "UPDATE audit.dead_letter SET resolved=true, resolved_at=NOW(), \
+   resolved_by='<operator-id>', resolution='manual-replay' WHERE id='<id>'"
+
+# 5. Watch the worker pick it back up
+docker logs -f --tail 100 <worker-name>
+```
+
+### Bulk replay
+
+If a backlog accumulated during a Fabric outage:
+
+```
+PGPASSWORD=$PG vigil-pg psql -c \
+  "SELECT id, queue, envelope::text FROM audit.dead_letter \
+    WHERE resolved=false AND reason LIKE 'fabric-%' \
+    ORDER BY created_at ASC"
+```
+
+Pipe the resulting CSV through a small script that issues one
+`XADD` per row. **Bounded rate** — no more than 100/minute to avoid
+overwhelming the recovering worker.
+
+### Reconciliation-worker integration
+
+The new `worker-reconcil-audit` (FIND-005 closure) republishes
+missing-from-Fabric envelopes automatically on its hourly tick, up to
+`RECONCIL_AUDIT_MAX_REPUBLISH` envelopes per tick (default 100). For
+audit-chain gaps you typically do not need to manually replay — give
+the reconcil worker one or two cycles and confirm via the next tick's
+`audit.reconciliation_completed` chain row.
+
+### Postmortem
+
+Every manual replay should land a one-line note in
+`docs/runbook/dead-letter-replays.md` (create on first use): date,
+envelope id, original failure reason, resolution. This builds the
+historical record an external auditor or post-incident reviewer will
+ask for.

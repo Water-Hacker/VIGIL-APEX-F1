@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { DossierRepo, getDb } from '@vigil/db-postgres';
+import { DossierRepo, FindingRepo, getDb } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -10,15 +10,9 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
-import {
-  QueueClient,
-  STREAMS,
-  WorkerBase,
-  type Envelope,
-  type HandlerOutcome,
-} from '@vigil/queue';
+import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import { VaultClient, expose } from '@vigil/security';
-import { Schemas } from '@vigil/shared';
+import { Constants, Schemas } from '@vigil/shared';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import SftpClient from 'ssh2-sftp-client';
 import { z } from 'zod';
@@ -76,6 +70,7 @@ class ConacSftpWorker extends WorkerBase<Payload> {
   constructor(
     private readonly vault: VaultClient,
     private readonly dossierRepo: DossierRepo,
+    private readonly findingRepo: FindingRepo,
     private readonly ipfsApiUrl: string,
     queue: QueueClient,
   ) {
@@ -92,6 +87,44 @@ class ConacSftpWorker extends WorkerBase<Payload> {
 
   protected async handle(env: Envelope<Payload>): Promise<HandlerOutcome> {
     const body: RecipientBody = env.payload.recipient_body_name;
+
+    // FIND-002 closure (whole-system-audit doc 10) — THIRD LINE OF DEFENCE.
+    // Even if the council voted YES, even if worker-governance published a
+    // dossier.render envelope, the SFTP worker re-validates the underlying
+    // finding against the CONAC threshold (posterior >= 0.95 AND
+    // signal_count >= 5). A bug or doctrinal regression upstream cannot
+    // result in a sub-threshold finding being delivered to the institutional
+    // recipient. Fail closed: dead-letter the envelope and log loudly.
+    if (body === 'CONAC') {
+      const finding = await this.findingRepo.getById(env.payload.finding_id);
+      if (!finding) {
+        logger.error(
+          { finding_id: env.payload.finding_id, ref: env.payload.dossier_ref },
+          'finding-not-found-at-sftp-boundary; refusing CONAC delivery',
+        );
+        return {
+          kind: 'dead-letter',
+          reason: 'finding-missing-at-conac-boundary',
+        };
+      }
+      if (!Constants.meetsCONACThreshold(finding)) {
+        logger.error(
+          {
+            finding_id: finding.id,
+            posterior: finding.posterior,
+            signal_count: finding.signal_count,
+            threshold_posterior: Constants.POSTERIOR_THRESHOLD_CONAC,
+            threshold_signals: Constants.MIN_SIGNAL_COUNT_CONAC,
+            ref: env.payload.dossier_ref,
+          },
+          'finding-below-conac-threshold-at-sftp-boundary; refusing CONAC delivery (FIND-002 gate)',
+        );
+        return {
+          kind: 'dead-letter',
+          reason: 'finding-below-conac-threshold',
+        };
+      }
+    }
 
     let target: DeliveryTarget;
     try {
@@ -278,12 +311,13 @@ async function main(): Promise<void> {
   registerShutdown('queue', () => queue.close());
   const db = await getDb();
   const dossierRepo = new DossierRepo(db);
+  const findingRepo = new FindingRepo(db);
   const vault = await VaultClient.connect();
   registerShutdown('vault', () => vault.close());
 
   const ipfsApiUrl = process.env.IPFS_API_URL ?? 'http://vigil-ipfs:5001';
 
-  const worker = new ConacSftpWorker(vault, dossierRepo, ipfsApiUrl, queue);
+  const worker = new ConacSftpWorker(vault, dossierRepo, findingRepo, ipfsApiUrl, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
   logger.info('worker-conac-sftp-ready');

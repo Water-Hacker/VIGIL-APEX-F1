@@ -28,7 +28,7 @@
  */
 
 import { STREAMS, newEnvelope } from '@vigil/queue';
-import { Ids, Routing } from '@vigil/shared';
+import { Constants, Ids, Routing } from '@vigil/shared';
 
 import type { HashChain } from '@vigil/audit-chain';
 import type {
@@ -174,6 +174,45 @@ export async function handleProposalEscalated(deps: VoteCeremonyDeps, idx: numbe
       );
       return;
     }
+
+    // FIND-002 closure (whole-system-audit doc 10): refuse to publish
+    // dossier.render envelopes if the finding does NOT meet the CONAC
+    // delivery threshold (posterior >= 0.95 AND signal_count >= 5).
+    // The council vote alone is not sufficient — the underlying
+    // evidence must also clear the bar. This is the SECOND layer of
+    // defence (the first is the repo default in
+    // `FindingRepo.listEscalationCandidates`; the third is the SFTP
+    // worker itself). Emit a structured audit row so the architect can
+    // see in the audit log that a council-approved finding was held.
+    if (!Constants.meetsCONACThreshold(finding)) {
+      deps.logger.error(
+        {
+          idx,
+          finding_id: finding.id,
+          posterior: finding.posterior,
+          signal_count: finding.signal_count,
+          threshold_posterior: Constants.POSTERIOR_THRESHOLD_CONAC,
+          threshold_signals: Constants.MIN_SIGNAL_COUNT_CONAC,
+        },
+        'finding-below-conac-threshold-held; refusing dossier.render publish',
+      );
+      await deps.chain.append({
+        action: 'dossier.render_blocked_below_threshold',
+        actor: 'system:worker-governance',
+        subject_kind: 'finding',
+        subject_id: finding.id,
+        payload: {
+          proposal_index: String(idx),
+          posterior: finding.posterior,
+          signal_count: finding.signal_count,
+          threshold_posterior: Constants.POSTERIOR_THRESHOLD_CONAC,
+          threshold_signals: Constants.MIN_SIGNAL_COUNT_CONAC,
+          reason: 'FIND-002 gate — finding does not meet CONAC threshold',
+        },
+      });
+      return;
+    }
+
     const decision = await deps.dossierRepo.latestRoutingDecision(finding.id);
     let recipientBody: RecipientBodyName;
     if (decision !== null) {

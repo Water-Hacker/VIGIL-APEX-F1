@@ -152,3 +152,53 @@ export const SURFACES = {
   PUBLIC_LEDGER: '/ledger',
   PUBLIC_TIP: '/tip',
 } as const;
+
+/* =============================================================================
+ * Finding escalation thresholds — SRD §25 / DECISION-011 (Bayesian engine)
+ *
+ * SINGLE SOURCE OF TRUTH for the cutoff that gates institutional
+ * delivery. Closes FIND-002 from whole-system-audit doc 10 — previously
+ * the threshold was 0.85 in the repo default and the 0.95/5-source rule
+ * lived only in a documentation comment in `schemas/certainty.ts`.
+ *
+ * A finding is eligible for CONAC delivery IFF:
+ *   posterior >= POSTERIOR_THRESHOLD_CONAC
+ *   AND signal_count >= MIN_SIGNAL_COUNT_CONAC
+ *
+ * Enforcement is layered (defence in depth):
+ *   1. `FindingRepo.listEscalationCandidates` default — narrows the
+ *      query so operator triage screens already see only candidates
+ *      strong enough to bring to council.
+ *   2. `worker-governance.handleProposalEscalated` — gate before
+ *      publishing dossier.render envelopes after a successful council
+ *      vote.
+ *   3. `worker-conac-sftp.handle` — final gate before SFTP put().
+ *
+ * The two values are intentionally re-readable at runtime via the helper
+ * `meetsCONACThreshold(finding)` below, so a future change to the
+ * cutoff (e.g. tightening to 0.97 after calibration evidence) is a
+ * one-file edit.
+ * ===========================================================================*/
+
+export const POSTERIOR_THRESHOLD_CONAC = 0.95;
+export const MIN_SIGNAL_COUNT_CONAC = 5;
+
+/**
+ * Pure predicate over the minimal Finding shape required to make the
+ * decision. Accepts partial Finding rows (workers may load lazy
+ * projections) and answers true only if BOTH fields exist AND meet
+ * their thresholds.
+ *
+ * Refuse-on-doubt: a missing or non-numeric `posterior` or
+ * `signal_count` returns false (fail-closed).
+ */
+export function meetsCONACThreshold(finding: {
+  readonly posterior?: number | null;
+  readonly signal_count?: number | null;
+}): boolean {
+  const p = finding.posterior;
+  const c = finding.signal_count;
+  if (typeof p !== 'number' || !Number.isFinite(p)) return false;
+  if (typeof c !== 'number' || !Number.isFinite(c)) return false;
+  return p >= POSTERIOR_THRESHOLD_CONAC && c >= MIN_SIGNAL_COUNT_CONAC;
+}

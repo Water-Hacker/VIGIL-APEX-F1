@@ -1,11 +1,6 @@
 import { z } from 'zod';
 
-import {
-  zCorrelationId,
-  zIsoInstant,
-  zSha256Hex,
-  zUuid,
-} from './common.js';
+import { zCorrelationId, zIsoInstant, zSha256Hex, zUuid } from './common.js';
 
 /* =============================================================================
  * TAL-PA — Total Action Logging with Public Anchoring (DECISION-012).
@@ -70,7 +65,8 @@ export type ActorRole = z.infer<typeof zActorRole>;
  * coverage tests in `packages/audit-log/__tests__/coverage.test.ts` so a
  * silent type proliferation is caught at CI.
  */
-export const EVENT_TYPE_RE = /^(auth|search|query|graph|dossier|vote|signature|analyst|record|status|classification|priority|prompt|model|threshold|likelihood_ratio|user|permission|yubikey|system|external|public|failed|audit|redaction)\.[a-z_]+$/;
+export const EVENT_TYPE_RE =
+  /^(auth|search|query|graph|dossier|vote|signature|analyst|record|status|classification|priority|prompt|model|threshold|likelihood_ratio|user|permission|yubikey|system|external|public|failed|audit|redaction)\.[a-z_]+$/;
 
 export const zEventType = z
   .string()
@@ -144,6 +140,10 @@ export const KNOWN_EVENT_TYPES = {
     'user.removed',
     'permission.granted',
     'permission.revoked',
+    // FIND-001 closure (whole-system-audit doc 10) — every forbidden-access
+    // attempt from the middleware's 403 rewrite path emits this event so
+    // an investigator can reconstruct probing patterns post-incident.
+    'permission.denied',
     'yubikey.enrolled',
     'yubikey.revoked',
   ],
@@ -198,7 +198,9 @@ export const KNOWN_EVENT_TYPES = {
  * scoping function to decide what fields to redact in the public view.
  */
 export function categoryOf(eventType: string): AuditCategory | null {
-  for (const [cat, slugs] of Object.entries(KNOWN_EVENT_TYPES) as Array<[AuditCategory, readonly string[]]>) {
+  for (const [cat, slugs] of Object.entries(KNOWN_EVENT_TYPES) as Array<
+    [AuditCategory, readonly string[]]
+  >) {
     if (slugs.includes(eventType)) return cat;
   }
   // Fall back to a regex-derived prefix mapping for unknown slugs.
@@ -207,7 +209,8 @@ export function categoryOf(eventType: string): AuditCategory | null {
   if (/^dossier\./.test(eventType)) return 'C';
   if (/^(vote|signature|analyst)\./.test(eventType)) return 'D';
   if (/^(record|status|classification|priority)\./.test(eventType)) return 'E';
-  if (/^(prompt|model|threshold|likelihood_ratio|user|permission|yubikey)\./.test(eventType)) return 'F';
+  if (/^(prompt|model|threshold|likelihood_ratio|user|permission|yubikey)\./.test(eventType))
+    return 'F';
   if (/^system\./.test(eventType)) return 'G';
   if (/^external\./.test(eventType)) return 'H';
   if (/^public\./.test(eventType)) return 'I';
@@ -292,10 +295,17 @@ export const zUserActionEvent = z.object({
   correlation_id: zCorrelationId.nullable(),
   /** Actor's YubiKey signature (hex) over `record_hash`. null for events
    *  produced by accounts not yet enrolled or for `system:` actors. */
-  digital_signature: z.string().regex(/^[a-f0-9]+$/).max(2048).nullable(),
+  digital_signature: z
+    .string()
+    .regex(/^[a-f0-9]+$/)
+    .max(2048)
+    .nullable(),
   /** Polygon transaction hash where this event's record was anchored.
    *  null until the next batch (or immediate, for high-sig). */
-  chain_anchor_tx: z.string().regex(/^0x[a-f0-9]{64}$/i).nullable(),
+  chain_anchor_tx: z
+    .string()
+    .regex(/^0x[a-f0-9]{64}$/i)
+    .nullable(),
   record_hash: zSha256Hex,
   /** True iff this event was anchored individually within seconds rather
    *  than via the hourly batch. */
@@ -390,7 +400,10 @@ export const zPublicAuditView = z.object({
   target_resource: z.string().min(1).max(500),
   result_status: zResultStatus,
   /** Polygon anchor tx if known. */
-  chain_anchor_tx: z.string().regex(/^0x[a-f0-9]{64}$/i).nullable(),
+  chain_anchor_tx: z
+    .string()
+    .regex(/^0x[a-f0-9]{64}$/i)
+    .nullable(),
   high_significance: z.boolean(),
 });
 export type PublicAuditView = z.infer<typeof zPublicAuditView>;

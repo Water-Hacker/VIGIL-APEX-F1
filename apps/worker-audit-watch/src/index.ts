@@ -8,11 +8,7 @@ import {
   type AnomalyEvent,
   type AnomalyRuleResult,
 } from '@vigil/audit-log';
-import {
-  AnomalyAlertRepo,
-  getDb,
-  getPool,
-} from '@vigil/db-postgres';
+import { AnomalyAlertRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   createLogger,
   installShutdownHandler,
@@ -50,13 +46,42 @@ async function main(): Promise<void> {
 
   const intervalMs = Number(process.env.AUDIT_WATCH_INTERVAL_MS ?? 5 * 60_000); // 5 min default
   const windowHours = Number(process.env.AUDIT_WATCH_WINDOW_HOURS ?? 24);
+  // FIND-014 closure (whole-system-audit doc 10): cap on how many
+  // audit.actions rows to replay each tick. 0 disables the chain
+  // verify pass entirely. Default = 10 000 — enough to catch a tamper
+  // attempt within a few hours of insertion on a typical traffic
+  // profile without dominating the tick budget.
+  const verifyRows = Number(process.env.AUDIT_WATCH_CHAIN_VERIFY_ROWS ?? 10_000);
 
   let stopping = false;
   registerShutdown('watch-loop', () => {
     stopping = true;
   });
 
-  logger.info({ intervalMs, windowHours, ruleVersion: RULE_VERSION }, 'worker-audit-watch-ready');
+  // Cursor for the chain-verify pass — advances per successful tick so
+  // we don't re-verify the same prefix forever. On startup we seed it
+  // from the tail to keep the first tick cheap; the architect can set
+  // AUDIT_WATCH_CHAIN_VERIFY_FROM=1 to force a full-history sweep at
+  // restart.
+  let verifyCursor: bigint = process.env.AUDIT_WATCH_CHAIN_VERIFY_FROM
+    ? BigInt(process.env.AUDIT_WATCH_CHAIN_VERIFY_FROM)
+    : await (async (): Promise<bigint> => {
+        const tail = await chain.tail();
+        if (!tail) return 1n;
+        const window = BigInt(verifyRows);
+        return tail.seq > window ? BigInt(tail.seq) - window + 1n : 1n;
+      })();
+
+  logger.info(
+    {
+      intervalMs,
+      windowHours,
+      verifyRows,
+      verifyCursor: verifyCursor.toString(),
+      ruleVersion: RULE_VERSION,
+    },
+    'worker-audit-watch-ready',
+  );
 
   while (!stopping) {
     try {
@@ -99,7 +124,57 @@ async function main(): Promise<void> {
         await persistAlert(anomalyRepo, a);
       }
 
-      // Audit-of-audit — every detection cycle is itself logged.
+      // FIND-014 closure: replay a window of the global hash chain so
+      // tampering — a malicious or buggy UPDATE on audit.actions — does
+      // not slip past the audit-of-audit loop.
+      //
+      // HashChain.verify() throws on the first divergence with a
+      // HashChainBrokenError; we catch it here, surface a fatal
+      // `audit.hash_chain_break` row, and let the loop continue (the
+      // operator must intervene; the next tick will keep emitting the
+      // break event so silence cannot be confused with "all clear").
+      let verifyChecked = 0;
+      let verifyBreak: string | null = null;
+      if (verifyRows > 0) {
+        const tail = await chain.tail();
+        if (tail) {
+          const to = BigInt(tail.seq);
+          const from = verifyCursor;
+          if (to >= from) {
+            const end = to - from + 1n > BigInt(verifyRows) ? from + BigInt(verifyRows) - 1n : to;
+            try {
+              verifyChecked = await chain.verify(Number(from), Number(end));
+              verifyCursor = end + 1n;
+              if (verifyCursor > to) verifyCursor = to + 1n;
+            } catch (err) {
+              verifyBreak = err instanceof Error ? err.message : String(err);
+              await chain.append({
+                action: 'audit.hash_chain_break',
+                actor: 'system:worker-audit-watch',
+                subject_kind: 'system',
+                subject_id: 'audit-watch',
+                payload: {
+                  from_seq: from.toString(),
+                  to_seq: end.toString(),
+                  error: verifyBreak,
+                  rule_version: RULE_VERSION,
+                },
+              });
+              logger.error(
+                { from: from.toString(), to: end.toString(), err: verifyBreak },
+                'audit-chain-break-detected; operator intervention required',
+              );
+              // Do NOT advance the cursor on break — keep replaying
+              // this window until the operator fixes or accepts the
+              // divergence (and bumps AUDIT_WATCH_CHAIN_VERIFY_FROM).
+            }
+          }
+        }
+      }
+
+      // Audit-of-audit — every detection cycle is itself logged with
+      // the chain-verify stats so a reader can confirm the integrity
+      // pass actually ran (not just the anomaly rules).
       await chain.append({
         action: 'audit.hash_chain_verified',
         actor: 'system:worker-audit-watch',
@@ -110,11 +185,19 @@ async function main(): Promise<void> {
           window_hours: windowHours,
           events_scanned: events.length,
           alerts_emitted: alerts.length,
+          chain_rows_verified: verifyChecked,
+          chain_break: verifyBreak,
         },
       });
 
       logger.info(
-        { events: events.length, alerts: alerts.length, ruleVersion: RULE_VERSION },
+        {
+          events: events.length,
+          alerts: alerts.length,
+          ruleVersion: RULE_VERSION,
+          chainRowsVerified: verifyChecked,
+          chainCursor: verifyCursor.toString(),
+        },
         'audit-watch-tick',
       );
     } catch (err) {

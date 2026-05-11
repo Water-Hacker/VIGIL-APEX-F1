@@ -2,15 +2,17 @@
   "name": "dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "VIGIL APEX dashboard \u2014 operator + council + public verify + tip portal (Next.js 14).",
+  "description": "VIGIL APEX dashboard — operator + council + public verify + tip portal (Next.js 14).",
   "license": "UNLICENSED",
   "scripts": {
+    "prebuild": "tsx ../../scripts/check-rbac-coverage.ts",
     "build": "next build",
     "dev": "next dev -p 3000",
     "start": "next start -p 3000",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "check:rbac-coverage": "tsx ../../scripts/check-rbac-coverage.ts",
     "clean": "rimraf .next .turbo"
   },
   "dependencies": {
