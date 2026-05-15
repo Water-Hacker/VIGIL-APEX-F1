@@ -19,7 +19,10 @@ export const finding = findingSchema.table(
     id: uuid('id').primaryKey().notNull(),
     state: text('state').notNull().default('detected'),
     primary_entity_id: uuid('primary_entity_id'),
-    related_entity_ids: uuid('related_entity_ids').array().notNull().default(sql`ARRAY[]::uuid[]`),
+    related_entity_ids: uuid('related_entity_ids')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::uuid[]`),
     amount_xaf: bigint('amount_xaf', { mode: 'number' }),
     region: text('region'),
     severity: text('severity').notNull().default('low'),
@@ -36,12 +39,19 @@ export const finding = findingSchema.table(
     council_voted_at: timestamp('council_voted_at', { withTimezone: true }),
     council_yes_votes: integer('council_yes_votes').notNull().default(0),
     council_no_votes: integer('council_no_votes').notNull().default(0),
-    council_recused_addresses: text('council_recused_addresses').array().notNull().default(sql`ARRAY[]::text[]`),
+    council_recused_addresses: text('council_recused_addresses')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
     closed_at: timestamp('closed_at', { withTimezone: true }),
     closure_reason: text('closure_reason'),
     // DECISION-010
     recommended_recipient_body: text('recommended_recipient_body'),
     primary_pattern_id: text('primary_pattern_id'),
+    // Hardening mode 2.8 — optimistic-lock counter for setPosterior /
+    // setState / setCounterEvidence / setRecommendedRecipientBody.
+    // See migration 0017_finding_revision.sql for rationale.
+    revision: bigint('revision', { mode: 'number' }).notNull().default(0),
   },
   (t) => ({
     stateIdx: index('finding_state_idx').on(t.state),
@@ -64,7 +74,9 @@ export const signal = findingSchema.table(
     evidence_event_ids: uuid('evidence_event_ids').array().notNull(),
     evidence_document_cids: text('evidence_document_cids').array().notNull(),
     contributed_at: timestamp('contributed_at', { withTimezone: true }).notNull().defaultNow(),
-    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    metadata: jsonb('metadata')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
   },
   (t) => ({
     findingIdx: index('signal_finding_idx').on(t.finding_id),

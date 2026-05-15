@@ -264,6 +264,20 @@ export const dbPoolWaiting = new Gauge({
 });
 
 /**
+ * Hardening mode 2.8 — optimistic-lock CAS conflict counter. Incremented
+ * every time a repo setter that received `expectedRevision` finds the
+ * row's actual revision did not match (concurrent writer detected). The
+ * caller surfaces the conflict via `CasConflictError`; the metric makes
+ * the contention visible to operators even when callers retry silently.
+ */
+export const repoCasConflictTotal = new Counter({
+  name: 'vigil_repo_cas_conflict_total',
+  help: 'Optimistic-lock CAS conflicts detected by repo setters (mode 2.8)',
+  labelNames: ['repo', 'fn'] as const,
+  registers: [registry],
+});
+
+/**
  * In-flight gauge for adaptive concurrency (D9). Each worker reports its
  * own slot count.
  */

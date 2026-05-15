@@ -1,9 +1,36 @@
+import { repoCasConflictTotal } from '@vigil/observability';
 import { Constants } from '@vigil/shared';
 import { and, desc, eq, gte, ne, or, sql } from 'drizzle-orm';
 
 import * as findingSchema from '../schema/finding.js';
 
 import type { Db } from '../client.js';
+
+/**
+ * Hardening mode 2.8 — typed CAS conflict for repo setters that accept
+ * `expectedRevision`. Callers MUST catch this and either retry with a
+ * fresh read or fail the operation; never assume the write succeeded.
+ *
+ * The metric `vigil_repo_cas_conflict_total{repo,fn}` is incremented on
+ * every throw so operators can see contention pressure even when callers
+ * retry silently.
+ */
+export class CasConflictError extends Error {
+  readonly code = 'CAS_CONFLICT';
+
+  constructor(
+    public readonly repo: string,
+    public readonly fn: string,
+    public readonly id: string,
+    public readonly expectedRevision: number,
+  ) {
+    super(
+      `CAS conflict in ${repo}.${fn}(${id}): expected revision ${expectedRevision} ` +
+        `but row revision differs (concurrent writer detected). Caller must refetch and retry.`,
+    );
+    this.name = 'CasConflictError';
+  }
+}
 
 export class FindingRepo {
   constructor(private readonly db: Db) {}
@@ -73,28 +100,44 @@ export class FindingRepo {
     });
   }
 
-  async setPosterior(id: string, posterior: number): Promise<void> {
-    await this.db
-      .update(findingSchema.finding)
-      .set({ posterior, last_signal_at: new Date() })
-      .where(eq(findingSchema.finding.id, id));
+  /**
+   * Hardening mode 2.8 — all setters now accept an OPTIONAL
+   * `expectedRevision` and increment the `revision` column on every
+   * write. Callers that pass `expectedRevision` get CAS semantics:
+   * mismatch throws `CasConflictError`, no write happens. Callers
+   * that omit it continue with last-write-wins (backward compat).
+   *
+   * Returns the new revision so the caller can chain another CAS write.
+   */
+  async setPosterior(id: string, posterior: number, expectedRevision?: number): Promise<number> {
+    return this.casUpdate('setPosterior', id, expectedRevision, {
+      posterior,
+      last_signal_at: new Date(),
+    });
   }
 
-  async setCounterEvidence(id: string, text: string, nextState: string = 'review'): Promise<void> {
-    await this.db
-      .update(findingSchema.finding)
-      .set({ counter_evidence: text, state: nextState })
-      .where(eq(findingSchema.finding.id, id));
+  async setCounterEvidence(
+    id: string,
+    text: string,
+    nextState: string = 'review',
+    expectedRevision?: number,
+  ): Promise<number> {
+    return this.casUpdate('setCounterEvidence', id, expectedRevision, {
+      counter_evidence: text,
+      state: nextState,
+    });
   }
 
-  async setState(id: string, state: string, closure_reason?: string): Promise<void> {
-    await this.db
-      .update(findingSchema.finding)
-      .set({
-        state,
-        ...(closure_reason !== undefined && { closure_reason, closed_at: new Date() }),
-      })
-      .where(eq(findingSchema.finding.id, id));
+  async setState(
+    id: string,
+    state: string,
+    closure_reason?: string,
+    expectedRevision?: number,
+  ): Promise<number> {
+    return this.casUpdate('setState', id, expectedRevision, {
+      state,
+      ...(closure_reason !== undefined && { closure_reason, closed_at: new Date() }),
+    });
   }
 
   /** DECISION-010 — set / refresh the auto-recommended recipient body and
@@ -103,14 +146,50 @@ export class FindingRepo {
     id: string,
     recommended: string,
     primaryPatternId: string | null,
-  ): Promise<void> {
-    await this.db
+    expectedRevision?: number,
+  ): Promise<number> {
+    return this.casUpdate('setRecommendedRecipientBody', id, expectedRevision, {
+      recommended_recipient_body: recommended,
+      ...(primaryPatternId !== null && { primary_pattern_id: primaryPatternId }),
+    });
+  }
+
+  /**
+   * Internal CAS-aware update helper. ALL setter mutations flow through
+   * here so the revision-increment + CAS-check contract is uniform.
+   */
+  private async casUpdate(
+    fn: string,
+    id: string,
+    expectedRevision: number | undefined,
+    columns: Record<string, unknown>,
+  ): Promise<number> {
+    const whereExpectedRevision =
+      expectedRevision !== undefined
+        ? and(
+            eq(findingSchema.finding.id, id),
+            eq(findingSchema.finding.revision, expectedRevision),
+          )
+        : eq(findingSchema.finding.id, id);
+
+    const result = await this.db
       .update(findingSchema.finding)
       .set({
-        recommended_recipient_body: recommended,
-        ...(primaryPatternId !== null && { primary_pattern_id: primaryPatternId }),
+        ...columns,
+        revision: sql`${findingSchema.finding.revision} + 1`,
       })
-      .where(eq(findingSchema.finding.id, id));
+      .where(whereExpectedRevision)
+      .returning({ revision: findingSchema.finding.revision });
+
+    if (expectedRevision !== undefined && result.length === 0) {
+      repoCasConflictTotal.inc({ repo: 'FindingRepo', fn });
+      throw new CasConflictError('FindingRepo', fn, id, expectedRevision);
+    }
+    // result.length === 0 with no expectedRevision: row doesn't exist.
+    // Preserve legacy behaviour (silent no-op) — changing this would
+    // break callers that intentionally race on a finding being created.
+    // Callers that care can pass expectedRevision and get CAS semantics.
+    return result[0]?.revision ?? -1;
   }
 
   /**
