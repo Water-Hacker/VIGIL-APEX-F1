@@ -3961,7 +3961,7 @@ commit: fd38e2c
 
 ## DECISION-020 DL380 cluster hardware tier — AI / Security Node spec
 
-**Status:** FINAL (procurement intent).
+**Status:** FINAL (procurement intent). (AUDIT-071)
 
 **Date:** 2026-05-15.
 
@@ -3979,7 +3979,7 @@ before first local-LLM call (model-poisoning + signed-weights surface).
 Full rationale + procurement order-of-events + re-open triggers in
 `decision-020-dl380-ai-security-tier.md`.
 
-commit: PENDING
+commit: c3920d1
 
 ---
 
