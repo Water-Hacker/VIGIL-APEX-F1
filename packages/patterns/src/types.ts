@@ -13,7 +13,48 @@ export type PatternStatus = 'shadow' | 'live' | 'deprecated';
 
 export interface PatternDef<TSubject = SubjectInput> {
   readonly id: Ids.PatternId;
-  readonly category: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
+  /**
+   * Pattern category — extended 2026-05-14 per FRONTIER-AUDIT Layer-1
+   * E1.1 closure. Original Cameroon-tuned A–H joined by I–P sourced
+   * from verified international bodies (ACFE, FATF, OECD, World Bank
+   * INT, EITI, etc). See category-{i..p}/README.md for source citations.
+   */
+  readonly category:
+    | 'A'
+    | 'B'
+    | 'C'
+    | 'D'
+    | 'E'
+    | 'F'
+    | 'G'
+    | 'H'
+    | 'I'
+    | 'J'
+    | 'K'
+    | 'L'
+    | 'M'
+    | 'N'
+    | 'O'
+    | 'P';
+  /**
+   * Citation to the verified body that published the underlying
+   * typology. Helps an external reviewer trace pattern provenance.
+   * `CMR_DOMAIN` = architect-derived Cameroon-specific pattern with
+   * no single external-body citation (the original A–H).
+   */
+  readonly source_body?:
+    | 'ACFE'
+    | 'FATF'
+    | 'OECD'
+    | 'WORLD_BANK_INT'
+    | 'EITI'
+    | 'WOLFSBERG'
+    | 'UNODC'
+    | 'OCCRP'
+    | 'EGMONT'
+    | 'INTERPOL'
+    | 'TRANSPARENCY_INTERNATIONAL'
+    | 'CMR_DOMAIN';
   readonly subjectKinds: ReadonlyArray<'Tender' | 'Company' | 'Person' | 'Project' | 'Payment'>;
   readonly title_fr: string;
   readonly title_en: string;
@@ -48,12 +89,18 @@ export interface SubjectInput {
 
 export interface PatternContext {
   readonly now: Date;
-  readonly logger: { info: (m: string, c?: unknown) => void; warn: (m: string, c?: unknown) => void };
+  readonly logger: {
+    info: (m: string, c?: unknown) => void;
+    warn: (m: string, c?: unknown) => void;
+  };
   /** Read-only DB / graph handles, scoped to this pattern's needs. */
   readonly graph: PatternGraphReader;
 }
 
 export interface PatternGraphReader {
   /** Cypher single-row read. */
-  cypher<T extends Record<string, unknown>>(query: string, params?: Record<string, unknown>): Promise<T[]>;
+  cypher<T extends Record<string, unknown>>(
+    query: string,
+    params?: Record<string, unknown>,
+  ): Promise<T[]>;
 }

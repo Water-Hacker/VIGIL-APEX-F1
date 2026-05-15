@@ -16,5 +16,6 @@ export * as Constants from './constants.js';
 export * as Result from './result.js';
 export * as Routing from './routing/index.js';
 export * as TipSanitise from './tip-sanitise.js';
+export * as Calibration from './calibration/index.js';
 
 export type { Brand, DeepReadonly, Json, JsonObject, Nullable, Optional } from './types.js';

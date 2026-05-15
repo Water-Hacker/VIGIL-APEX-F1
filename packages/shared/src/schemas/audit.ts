@@ -90,6 +90,21 @@ export const zAuditAction = z.enum([
   'tip.promoted_to_finding',
   'tip.dismissed',
   'tip.decrypted',
+  // FRONTIER-AUDIT E1.4 — multi-channel ingestion. Emitted by
+  // worker-tip-channels after a USSD / SMS / voice tip has been
+  // encrypted, persisted, and assigned a TIP-YYYY-NNNN reference.
+  // Payload carries channel + language + ciphertext byte length only —
+  // never plaintext, never MSISDN.
+  'audit.tip_received_channel',
+  // FRONTIER-AUDIT Layer-7 — outcome feedback loop. Emitted by
+  // worker-outcome-feedback after a delivered dossier has been
+  // matched against an external operational signal (CONAC press,
+  // court ruling, ARMP debarment, ANIF bulletin, MINFI clawback).
+  'audit.dossier_outcome_matched',
+  // FRONTIER-AUDIT E1.1 third element — pattern discovery on the
+  // entity graph. Emitted by worker-pattern-discovery for each
+  // graph anomaly that exceeds the alert threshold.
+  'audit.pattern_anomaly_detected',
 
   // Calibration
   'calibration.entry_added',

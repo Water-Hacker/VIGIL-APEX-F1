@@ -49,3 +49,57 @@ import './category-g/p-g-004-font-anomaly.js';
 import './category-h/p-h-001-award-before-tender-close.js';
 import './category-h/p-h-002-amendment-out-of-sequence.js';
 import './category-h/p-h-003-holiday-publication-burst.js';
+
+// ─── Category I — ACFE asset misappropriation (8 patterns) ───
+import './category-i/p-i-001-shell-vendor-billing.js';
+import './category-i/p-i-002-personal-purchases.js';
+import './category-i/p-i-003-ghost-employee.js';
+import './category-i/p-i-004-falsified-wages.js';
+import './category-i/p-i-005-fictitious-expense.js';
+import './category-i/p-i-006-cash-skimming.js';
+import './category-i/p-i-007-cash-larceny.js';
+import './category-i/p-i-008-inventory-misappropriation.js';
+
+// ─── Category J — ACFE financial statement fraud (5 patterns) ───
+import './category-j/p-j-001-premature-revenue.js';
+import './category-j/p-j-002-overstated-assets.js';
+import './category-j/p-j-003-concealed-liabilities.js';
+import './category-j/p-j-004-expense-capitalisation.js';
+import './category-j/p-j-005-related-party-undisclosed.js';
+
+// ─── Category K — FATF trade-based money laundering (6 patterns) ───
+import './category-k/p-k-001-over-invoicing.js';
+import './category-k/p-k-002-under-invoicing.js';
+import './category-k/p-k-003-multiple-invoicing.js';
+import './category-k/p-k-004-phantom-shipment.js';
+import './category-k/p-k-005-misclassification.js';
+import './category-k/p-k-006-round-trip-trade.js';
+
+// ─── Category L — OECD foreign bribery (5 patterns) ───
+import './category-l/p-l-001-third-party-agent.js';
+import './category-l/p-l-002-inflated-agent-fee.js';
+import './category-l/p-l-003-offshore-consultancy.js';
+import './category-l/p-l-004-pre-award-gift.js';
+import './category-l/p-l-005-revolving-door.js';
+
+// ─── Category M — World Bank INT procurement collusion (4 patterns) ───
+import './category-m/p-m-001-bid-rotation.js';
+import './category-m/p-m-002-bid-suppression.js';
+import './category-m/p-m-003-complementary-bidding.js';
+import './category-m/p-m-004-market-allocation.js';
+
+// ─── Category N — Beneficial ownership layering (4 patterns) ───
+import './category-n/p-n-001-nominee-chain-depth.js';
+import './category-n/p-n-002-recent-ubo-change.js';
+import './category-n/p-n-003-haven-no-substance.js';
+import './category-n/p-n-004-control-via-class-shares.js';
+
+// ─── Category O — Extractive sector (3 patterns) ───
+import './category-o/p-o-001-concession-no-eia.js';
+import './category-o/p-o-002-oil-block-pep.js';
+import './category-o/p-o-003-favourable-psc-rate.js';
+
+// ─── Category P — Post-award personal enrichment (3 patterns) ───
+import './category-p/p-p-001-property-flip-official.js';
+import './category-p/p-p-002-family-land-transfer.js';
+import './category-p/p-p-003-real-estate-concurrent.js';

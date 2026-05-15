@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   date,
   index,
   integer,
@@ -35,7 +36,9 @@ export const dossier = dossierSchema.table(
     recipient_body_name: text('recipient_body_name').notNull().default('CONAC'),
     recipient_case_reference: text('recipient_case_reference'),
     manifest_hash: text('manifest_hash'),
-    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    metadata: jsonb('metadata')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
   },
   (t) => ({
     refUnique: unique('dossier_ref_unique').on(t.ref, t.language),
@@ -78,6 +81,41 @@ export const routingDecision = dossierSchema.table(
   },
   (t) => ({
     findingIdx: index('routing_decision_finding_idx').on(t.finding_id, t.decided_at),
+  }),
+);
+
+/**
+ * FRONTIER-AUDIT Layer-7 — outcome feedback. One row per
+ * (signal_id, dossier_id) high-confidence match produced by
+ * worker-outcome-feedback. Operators see the trail in the dashboard;
+ * calibration uses it to refine pattern priors. Migration 0015.
+ */
+export const dossierOutcome = dossierSchema.table(
+  'dossier_outcome',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    dossier_id: uuid('dossier_id').notNull(),
+    dossier_ref: text('dossier_ref').notNull(),
+    signal_id: text('signal_id').notNull(),
+    signal_source: text('signal_source').notNull(),
+    signal_kind: text('signal_kind').notNull(),
+    signal_date: timestamp('signal_date', { withTimezone: true }).notNull(),
+    match_score: numeric('match_score', { precision: 5, scale: 4 }).notNull(),
+    entity_overlap: numeric('entity_overlap', { precision: 5, scale: 4 }).notNull(),
+    temporal_proximity: numeric('temporal_proximity', { precision: 5, scale: 4 }).notNull(),
+    body_alignment: numeric('body_alignment', { precision: 5, scale: 4 }).notNull(),
+    category_alignment: numeric('category_alignment', { precision: 5, scale: 4 }).notNull(),
+    is_high_confidence: boolean('is_high_confidence').notNull(),
+    rationale: text('rationale').notNull(),
+    matched_at: timestamp('matched_at', { withTimezone: true }).notNull().defaultNow(),
+    audit_event_id: uuid('audit_event_id'),
+  },
+  (t) => ({
+    signalDossierUnique: unique('dossier_outcome_signal_dossier_unique').on(
+      t.signal_id,
+      t.dossier_id,
+    ),
+    dossierIdx: index('dossier_outcome_dossier_idx').on(t.dossier_id, t.matched_at.desc()),
   }),
 );
 

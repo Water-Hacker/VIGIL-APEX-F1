@@ -1,0 +1,46 @@
+import { Ids, type Schemas } from '@vigil/shared';
+
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
+import { matched, notMatched } from '../_pattern-helpers.js';
+import { registerPattern } from '../registry.js';
+
+import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
+
+const PID = Ids.asPatternId('P-I-008');
+const definition: PatternDef = {
+  id: PID,
+  category: 'I',
+  source_body: 'ACFE',
+  subjectKinds: ['Project', 'Tender'],
+  title_fr: "Détournement d'inventaire / actifs non monétaires",
+  title_en: 'Inventory / non-cash misappropriation',
+  description_fr:
+    "Écart matériel entre l'inventaire déclaré et l'inventaire physique post-livraison. Typologie ACFE.",
+  description_en:
+    'Material gap between declared inventory and post-delivery physical count. ACFE typology.',
+  defaultPrior: 0.05,
+  defaultWeight: 0.5,
+  status: 'live',
+  async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
+    const shrinkage = readNumericWithFallback(
+      subject,
+      'inventory_shrinkage_ratio',
+      'inventory_shrinkage_ratio',
+      ['audit_observation', 'company_filing'],
+    );
+    if (shrinkage.value < 0.1) {
+      return notMatched(PID, `shrinkage=${shrinkage.value} < 10%`);
+    }
+    const strength = Math.min(0.95, 0.5 + shrinkage.value * 1.5);
+    const ev = evidenceFrom(shrinkage.contributors);
+    return matched({
+      pattern_id: PID,
+      strength,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Inventory shrinkage of ${(shrinkage.value * 100).toFixed(1)}%.`,
+    });
+  },
+};
+registerPattern(definition);
+export default definition;

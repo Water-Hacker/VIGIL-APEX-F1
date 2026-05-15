@@ -1,0 +1,35 @@
+{
+  "name": "worker-outcome-feedback",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Layer-7 closure (FRONTIER-AUDIT) — ingests external operational signals (CONAC press releases, court filings, ARMP debarments, Tribunal Suprême decisions), matches them against delivered dossiers, derives per-recipient-body backlog estimates, and emits outcome rows so the platform can measure whether its delivered findings actually produce institutional action.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "drizzle-orm": "^0.34.0",
+    "pg": "^8.13.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/pg": "^8.11.10",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.9"
+  }
+}

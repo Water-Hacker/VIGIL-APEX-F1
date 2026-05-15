@@ -882,6 +882,26 @@ Per TRUTH §L:
 - F10.5 Off-jurisdiction safe-deposit-box city (overlaps F8)
 - F10.6 Format-adapter Plan B target (Cour des Comptes recommended)
 
+### F11. MINPOSTEL sovereignty (FRONTIER-AUDIT Layer 8)
+
+Sovereignty over the platform's network identity cannot be closed from
+the build seat. The agent cannot file forms, sign contracts, or contact
+state agencies on the architect's behalf.
+
+- F11.1 Engagement letter draft to MINPOSTEL (agent can draft per EXEC §11)
+- F11.2 ASN delegation request with RIPE-NCC custodianship as fallback
+- F11.3 Counsel review of state-vs-private-host implications
+- F11.4 Hosting-failover plan if MINPOSTEL declines
+
+### F12. FRONTIER-AUDIT E1.5 — Council enrolment (institutional only)
+
+The FRONTIER-AUDIT closure log marks E1.5 as institutional-only; this is
+the same body of work as F1 above, surfaced here for the audit's
+traceability. The code-side prerequisites (RBAC, WebAuthn enrolment
+endpoints, Shamir share storage, hardware-key provisioning helpers) are
+all green; only the institutional act of naming, vetting, and enrolling
+the five pillar holders remains, and that act is architect work.
+
 ---
 
 ## Execution order
