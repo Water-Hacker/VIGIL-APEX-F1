@@ -14,7 +14,8 @@ import {
  *
  * mintAuthProof + verifyAuthProof together let downstream API routes
  * and server components refuse identity headers that didn't come
- * through middleware. The tests below lock the contract.
+ * through middleware. The tests below lock the contract. The primitive
+ * is async (Web Crypto API) so it runs in both Node and Edge Runtime.
  */
 
 const KEY = 'test-signing-key-not-for-production';
@@ -33,7 +34,7 @@ function makeHeaders(rec: Record<string, string>): { get(name: string): string |
 }
 
 describe('auth-proof primitive (mode 4.3)', () => {
-  it('mint + verify round-trips on identical input', () => {
+  it('mint + verify round-trips on identical input', async () => {
     const ts = 1_700_000_000_000;
     const input = {
       actor: 'user-abc',
@@ -43,7 +44,7 @@ describe('auth-proof primitive (mode 4.3)', () => {
       requestId: 'req-xyz',
       timestampMs: ts,
     };
-    const proof = mintAuthProof(input, KEY);
+    const proof = await mintAuthProof(input, KEY);
 
     const headers = makeHeaders({
       [AUTH_PROOF_HEADER]: proof,
@@ -55,16 +56,16 @@ describe('auth-proof primitive (mode 4.3)', () => {
       'x-vigil-roles-resource': 'auditor',
     });
 
-    const r = verifyAuthProof(headers, { key: KEY, nowMs: ts + 1_000 });
+    const r = await verifyAuthProof(headers, { key: KEY, nowMs: ts + 1_000 });
     expect(r.ok).toBe(true);
     expect(r.actor).toBe('user-abc');
     expect(r.rolesRealm).toEqual(['operator']);
     expect(r.rolesResource).toEqual(['auditor']);
   });
 
-  it('REJECTS a proof when the actor header is tampered with', () => {
+  it('REJECTS a proof when the actor header is tampered with', async () => {
     const ts = 1_700_000_000_000;
-    const proof = mintAuthProof(
+    const proof = await mintAuthProof(
       {
         actor: 'user-abc',
         username: null,
@@ -83,14 +84,14 @@ describe('auth-proof primitive (mode 4.3)', () => {
       'x-vigil-user': 'attacker-spoofed', // tampered!
       'x-vigil-roles-realm': 'operator',
     });
-    const r = verifyAuthProof(headers, { key: KEY, nowMs: ts });
+    const r = await verifyAuthProof(headers, { key: KEY, nowMs: ts });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('mismatch');
   });
 
-  it('REJECTS a proof when a role is added/removed', () => {
+  it('REJECTS a proof when a role is added/removed', async () => {
     const ts = 1_700_000_000_000;
-    const proof = mintAuthProof(
+    const proof = await mintAuthProof(
       {
         actor: 'user-abc',
         username: null,
@@ -110,14 +111,14 @@ describe('auth-proof primitive (mode 4.3)', () => {
       'x-vigil-user': 'user-abc',
       'x-vigil-roles-realm': 'operator,architect',
     });
-    const r = verifyAuthProof(headers, { key: KEY, nowMs: ts });
+    const r = await verifyAuthProof(headers, { key: KEY, nowMs: ts });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('mismatch');
   });
 
-  it('REJECTS a stale proof (outside the freshness window)', () => {
+  it('REJECTS a stale proof (outside the freshness window)', async () => {
     const ts = 1_700_000_000_000;
-    const proof = mintAuthProof(
+    const proof = await mintAuthProof(
       {
         actor: 'user-abc',
         username: null,
@@ -138,14 +139,14 @@ describe('auth-proof primitive (mode 4.3)', () => {
     });
 
     // 10 minutes later — outside the default 5-minute window.
-    const r = verifyAuthProof(headers, { key: KEY, nowMs: ts + 10 * 60 * 1_000 });
+    const r = await verifyAuthProof(headers, { key: KEY, nowMs: ts + 10 * 60 * 1_000 });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('stale');
   });
 
-  it('REJECTS a future-dated proof (clock-skew or adversarial pre-mint)', () => {
+  it('REJECTS a future-dated proof (clock-skew or adversarial pre-mint)', async () => {
     const ts = 1_700_000_000_000;
-    const proof = mintAuthProof(
+    const proof = await mintAuthProof(
       {
         actor: 'user-abc',
         username: null,
@@ -166,32 +167,32 @@ describe('auth-proof primitive (mode 4.3)', () => {
 
     // Verify with `now` set 1 minute BEFORE the proof was minted.
     // 10s skew tolerance < 60s offset → rejected.
-    const r = verifyAuthProof(headers, { key: KEY, nowMs: ts - 60_000 });
+    const r = await verifyAuthProof(headers, { key: KEY, nowMs: ts - 60_000 });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('stale');
   });
 
-  it('returns missing-proof when the AUTH_PROOF_HEADER is absent', () => {
+  it('returns missing-proof when the AUTH_PROOF_HEADER is absent', async () => {
     const headers = makeHeaders({
       [AUTH_PROOF_TS_HEADER]: String(Date.now()),
       'x-vigil-user': 'user-abc',
     });
-    const r = verifyAuthProof(headers, { key: KEY });
+    const r = await verifyAuthProof(headers, { key: KEY });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('missing-proof');
   });
 
-  it('returns missing-timestamp when AUTH_PROOF_TS_HEADER is absent', () => {
+  it('returns missing-timestamp when AUTH_PROOF_TS_HEADER is absent', async () => {
     const headers = makeHeaders({
       [AUTH_PROOF_HEADER]: 'a'.repeat(64),
       'x-vigil-user': 'user-abc',
     });
-    const r = verifyAuthProof(headers, { key: KEY });
+    const r = await verifyAuthProof(headers, { key: KEY });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('missing-timestamp');
   });
 
-  it('returns missing-key when no signing key is configured (env unset and not passed)', () => {
+  it('returns missing-key when no signing key is configured (env unset and not passed)', async () => {
     // Ensure env is clean for this assertion.
     const prior = process.env.VIGIL_AUTH_PROOF_KEY;
     delete process.env.VIGIL_AUTH_PROOF_KEY;
@@ -200,7 +201,7 @@ describe('auth-proof primitive (mode 4.3)', () => {
         [AUTH_PROOF_HEADER]: 'a'.repeat(64),
         [AUTH_PROOF_TS_HEADER]: String(Date.now()),
       });
-      const r = verifyAuthProof(headers);
+      const r = await verifyAuthProof(headers);
       expect(r.ok).toBe(false);
       expect(r.reason).toBe('missing-key');
     } finally {
@@ -208,9 +209,9 @@ describe('auth-proof primitive (mode 4.3)', () => {
     }
   });
 
-  it('role-list ordering does NOT change the proof (canonical sort)', () => {
+  it('role-list ordering does NOT change the proof (canonical sort)', async () => {
     const ts = 1_700_000_000_000;
-    const p1 = mintAuthProof(
+    const p1 = await mintAuthProof(
       {
         actor: 'a',
         username: null,
@@ -221,7 +222,7 @@ describe('auth-proof primitive (mode 4.3)', () => {
       },
       KEY,
     );
-    const p2 = mintAuthProof(
+    const p2 = await mintAuthProof(
       {
         actor: 'a',
         username: null,
@@ -235,11 +236,11 @@ describe('auth-proof primitive (mode 4.3)', () => {
     expect(p1).toBe(p2);
   });
 
-  it('mintAuthProof THROWS when no key is configured and none passed', () => {
+  it('mintAuthProof REJECTS when no key is configured and none passed', async () => {
     const prior = process.env.VIGIL_AUTH_PROOF_KEY;
     delete process.env.VIGIL_AUTH_PROOF_KEY;
     try {
-      expect(() =>
+      await expect(
         mintAuthProof({
           actor: 'a',
           username: null,
@@ -248,7 +249,7 @@ describe('auth-proof primitive (mode 4.3)', () => {
           requestId: 'r',
           timestampMs: Date.now(),
         }),
-      ).toThrow(/VIGIL_AUTH_PROOF_KEY/);
+      ).rejects.toThrow(/VIGIL_AUTH_PROOF_KEY/);
     } finally {
       if (prior !== undefined) process.env.VIGIL_AUTH_PROOF_KEY = prior;
     }
@@ -262,7 +263,7 @@ describe('auth-proof primitive (mode 4.3)', () => {
     expect(id1).not.toBe(id2);
   });
 
-  it('uses constant-time comparison (timingSafeEqual) — does not throw on length-mismatched proof', () => {
+  it('handles length-mismatched proof safely (returns mismatch, does not throw)', async () => {
     const ts = 1_700_000_000_000;
     const headers = makeHeaders({
       [AUTH_PROOF_HEADER]: 'too-short',
@@ -271,7 +272,7 @@ describe('auth-proof primitive (mode 4.3)', () => {
     });
     // Different length than a real 64-hex HMAC — must short-circuit
     // safely rather than throw, AND return mismatch (not crash).
-    const r = verifyAuthProof(headers, { key: KEY, nowMs: ts });
+    const r = await verifyAuthProof(headers, { key: KEY, nowMs: ts });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('mismatch');
   });

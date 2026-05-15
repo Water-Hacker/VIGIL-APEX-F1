@@ -288,7 +288,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   if (signingKey && payload.sub) {
     const reqId = generateRequestId();
     const ts = Date.now();
-    const proof = mintAuthProof(
+    const proof = await mintAuthProof(
       {
         actor: payload.sub,
         username: payload.preferred_username ?? null,

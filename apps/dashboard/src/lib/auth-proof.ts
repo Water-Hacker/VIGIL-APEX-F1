@@ -16,6 +16,14 @@
  * `verifyAuthProof(headers)` and refuse to proceed unless the proof
  * matches.
  *
+ * Implementation: uses Web Crypto API (`crypto.subtle.sign`) rather
+ * than `node:crypto`. Web Crypto is available in BOTH Next.js
+ * middleware (Edge Runtime) AND Node.js server components / API
+ * routes (Node 18+) — the same primitive works on both sides of the
+ * boundary. `node:crypto` would have worked on the API-route side but
+ * Next.js middleware rejects it because Edge Runtime doesn't ship
+ * Node built-ins.
+ *
  * Threat model:
  * - Adversary CAN inject HTTP headers (proxy compromise, Next.js plugin).
  * - Adversary CANNOT read the server-side HMAC key (Vault-issued at
@@ -34,8 +42,6 @@
  * operation; downstream verifiers re-read the key on each call so
  * rotation propagates without restart.
  */
-
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /** Freshness window — proofs older than this are rejected. Default 5 min. */
 const DEFAULT_MAX_AGE_MS = 5 * 60 * 1_000;
@@ -94,29 +100,75 @@ function canonicalEncoding(input: AuthProofInput): string {
   ].join('|');
 }
 
+/** Hex-encode a Uint8Array without using Node Buffer (Edge-safe). */
+function bytesToHex(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) {
+    s += bytes[i]!.toString(16).padStart(2, '0');
+  }
+  return s;
+}
+
+/** Hex-decode to Uint8Array without using Node Buffer (Edge-safe). */
+function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) throw new Error('hexToBytes: odd-length input');
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+/** Constant-time compare. Returns false if lengths differ; otherwise
+ *  scans all bytes regardless of mismatch position. */
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
+}
+
+async function importHmacKey(keyMaterial: string): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  return crypto.subtle.importKey(
+    'raw',
+    enc.encode(keyMaterial),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  );
+}
+
 /**
  * Mint a proof for the given input. Returns the hex HMAC. The caller
  * sets it as the `x-vigil-auth-proof` header. Throws if no signing key
  * is configured (callers MUST configure VIGIL_AUTH_PROOF_KEY).
+ *
+ * Async: Web Crypto's `sign` is async; the API is uniform across Edge
+ * Runtime and Node.js.
  */
-export function mintAuthProof(input: AuthProofInput, key?: string): string {
+export async function mintAuthProof(input: AuthProofInput, key?: string): Promise<string> {
   const signingKey = key ?? readSigningKey();
   if (!signingKey) {
     throw new Error(
       'mintAuthProof: VIGIL_AUTH_PROOF_KEY is unset. Production deployments must set this via the ExternalSecret projection of secret/vigil/auth-proof-key.',
     );
   }
-  const h = createHmac('sha256', signingKey);
-  h.update(canonicalEncoding(input));
-  return h.digest('hex');
+  const cryptoKey = await importHmacKey(signingKey);
+  const enc = new TextEncoder();
+  const sig = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(canonicalEncoding(input)));
+  return bytesToHex(new Uint8Array(sig));
 }
 
 /**
  * Generate a request id. 16 random bytes hex-encoded — collision-safe
- * for the lifetime of any reasonable request fleet.
+ * for the lifetime of any reasonable request fleet. Uses Web Crypto
+ * (`crypto.getRandomValues`) — Edge-safe.
  */
 export function generateRequestId(): string {
-  return randomBytes(16).toString('hex');
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
 }
 
 /**
@@ -128,14 +180,14 @@ export function generateRequestId(): string {
  * match. Returns `{ ok: true, actor, rolesRealm, rolesResource }` on
  * success.
  */
-export function verifyAuthProof(
+export async function verifyAuthProof(
   headers: { get(name: string): string | null },
   opts: {
     readonly key?: string;
     readonly nowMs?: number;
     readonly maxAgeMs?: number;
   } = {},
-): AuthProofVerifyResult {
+): Promise<AuthProofVerifyResult> {
   const signingKey = opts.key ?? readSigningKey();
   if (!signingKey) {
     return { ok: false, reason: 'missing-key' };
@@ -173,15 +225,22 @@ export function verifyAuthProof(
     timestampMs: tsMs,
   };
 
-  const expected = mintAuthProof(input, signingKey);
+  const expected = await mintAuthProof(input, signingKey);
 
-  // Constant-time compare. Both must be the same length (hex strings
-  // of equal length); otherwise we short-circuit with a mismatch.
+  // Length-mismatch short-circuits to mismatch (hex-decoding a
+  // wrong-length string is undefined behaviour for our purposes;
+  // surface as the same opaque "mismatch" reason).
   if (expected.length !== proof.length) {
     return { ok: false, reason: 'mismatch' };
   }
-  const eq = timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(proof, 'hex'));
-  if (!eq) {
+  let providedBytes: Uint8Array;
+  try {
+    providedBytes = hexToBytes(proof);
+  } catch {
+    return { ok: false, reason: 'mismatch' };
+  }
+  const expectedBytes = hexToBytes(expected);
+  if (!constantTimeEqual(expectedBytes, providedBytes)) {
     return { ok: false, reason: 'mismatch' };
   }
 
