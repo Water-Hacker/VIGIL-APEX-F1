@@ -1,6 +1,15 @@
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import {
+  AUTH_PROOF_HEADER,
+  AUTH_PROOF_TS_HEADER,
+  REQUEST_ID_HEADER,
+  generateRequestId,
+  mintAuthProof,
+  readSigningKey,
+} from './lib/auth-proof';
+
 /**
  * VIGIL APEX dashboard middleware (Phase C1).
  *
@@ -156,6 +165,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     headers.delete('x-vigil-user');
     headers.delete('x-vigil-username');
     headers.delete('x-vigil-roles');
+    headers.delete('x-vigil-roles-realm');
+    headers.delete('x-vigil-roles-resource');
+    // Mode 4.3 — same belt-and-braces strip for the auth-proof set.
+    headers.delete(AUTH_PROOF_HEADER);
+    headers.delete(AUTH_PROOF_TS_HEADER);
+    headers.delete(REQUEST_ID_HEADER);
     // Surface the path to the root layout's NavBar so the active link
     // styling works without each page passing the prop.
     headers.set('x-vigil-pathname', pathname);
@@ -231,9 +246,17 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // these without re-verifying). Strip first to defend against spoofing.
   const headers = new Headers(req.headers);
   headers.delete('x-vigil-user');
+  headers.delete('x-vigil-username');
   headers.delete('x-vigil-roles');
   headers.delete('x-vigil-roles-realm');
   headers.delete('x-vigil-roles-resource');
+  // Mode 4.3 — strip any caller-supplied proof/request-id/ts headers
+  // so an adversary can't pre-seed them with values that would be
+  // re-signed by middleware.
+  headers.delete(AUTH_PROOF_HEADER);
+  headers.delete(AUTH_PROOF_TS_HEADER);
+  headers.delete(REQUEST_ID_HEADER);
+
   if (payload.sub) headers.set('x-vigil-user', payload.sub);
   if (payload.preferred_username) {
     headers.set('x-vigil-username', payload.preferred_username);
@@ -248,6 +271,39 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // x-vigil-roles continues to carry the merged set.
   if (realm.length > 0) headers.set('x-vigil-roles-realm', realm.join(','));
   if (resource.length > 0) headers.set('x-vigil-roles-resource', resource.join(','));
+
+  // Mode 4.3 — cryptographically bind the identity-header set so
+  // downstream consumers can detect middleware bypass (Next.js plugin
+  // manipulation, proxy header injection, container-level smuggling).
+  // The HMAC binds actor + roles + request-id + timestamp under a
+  // server-side key. Downstream calls verifyAuthProof() to refuse
+  // headers that don't carry a valid proof.
+  //
+  // If the signing key is not configured (dev without
+  // VIGIL_AUTH_PROOF_KEY set), we skip minting — downstream verifiers
+  // will return `missing-key` and the operator runbook documents that
+  // the key must be configured in production. This avoids a hard
+  // dependency on Vault for local development.
+  const signingKey = readSigningKey();
+  if (signingKey && payload.sub) {
+    const reqId = generateRequestId();
+    const ts = Date.now();
+    const proof = mintAuthProof(
+      {
+        actor: payload.sub,
+        username: payload.preferred_username ?? null,
+        rolesRealm: realm,
+        rolesResource: resource,
+        requestId: reqId,
+        timestampMs: ts,
+      },
+      signingKey,
+    );
+    headers.set(REQUEST_ID_HEADER, reqId);
+    headers.set(AUTH_PROOF_TS_HEADER, String(ts));
+    headers.set(AUTH_PROOF_HEADER, proof);
+  }
+
   // Surface the path to the root layout's NavBar so active-link
   // styling works without each page passing the prop.
   headers.set('x-vigil-pathname', pathname);
