@@ -455,3 +455,95 @@ jobs:
             --set '*.cache-to=type=gha,mode=max' \
             --load
         continue-on-error: true # bake file emerges with R0.D
+
+  trivy-base-images:
+    # Hardening modes 10.7 + 10.2(a) — base-image CVE gate.
+    #
+    # Scans every base image referenced by a Dockerfile under
+    # `infra/docker/dockerfiles/` for HIGH + CRITICAL CVEs. Trivy pulls
+    # each image, inventories its OS-package + library layer, and
+    # cross-references against its CVE database. Hard fails on any HIGH
+    # or CRITICAL finding — base-image compromise (mode 10.2) and CVE
+    # drift (mode 10.7) close on this gate.
+    #
+    # The image list is enumerated dynamically by
+    # `scripts/enumerate-base-images.ts` so adding a new Dockerfile
+    # automatically extends the scan. Refresh procedure is documented in
+    # `docs/runbooks/base-image-refresh.md` (mode 10.2(c)).
+    #
+    # Digest-pinning of FROM lines (mode 10.2(b)) is deferred to Phase 12
+    # alongside the cosign chain (modes 9.8 + 9.9 + 10.8).
+    name: trivy-base-images
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Enumerate base images from Dockerfiles
+        id: enum
+        run: |
+          set -euo pipefail
+          IMAGES=$(pnpm exec tsx scripts/enumerate-base-images.ts)
+          {
+            echo 'images<<EOF'
+            echo "$IMAGES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "Will scan:"
+          echo "$IMAGES"
+      # Mirrors the gitleaks install pattern from secret-scan.yml: pinned
+      # version + sha256 checksum verify. Closes part of mode 10.3
+      # (Compromised build tool) for the trivy binary surface. When
+      # bumping the version, refresh BOTH the version string AND the
+      # sha256 below; the new checksum is at
+      # https://github.com/aquasecurity/trivy/releases/download/v$VERSION/trivy_${VERSION}_checksums.txt.
+      - name: Install Trivy (sha256-verified)
+        run: |
+          set -euo pipefail
+          TRIVY_VERSION=0.70.0
+          TRIVY_SHA256=8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
+          trivy --version
+      - name: Trivy scan each base image (HIGH + CRITICAL hard gate)
+        env:
+          IMAGES: ${{ steps.enum.outputs.images }}
+        run: |
+          set -euo pipefail
+          trivy --version
+          FAIL=0
+          # Iterate the enumerated list. `trivy image --exit-code 1`
+          # returns non-zero ONLY when a finding at the requested
+          # severity is present. Image-pull or scan-engine errors are
+          # caught separately and treated as failures — a base image
+          # we can't scan is a 10.2 signal worth surfacing.
+          while IFS= read -r IMG; do
+            [ -z "$IMG" ] && continue
+            echo "::group::trivy image $IMG"
+            if ! trivy image \
+                --quiet \
+                --severity HIGH,CRITICAL \
+                --ignore-unfixed \
+                --exit-code 1 \
+                --format table \
+                "$IMG"; then
+              echo "::endgroup::"
+              echo "::error::Trivy found HIGH or CRITICAL CVEs (or could not scan) in $IMG"
+              FAIL=$((FAIL + 1))
+            else
+              echo "::endgroup::"
+              echo "OK: $IMG"
+            fi
+          done <<< "$IMAGES"
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::Trivy gate failed for $FAIL image(s). See per-image groups above."
+            exit 1
+          fi
+          echo "Trivy gate passed for all base images."
