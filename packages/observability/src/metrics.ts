@@ -293,6 +293,21 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 6.9 — feature-flag boot audit.
+ *
+ * Set on worker boot for every env-var-driven feature toggle. Value
+ * is 1 if the flag is "truthy" (1, true, yes, on — case-insensitive)
+ * and 0 otherwise. Operators graph this to confirm the flag rollout
+ * across the fleet without grep'ing pod env vars.
+ */
+export const featureFlagState = new Gauge({
+  name: 'vigil_feature_flag_state',
+  help: 'Boot-time state of env-var-driven feature flags (1 = on, 0 = off) (mode 6.9)',
+  labelNames: ['name', 'service'] as const,
+  registers: [registry],
+});
+
+/**
  * Hardening mode 6.7 — NTP clock-skew detection.
  *
  * `scripts/ntp-check.ts` (invoked every 5 min by a systemd timer)
