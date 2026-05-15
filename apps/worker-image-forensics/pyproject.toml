@@ -7,7 +7,13 @@ license = { text = "UNLICENSED" }
 authors = [{ name = "Junior Thuram Nana", email = "satoshinakamotobull@gmail.com" }]
 
 dependencies = [
-  "vigil-common @ file:///app/packages/py-common",
+  # Resolved by name from the env. The Dockerfile installs
+  # py-common in a prior layer (PythonWorker.Dockerfile:73-74);
+  # CI installs it in a prior step (python-ci.yml: `pip install -e
+  # packages/py-common[test]` before this package). The previously
+  # hardcoded file:///app/packages/py-common URL was a latent bug;
+  # see apps/worker-satellite/pyproject.toml for the equivalent fix.
+  "vigil-common",
   "opencv-python-headless>=4.10.0,<5",
   "scikit-image>=0.24.0,<1",
   "Pillow>=10.4.0,<11",

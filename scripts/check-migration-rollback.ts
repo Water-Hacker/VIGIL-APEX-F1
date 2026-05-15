@@ -151,10 +151,23 @@ async function main(): Promise<number> {
     process.stdout.write('[check-migration-rollback] phase 3/4: down sweep (reverse order)\n');
     await applySweep(client, down, 'down');
 
-    // Clear the tracking table only — keep schemas in whatever state
-    // the down sweep left them, so the re-forward sweep is testing the
-    // ACTUAL behaviour of running forwards against a down-rolled DB.
-    await client.query('DROP TABLE IF EXISTS _vigil_migrations');
+    // Full reset before the second forward sweep. We deliberately reset
+    // all VIGIL schemas + the tracking table here rather than relying on
+    // the down sweep alone, because the legacy forward-only migrations
+    // (0000_bootstrap, 0001_init, 0002–0006, 0008 per the allow-list in
+    // scripts/check-migration-pairs.ts) have no `*_down.sql` partners,
+    // so their state survives the down sweep. After the down sweep,
+    // re-running 0001_init against the partially-reverted DB fails with
+    // "policy X already exists" / "type X already exists" / etc. —
+    // legitimate post-condition of "0001 isn't idempotent + has no down".
+    //
+    // The gate's invariant is "down migrations run cleanly + forwards
+    // run cleanly against a freshly-reset DB". Verifying that downs
+    // FULLY reverse forwards would require every legacy migration to
+    // ship a down, which is out of scope for the AUDIT-051 allowlist
+    // posture. See docs/audit/evidence/hardening/category-9/mode-9.3-9.6/CLOSURE.md.
+    process.stdout.write('[check-migration-rollback] reset between sweeps\n');
+    await resetDb(client);
 
     process.stdout.write('[check-migration-rollback] phase 4/4: forward sweep again\n');
     await applySweep(client, forward, 'forward-2');

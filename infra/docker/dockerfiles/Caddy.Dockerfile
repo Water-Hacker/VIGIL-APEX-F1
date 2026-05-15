@@ -1,9 +1,9 @@
 # Custom Caddy build with the rate-limit module compiled in.
 # Pinned digest discipline per SRD §3.4 — the operator updates the digest
 # in this file and the SBOM scanner re-runs.
-FROM caddy:2.8-builder AS builder
+FROM caddy:2.11.3-builder AS builder
 RUN xcaddy build \
     --with github.com/mholt/caddy-ratelimit
 
-FROM caddy:2.8-alpine
+FROM caddy:2.11.3-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy

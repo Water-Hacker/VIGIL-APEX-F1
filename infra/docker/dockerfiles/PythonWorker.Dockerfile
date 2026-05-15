@@ -11,7 +11,7 @@
 #   APP_MODULE — Python module to launch, e.g. vigil_satellite.main
 #   EXTRA_APT  — space-separated apt packages required at runtime (e.g. tesseract-ocr)
 
-ARG PYTHON_VERSION=3.12.6
+ARG PYTHON_VERSION=3.12.13
 
 # ============================================================================
 # Stage 1 — base

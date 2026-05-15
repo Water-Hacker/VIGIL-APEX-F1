@@ -3,7 +3,7 @@
 # Multi-stage; runtime is distroless / minimal Alpine.
 
 # Stage 1 — deps
-FROM node:20.17.0-alpine AS deps
+FROM node:20.20.2-alpine AS deps
 RUN apk add --no-cache libc6-compat dumb-init
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
@@ -19,7 +19,7 @@ RUN test -n "$WORKER_NAME" || (echo "WORKER_NAME build-arg required" && exit 1)
 RUN pnpm run build --filter "@vigil/*..." --filter "...^./apps/${WORKER_NAME}"
 
 # Stage 3 — runtime (minimal)
-FROM node:20.17.0-alpine AS runtime
+FROM node:20.20.2-alpine AS runtime
 ARG WORKER_NAME
 ENV NODE_ENV=production
 ENV TZ=Africa/Douala
