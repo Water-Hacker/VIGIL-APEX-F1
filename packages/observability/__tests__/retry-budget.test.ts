@@ -191,7 +191,14 @@ describe('RetryBudget (mode 1.5, unit with Redis stub)', () => {
   });
 });
 
-const INTEGRATION_REDIS_URL = process.env.INTEGRATION_REDIS_URL ?? process.env.REDIS_URL;
+// Gate ONLY on INTEGRATION_REDIS_URL (explicit opt-in). The earlier
+// `?? process.env.REDIS_URL` fallback caused the integration suite to
+// activate in CI's test job where REDIS_URL is set by the redis service
+// container — but `@vigil/observability` doesn't take a direct ioredis
+// dep, so the lazy import in the integration block fails. Tightening
+// the gate keeps the integration suite explicit-opt-in (the suite still
+// runs in deployments that DO have ioredis available + set the env).
+const INTEGRATION_REDIS_URL = process.env.INTEGRATION_REDIS_URL;
 
 describe.skipIf(!INTEGRATION_REDIS_URL)('RetryBudget (mode 1.5, integration)', () => {
   // Lazy-import ioredis so the file loads cleanly when observability
