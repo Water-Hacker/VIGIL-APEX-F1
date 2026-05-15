@@ -1,8 +1,11 @@
 import { DossierRepo, getDb } from '@vigil/db-postgres';
+import { createLogger } from '@vigil/observability';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { audit, AuditEmitterUnavailableError } from '@/lib/audit-emit.server';
+
+const logger = createLogger({ service: 'api-dossier' });
 
 /**
  * GET /api/dossier/[ref]?lang=fr|en
@@ -79,10 +82,13 @@ export async function GET(
           for await (const chunk of kubo.cat(row.pdf_cid!)) chunks.push(chunk);
           bytes = Buffer.concat(chunks);
         } catch (err) {
-          return NextResponse.json(
-            { error: 'ipfs-fetch-failed', message: String(err) },
-            { status: 503 },
-          );
+          // Mode 4.9: do NOT echo `err`/`err.stack`/`err.message` to the
+          // client. Internal IPFS state (paths, peer IDs, daemon
+          // version) leaks via the stack trace and aids reconnaissance.
+          // Log the full error server-side so operators can diagnose;
+          // return only a generic message to the caller.
+          logger.error({ err, ref, lang, cid: row.pdf_cid }, 'ipfs-fetch-failed');
+          return NextResponse.json({ error: 'ipfs-fetch-failed' }, { status: 503 });
         }
         return new Response(new Uint8Array(bytes), {
           status: 200,
@@ -100,10 +106,10 @@ export async function GET(
     );
   } catch (err) {
     if (err instanceof AuditEmitterUnavailableError) {
-      return NextResponse.json(
-        { error: 'audit-emitter-unavailable', message: err.message },
-        { status: 503 },
-      );
+      // Mode 4.9: log server-side, return opaque code. The audit
+      // emitter's message may contain internal Postgres / Vault state.
+      logger.error({ err, ref, lang }, 'audit-emitter-unavailable');
+      return NextResponse.json({ error: 'audit-emitter-unavailable' }, { status: 503 });
     }
     throw err;
   }
