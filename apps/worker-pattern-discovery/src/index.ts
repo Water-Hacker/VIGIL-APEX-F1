@@ -4,6 +4,7 @@ import { HashChain } from '@vigil/audit-chain';
 import { Neo4jClient } from '@vigil/db-neo4j';
 import { PatternDiscoveryRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  LoopBackoff,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -67,6 +68,8 @@ async function main(): Promise<void> {
 
   logger.info({ intervalMs, windowDays }, 'worker-pattern-discovery-ready');
 
+  // Mode 1.6 — adaptive sleep on consecutive failures.
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: intervalMs });
   while (!stopping) {
     try {
       await runDiscoveryCycle({
@@ -76,10 +79,15 @@ async function main(): Promise<void> {
         loadSnapshot: (d) => loadGraphSnapshot(neo4j, { windowDays: d }),
         windowDays,
       });
+      backoff.onSuccess();
     } catch (err) {
-      logger.error({ err }, 'pattern-discovery-loop-error');
+      backoff.onError();
+      logger.error(
+        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        'pattern-discovery-loop-error',
+      );
     }
-    await sleep(intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
   logger.info('worker-pattern-discovery-stopping');
 }

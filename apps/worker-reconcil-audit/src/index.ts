@@ -3,6 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import {
+  LoopBackoff,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -10,7 +11,7 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
-import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
+import { QueueClient } from '@vigil/queue';
 
 import {
   computeReconciliationPlan,
@@ -19,6 +20,7 @@ import {
   type AnchorCommitmentRow,
   type FabricWitnessRow,
 } from './reconcile.js';
+import { republishToFabricBridge } from './republish.js';
 
 import type { Pool } from 'pg';
 
@@ -128,32 +130,8 @@ async function maxActionSeq(pool: Pool): Promise<bigint> {
   return BigInt(v);
 }
 
-async function republishToFabricBridge(
-  queue: QueueClient,
-  gaps: ReadonlyArray<{ seq: string; body_hash: string }>,
-  maxPerTick: number,
-): Promise<number> {
-  // The fabric-bridge consumes STREAMS.AUDIT_PUBLISH envelopes carrying
-  // { seq, body_hash }. Republish (with a `reconcil:` dedup prefix so the
-  // bridge's idempotent insert keeps the original record, not a fake
-  // duplicate audit row).
-  const slice = gaps.slice(0, maxPerTick);
-  let published = 0;
-  for (const gap of slice) {
-    const env = newEnvelope(
-      'worker-reconcil-audit',
-      { seq: gap.seq, body_hash: gap.body_hash },
-      `reconcil:${gap.seq}`,
-    );
-    try {
-      await queue.publish(STREAMS.AUDIT_PUBLISH, env);
-      published += 1;
-    } catch (err) {
-      logger.error({ err, seq: gap.seq }, 'reconcil-republish-failed');
-    }
-  }
-  return published;
-}
+// republishToFabricBridge moved to ./republish.ts so it can be tested
+// directly (mode 3.2 closure). Re-exports the same contract.
 
 async function tick(
   pool: Pool,
@@ -213,11 +191,13 @@ async function tick(
   // Republish missing-from-Fabric envelopes (bounded per tick).
   let republished = 0;
   if (plan.missingFromFabric.length > 0) {
-    republished = await republishToFabricBridge(
+    const r = await republishToFabricBridge(
       queue,
       plan.missingFromFabric,
       cfg.maxRepublishPerTick,
+      logger,
     );
+    republished = r.published;
   }
 
   // Missing-from-Polygon: the anchor worker reads the tail and includes
@@ -267,6 +247,8 @@ async function main(): Promise<void> {
     stopping = true;
   });
 
+  // Mode 1.6 — adaptive sleep on consecutive failures.
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: cfg.intervalMs });
   while (!stopping) {
     try {
       const result = await tick(pool, queue, chain, cfg);
@@ -276,11 +258,20 @@ async function main(): Promise<void> {
         // pings via the next tick so silence cannot be confused with
         // "all clear". The next chain.append on the divergence path
         // already surfaced the issue.
+        // Treat fatal-but-non-throwing as a "we shouldn't pound the
+        // dependency" signal — back off the next tick.
+        backoff.onError();
+      } else {
+        backoff.onSuccess();
       }
     } catch (err) {
-      logger.error({ err }, 'reconcil-tick-failed');
+      backoff.onError();
+      logger.error(
+        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        'reconcil-tick-failed',
+      );
     }
-    await sleep(cfg.intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
 
   logger.info('worker-reconcil-audit-stopping');

@@ -10,6 +10,8 @@
 -- (separate migration script invokes with `CONCURRENTLY` based on
 -- $POSTGRES_INDEX_CONCURRENT). The plain form here is what a fresh
 -- bootstrap runs.
+--
+-- @migration-locks-acknowledged: shipped before mode 2.5 closure. The CONCURRENTLY-aware wrapper referenced above is not yet in the repo; production deployments apply this migration manually with CONCURRENTLY rewritten in via the operator runbook. Any NEW perf-index migration after this one MUST emit `CREATE INDEX CONCURRENTLY` directly — see scripts/check-migration-locks.ts.
 
 ------------------------------------------------------------------------
 -- D2 — finding.finding hot path (operator dashboard, escalation queue)

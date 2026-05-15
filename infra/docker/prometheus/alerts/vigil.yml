@@ -186,3 +186,62 @@ groups:
         annotations:
           summary: 'salt-collision-check has not run in > 100 days'
           description: 'The vigil_audit_salt_collisions_total gauge has not been refreshed in over 100 days, but the check is scheduled quarterly. Either AUDIT_SALT_COLLISION_CHECK_ENABLED is false, the cron expression is invalid, or the adapter-runner did not boot. Check adapter-runner logs for `salt-collision-check-scheduled` at boot.'
+
+      # Hardening mode 2.1 — Postgres pool saturation. The
+      # `vigil_db_pool_waiting` gauge is populated by
+      # `startPoolMetricsScraper()` in packages/db-postgres/src/client.ts.
+      # Sustained > 10 waiters for 30 s means foreground requests are
+      # queueing behind background work. Background callers using
+      # `acquireWithPriority(pool, 'background')` will already be
+      # rejecting with PoolSaturatedError at this point — this alert
+      # surfaces the underlying pressure so the operator can either
+      # scale `POSTGRES_POOL_MAX` or investigate the slow-query source.
+      - alert: DbPoolSaturated
+        expr: vigil_db_pool_waiting > 10
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: 'Postgres pool saturated (waiting = {{ $value }})'
+          description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
+
+      # Hardening mode 1.5 — global retry-budget exhaustion.
+      # RetryBudget.tryReserve() increments
+      # vigil_retry_budget_exhausted_total when the per-window ceiling
+      # is exceeded — that's the signal that a shared dependency
+      # (Polygon, LLM provider, Fabric) is in trouble and workers
+      # across the fleet are correctly backing off. Sustained
+      # exhaustion is critical: it means the actual failure rate is
+      # above the operator-configured ceiling.
+      - alert: RetryBudgetExhausted
+        expr: rate(vigil_retry_budget_exhausted_total[5m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Retry budget {{ $labels.name }} exhausted'
+          description: 'vigil_retry_budget_exhausted_total{name="{{ $labels.name }}"} has fired for 5 minutes. The shared dependency under this budget is failing and the fleet is throttling its retries to avoid a cascade. Investigate the dependency (logs at the worker level will show the underlying error).'
+
+      # Hardening mode 1.7 — startup-failure circuit breaker pressure.
+      # StartupGuard.check() emits this counter when a worker has
+      # tripped the failure ceiling within its window (defaults: 5
+      # failures in 5 minutes). The counter fires once per trip; a
+      # sustained rate indicates a worker that cannot start at all
+      # (missing env, unreachable dependency, container image bug).
+      - alert: WorkerStartupCrashLoop
+        expr: rate(vigil_worker_startup_failures_total[5m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Worker {{ $labels.service }} is in a startup crash-loop'
+          description: 'StartupGuard tripped — {{ $labels.service }} has failed to start at least 5 times in the last 5 minutes. The worker will sleep and exit with code 42 between attempts. Check logs for the root cause (missing env, Vault token, Postgres unavailable).'
+
+      # Mode 2.1 companion — the pool-metrics scraper itself has stalled.
+      # The scraper writes to `vigil_db_pool_total` every 5 s; if the
+      # gauge isn't refreshed for > 60 s, either the worker that owns
+      # the pool has died or `startPoolMetricsScraper()` was never called.
+      - alert: DbPoolScraperStale
+        expr: time() - timestamp(vigil_db_pool_total) > 60
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Postgres pool metrics scraper stalled'
+          description: 'vigil_db_pool_total has not been refreshed in > 60 s. Either startPoolMetricsScraper was not invoked at worker init, or the owning process has died without firing the alert.'

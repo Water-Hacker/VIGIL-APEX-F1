@@ -264,6 +264,57 @@ export const dbPoolWaiting = new Gauge({
 });
 
 /**
+ * Hardening mode 2.8 — optimistic-lock CAS conflict counter. Incremented
+ * every time a repo setter that received `expectedRevision` finds the
+ * row's actual revision did not match (concurrent writer detected). The
+ * caller surfaces the conflict via `CasConflictError`; the metric makes
+ * the contention visible to operators even when callers retry silently.
+ */
+export const repoCasConflictTotal = new Counter({
+  name: 'vigil_repo_cas_conflict_total',
+  help: 'Optimistic-lock CAS conflicts detected by repo setters (mode 2.8)',
+  labelNames: ['repo', 'fn'] as const,
+  registers: [registry],
+});
+
+/**
+ * Hardening mode 1.7 — startup-failure circuit breaker counter.
+ * Incremented when StartupGuard observes that the worker has tripped
+ * the failure ceiling within the configured window. Visible via
+ * Prometheus even though the worker is about to exit; alerting on
+ * `rate(vigil_worker_startup_failures_total[5m]) > 0` surfaces
+ * crash-loop pressure to operators.
+ */
+export const startupGuardFailuresTotal = new Counter({
+  name: 'vigil_worker_startup_failures_total',
+  help: 'Startup-guard trips detected — crash-loop pressure (mode 1.7)',
+  labelNames: ['service'] as const,
+  registers: [registry],
+});
+
+/**
+ * Hardening mode 1.5 — global retry budget counters. Every call to
+ * `RetryBudget.tryReserve()` increments `vigil_retry_budget_reserved_total`
+ * regardless of outcome; when the ceiling is crossed the call also
+ * increments `vigil_retry_budget_exhausted_total`. The exhausted
+ * counter rising is the operator's signal that the shared dependency
+ * is in trouble and workers are correctly backing off.
+ */
+export const retryBudgetTotalReserved = new Counter({
+  name: 'vigil_retry_budget_reserved_total',
+  help: 'Retry-budget reservation attempts (mode 1.5)',
+  labelNames: ['name'] as const,
+  registers: [registry],
+});
+
+export const retryBudgetExhaustedTotal = new Counter({
+  name: 'vigil_retry_budget_exhausted_total',
+  help: 'Retry-budget exhaustion events — global retry storm signal (mode 1.5)',
+  labelNames: ['name'] as const,
+  registers: [registry],
+});
+
+/**
  * In-flight gauge for adaptive concurrency (D9). Each worker reports its
  * own slot count.
  */

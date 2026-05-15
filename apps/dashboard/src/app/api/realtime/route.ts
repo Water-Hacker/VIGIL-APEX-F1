@@ -1,7 +1,10 @@
+import { createLogger } from '@vigil/observability';
 import { QueueClient } from '@vigil/queue';
 import { type NextRequest } from 'next/server';
 
 import { startSseHeartbeat } from '../../../lib/sse-heartbeat';
+
+const logger = createLogger({ service: 'api-realtime' });
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // SSE needs a long-lived connection — Edge runtime times out
@@ -79,8 +82,11 @@ export async function GET(req: NextRequest): Promise<Response> {
           }
         }
       } catch (err) {
+        // Mode 4.9: log server-side; send opaque error to the SSE client.
+        // String(err) leaks Redis connection details + stack trace.
+        logger.error({ err }, 'realtime-sse-error');
         controller.enqueue(
-          encoder.encode(`event: error\ndata: ${JSON.stringify({ message: String(err) })}\n\n`),
+          encoder.encode(`event: error\ndata: ${JSON.stringify({ error: 'stream-error' })}\n\n`),
         );
       } finally {
         hb.stop();

@@ -1,8 +1,14 @@
 import { readFile } from 'node:fs/promises';
 
-import { createLogger, type Logger } from '@vigil/observability';
+import {
+  createLogger,
+  dbPoolIdle,
+  dbPoolTotal,
+  dbPoolWaiting,
+  type Logger,
+} from '@vigil/observability';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { Pool, type PoolConfig } from 'pg';
+import { Pool, type PoolClient, type PoolConfig } from 'pg';
 
 import * as schema from './schema/index.js';
 
@@ -117,9 +123,109 @@ export function poolStats(pool: Pool): { total: number; idle: number; waiting: n
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Mode 2.1 — Pool saturation circuit breaker + Prometheus scraper.
+//
+// Failure mode: a burst of N > poolMax concurrent slow queries causes
+// `pool.waitingCount` to grow unbounded. Foreground (user-facing)
+// queries stall behind background batch work and the whole service
+// degrades silently. The hardening pass adds two primitives:
+//
+//   1. `acquireWithPriority(pool, priority, opts)` — a connection
+//      acquirer that rejects `'background'` priority callers with a
+//      typed `PoolSaturatedError` when `waitingCount >= threshold`.
+//      `'foreground'` priority always proceeds (queues if needed).
+//
+//   2. `startPoolMetricsScraper(pool, opts)` — periodically writes
+//      `poolStats(pool)` to the `vigil_db_pool_{total,idle,waiting}`
+//      Prometheus gauges declared in `@vigil/observability`. The
+//      `DbPoolSaturated` alert rule fires when waiting > 10 for 30 s.
+//
+// Test: `packages/db-postgres/__tests__/pool-saturation.test.ts`.
+// Closure evidence: `docs/audit/evidence/hardening/category-2/mode-2.1/`.
+// ──────────────────────────────────────────────────────────────────────
+
+export type AcquirePriority = 'foreground' | 'background';
+
+export interface AcquireOptions {
+  /** Reject `'background'` priority when `pool.waitingCount >= this`. Default 10. */
+  readonly waitingThreshold?: number;
+}
+
+export class PoolSaturatedError extends Error {
+  readonly code = 'POOL_SATURATED';
+  readonly stats: { total: number; idle: number; waiting: number };
+  readonly threshold: number;
+
+  constructor(stats: { total: number; idle: number; waiting: number }, threshold: number) {
+    super(
+      `Postgres pool saturated: waiting=${stats.waiting} >= threshold=${threshold} ` +
+        `(total=${stats.total}, idle=${stats.idle}). Background work backing off.`,
+    );
+    this.name = 'PoolSaturatedError';
+    this.stats = stats;
+    this.threshold = threshold;
+  }
+}
+
+const DEFAULT_WAITING_THRESHOLD = 10;
+
+export async function acquireWithPriority(
+  pool: Pool,
+  priority: AcquirePriority,
+  opts: AcquireOptions = {},
+): Promise<PoolClient> {
+  if (priority === 'background') {
+    const threshold = opts.waitingThreshold ?? DEFAULT_WAITING_THRESHOLD;
+    const stats = poolStats(pool);
+    if (stats.waiting >= threshold) {
+      throw new PoolSaturatedError(stats, threshold);
+    }
+  }
+  return pool.connect();
+}
+
+export interface ScraperOptions {
+  /** Tick interval in milliseconds. Default 5000. */
+  readonly intervalMs?: number;
+}
+
+let metricsScraperTimer: NodeJS.Timeout | null = null;
+
+export function startPoolMetricsScraper(pool: Pool, opts: ScraperOptions = {}): void {
+  // Replace any existing scraper — second call is intentional.
+  if (metricsScraperTimer) {
+    clearInterval(metricsScraperTimer);
+    metricsScraperTimer = null;
+  }
+  const intervalMs = opts.intervalMs ?? 5_000;
+  const tick = () => {
+    const stats = poolStats(pool);
+    dbPoolTotal.set(stats.total);
+    dbPoolIdle.set(stats.idle);
+    dbPoolWaiting.set(stats.waiting);
+  };
+  tick();
+  metricsScraperTimer = setInterval(tick, intervalMs);
+  // Don't keep the event loop alive purely for metrics scraping.
+  metricsScraperTimer.unref?.();
+}
+
+export function stopPoolMetricsScraper(): void {
+  if (metricsScraperTimer) {
+    clearInterval(metricsScraperTimer);
+    metricsScraperTimer = null;
+  }
+}
+
 export async function getPool(opts?: DbClientOptions): Promise<Pool> {
   if (singletonPool) return singletonPool;
   singletonPool = await createPool(opts);
+  // Mode 2.1 — every long-lived process that owns a singleton pool gets
+  // the saturation scraper automatically. Tests that construct their own
+  // Pool via `new Pool(...)` opt in by calling startPoolMetricsScraper
+  // explicitly.
+  startPoolMetricsScraper(singletonPool);
   return singletonPool;
 }
 
@@ -130,6 +236,7 @@ export async function getDb(opts?: DbClientOptions): Promise<Db> {
 
 export async function closePool(): Promise<void> {
   if (singletonPool) {
+    stopPoolMetricsScraper();
     await singletonPool.end();
     singletonPool = null;
   }

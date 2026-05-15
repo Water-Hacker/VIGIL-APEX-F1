@@ -1,3 +1,4 @@
+-- @migration-locks-acknowledged: shipped before mode 2.5 closure; the index is fast in practice because entity.canonical was small at deployment. The next index added against entity.canonical (post-this-migration) MUST use CONCURRENTLY — see scripts/check-migration-locks.ts.
 -- Block-A reconciliation §2.A.7 / original A.7 — expression index
 -- supporting the rule-pass exact-match lookup in
 -- EntityRepo.findCanonicalByNormalizedName.

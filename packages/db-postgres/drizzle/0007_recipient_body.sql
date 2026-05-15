@@ -1,6 +1,8 @@
 -- DECISION-010 — per-finding recipient-body routing
 --
 -- Forward migration. Reverse is in 0007_recipient_body_down.sql.
+--
+-- @migration-locks-acknowledged: ALTER + CREATE INDEX on finding.routing_decision which is a new table created in this same migration (empty at index-build time). Future indexes on finding.routing_decision MUST use CONCURRENTLY.
 
 -- 1. Add recipient_body_name to dossier table.
 --    NOT NULL with default 'CONAC' so historical rows backfill cleanly.

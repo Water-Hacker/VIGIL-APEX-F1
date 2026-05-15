@@ -10,6 +10,7 @@ import {
 } from '@vigil/audit-log';
 import { AnomalyAlertRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  LoopBackoff,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -83,6 +84,8 @@ async function main(): Promise<void> {
     'worker-audit-watch-ready',
   );
 
+  // Mode 1.6 — adaptive sleep on consecutive failures.
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: intervalMs });
   while (!stopping) {
     try {
       const since = new Date(Date.now() - windowHours * 3_600_000).toISOString();
@@ -200,10 +203,15 @@ async function main(): Promise<void> {
         },
         'audit-watch-tick',
       );
+      backoff.onSuccess();
     } catch (err) {
-      logger.error({ err }, 'audit-watch-loop-error');
+      backoff.onError();
+      logger.error(
+        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        'audit-watch-loop-error',
+      );
     }
-    await sleep(intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
   logger.info('worker-audit-watch-stopping');
 }
