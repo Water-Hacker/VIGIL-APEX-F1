@@ -63,8 +63,12 @@ describe('mode 6.8 — Redis stream scraper', () => {
       streams: ['vigil:t-b'],
     });
     try {
-      // Wait for >= 3 ticks (one immediate + 2 interval).
-      await sleep(70);
+      // Wait long enough that CI runner scheduler slop doesn't starve the
+      // setInterval. At intervalMs=20, 250ms gives ~12 expected ticks; the
+      // assertion of >= 3 holds even when the runner delivers half the
+      // budget. Earlier sleep(70) was too tight on GitHub-hosted runners
+      // under load (observed 2 ticks in 70ms — see CI run 25941635415).
+      await sleep(250);
       expect(stub.xlen.mock.calls.length).toBeGreaterThanOrEqual(3);
       expect(readGauge('vigil:t-b')).toBe(42);
     } finally {
