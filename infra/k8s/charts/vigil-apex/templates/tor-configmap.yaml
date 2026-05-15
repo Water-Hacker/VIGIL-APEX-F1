@@ -1,0 +1,37 @@
+{{- if .Values.tor.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor-config") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "tor") | nindent 4 }}
+data:
+  torrc: |
+    # VIGIL APEX Tor — v3 hidden service for the citizen tip portal.
+    User tor
+    DataDirectory /var/lib/tor
+    SocksPort 0.0.0.0:9050
+    ControlPort 0.0.0.0:9051
+
+    # Hidden service — reverse-proxies to the cluster Caddy VIP for /tip.
+    HiddenServiceDir /var/lib/tor/hidden-services/vigil-tip
+    HiddenServiceVersion 3
+    HiddenServicePort 80 {{ .Values.tor.upstream | default "vigil-apex-caddy:80" }}
+    HiddenServicePoWDefensesEnabled 1
+    HiddenServicePoWQueueRate 250
+    HiddenServicePoWQueueBurst 1000
+
+    # Bridge / obfs4 — Tor-friendly fallback for citizens in jurisdictions
+    # where direct Tor is blocked. Optional; the architect provisions the
+    # bridge lines as a Secret (tor-bridge-lines) when used.
+    UseBridges {{ if .Values.tor.bridges.enabled }}1{{ else }}0{{ end }}
+
+    # Logging
+    Log notice stdout
+    SafeLogging 1
+
+    # Hardening
+    AvoidDiskWrites 1
+    DisableDebuggerAttachment 1
+    ClientUseIPv6 1
+{{- end }}

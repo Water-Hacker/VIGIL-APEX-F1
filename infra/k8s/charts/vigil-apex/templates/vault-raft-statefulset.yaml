@@ -1,0 +1,151 @@
+{{- if and .Values.vault.enabled .Values.vault.ha.enabled }}
+# Vault Raft HA — 3 voter cluster across the 3 DL380 Gen11 nodes.
+# Transit auto-unseal points at Hetzner N02 (Falkenstein); initial Shamir
+# ceremony is one-time on first install (architect runs
+# `vault operator init -recovery-shares=5 -recovery-threshold=3`).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 4 }}
+spec:
+  replicas: {{ .Values.vault.ha.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-headless") }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "vault") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/vault-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "vault") | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: vault
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.vault.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 100
+            capabilities:
+              drop: ["ALL"]
+              add: ["IPC_LOCK"]   # mlock — required by Vault for memory protection
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - vault
+            - server
+            - -config=/vault/config/config.hcl
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: VAULT_NODE_ID
+              value: $(POD_NAME)
+            - name: VAULT_NODE_HOSTNAME
+              value: $(POD_NAME).{{ include "vigil-apex.componentName" (dict "root" . "component" "vault-headless") }}.{{ .Release.Namespace }}.svc.cluster.local
+            - name: VAULT_API_ADDR
+              value: https://$(VAULT_NODE_HOSTNAME):8200
+            - name: VAULT_CLUSTER_ADDR
+              value: https://$(VAULT_NODE_HOSTNAME):8201
+            - name: VAULT_TRANSIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-transit") }}
+                  key: token
+          ports:
+            - { name: api, containerPort: 8200, protocol: TCP }
+            - { name: cluster, containerPort: 8201, protocol: TCP }
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&perfstandbyok=true
+              port: api
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              # Sealed=200, unsealed-active=200, unsealed-standby=429 → all pass
+              # only the active node should serve. standbyok=true makes
+              # standbys ready too (they proxy writes to the leader).
+              path: /v1/sys/health?standbyok=true&perfstandbyok=true
+              port: api
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /vault/config, readOnly: true }
+            - { name: data, mountPath: /vault/file }
+            - { name: tls, mountPath: /vault/tls, readOnly: true }
+            - { name: logs, mountPath: /vault/logs }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-config") }}
+        - name: tls
+          secret:
+            secretName: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-tls") }}
+            optional: true
+        - name: logs
+          emptyDir: { sizeLimit: 1Gi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.vault.persistence.size | default "20Gi" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "vault") | nindent 4 }}
+  ports:
+    - { name: api, port: 8200, targetPort: 8200, protocol: TCP }
+    - { name: cluster, port: 8201, targetPort: 8201, protocol: TCP }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "vault-raft") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 4 }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "vault") | nindent 6 }}
+{{- end }}

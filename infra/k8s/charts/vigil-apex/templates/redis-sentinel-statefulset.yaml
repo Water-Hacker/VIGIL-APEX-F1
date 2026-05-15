@@ -1,0 +1,180 @@
+{{- if and .Values.redis.enabled .Values.redis.ha.enabled }}
+# Redis with Sentinel — 3 replicas (1 primary + 2 replicas) each with
+# a co-located Sentinel sidecar. Sentinel quorum = 2 of 3 detects
+# primary failure and promotes a replica within < 30s.
+#
+# Pod 0 is the initial primary; on failover Sentinel updates clients
+# via subscription to +switch-master. Clients (workers / dashboard)
+# connect through the redis-sentinel headless service and discover the
+# current primary by querying Sentinel.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  replicas: {{ .Values.redis.ha.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-headless") }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/redis-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "redis") | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        # ──────────────────────────────────────────────────────────────────
+        # Redis itself. Pod 0 starts as primary; pods 1+ replicate.
+        # ──────────────────────────────────────────────────────────────────
+        - name: redis
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.redis.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              ORDINAL="${POD_NAME##*-}"
+              PRIMARY_HOST="$(echo "${POD_NAME%-*}-0").{{ include "vigil-apex.componentName" (dict "root" . "component" "redis-headless") }}.{{ .Release.Namespace }}.svc.cluster.local"
+              cp /etc/redis-template/redis.conf /tmp/redis.conf
+              if [ "${ORDINAL}" != "0" ]; then
+                echo "replicaof ${PRIMARY_HOST} 6379" >> /tmp/redis.conf
+              fi
+              exec redis-server /tmp/redis.conf
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          ports:
+            - { name: redis, containerPort: 6379, protocol: TCP }
+          {{- include "vigil-apex.tcpProbes" (dict "port" "redis") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/redis-template, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+        # ──────────────────────────────────────────────────────────────────
+        # Sentinel sidecar. One per pod; quorum 2 of 3.
+        # ──────────────────────────────────────────────────────────────────
+        - name: sentinel
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.redis.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              PRIMARY_HOST="$(echo "${POD_NAME%-*}-0").{{ include "vigil-apex.componentName" (dict "root" . "component" "redis-headless") }}.{{ .Release.Namespace }}.svc.cluster.local"
+              POD_FQDN="${POD_NAME}.{{ include "vigil-apex.componentName" (dict "root" . "component" "redis-headless") }}.{{ .Release.Namespace }}.svc.cluster.local"
+              # Resolve the primary's IP for the initial sentinel monitor directive
+              # (Sentinel updates this internally after failover; this is the seed).
+              for _ in $(seq 1 30); do
+                if PRIMARY_IP=$(getent hosts "${PRIMARY_HOST}" | awk '{print $1}'); then
+                  [ -n "${PRIMARY_IP}" ] && break
+                fi
+                sleep 2
+              done
+              if [ -z "${PRIMARY_IP}" ]; then
+                # Fall back to the hostname; Sentinel will retry until DNS resolves.
+                PRIMARY_IP="${PRIMARY_HOST}"
+              fi
+              sed -e "s|MASTER_HOST|${PRIMARY_IP}|g" \
+                  -e "s|ANNOUNCE_IP|${POD_FQDN}|g" \
+                  /etc/sentinel-template/sentinel.conf > /tmp/sentinel.conf
+              exec redis-server /tmp/sentinel.conf --sentinel
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          ports:
+            - { name: sentinel, containerPort: 26379, protocol: TCP }
+          {{- include "vigil-apex.tcpProbes" (dict "port" "sentinel") | nindent 10 }}
+          resources:
+            requests: { memory: "64Mi", cpu: "50m" }
+            limits:   { memory: "256Mi", cpu: "200m" }
+          volumeMounts:
+            - { name: config, mountPath: /etc/sentinel-template, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+            - { name: secrets, mountPath: /run/secrets, readOnly: true }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-config") }}
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        - name: secrets
+          secret:
+            secretName: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-secrets") }}
+            items:
+              - { key: redis-password, path: redis_password, mode: 0400 }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.persistence.size | default "50Gi" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "redis") | nindent 4 }}
+  ports:
+    - { name: redis, port: 6379, targetPort: redis, protocol: TCP }
+    - { name: sentinel, port: 26379, targetPort: sentinel, protocol: TCP }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis-sentinel") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "redis") | nindent 4 }}
+  ports:
+    - { name: sentinel, port: 26379, targetPort: sentinel, protocol: TCP }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "redis") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "redis") | nindent 6 }}
+{{- end }}

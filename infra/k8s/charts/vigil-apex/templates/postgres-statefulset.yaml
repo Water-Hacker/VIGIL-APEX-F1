@@ -1,4 +1,7 @@
-{{- if .Values.postgres.enabled }}
+{{- if and .Values.postgres.enabled (not .Values.postgres.ha.enabled) }}
+# Single-replica Postgres — DEV / single-node deployments only. In
+# production the HA path (postgres-patroni-statefulset.yaml) takes over
+# when .Values.postgres.ha.enabled = true (set via values-cluster.yaml).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

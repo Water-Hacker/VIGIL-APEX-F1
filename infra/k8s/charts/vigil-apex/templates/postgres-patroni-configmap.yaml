@@ -1,0 +1,75 @@
+{{- if and .Values.postgres.enabled .Values.postgres.ha.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-patroni") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+data:
+  # Spilo bootstrap configuration. Spilo reads SPILO_CONFIGURATION as
+  # YAML at boot and converts it into the underlying Patroni config.
+  # This mirrors the infra/docker/postgres/postgresql.conf settings.
+  spilo.yaml: |
+    bootstrap:
+      dcs:
+        ttl: 30
+        loop_wait: 10
+        retry_timeout: 10
+        maximum_lag_on_failover: 16777216
+        master_start_timeout: 30
+        synchronous_mode: {{ .Values.postgres.ha.synchronousMode | default true }}
+        synchronous_node_count: {{ .Values.postgres.ha.synchronousNodeCount | default 1 }}
+        postgresql:
+          use_pg_rewind: true
+          use_slots: true
+          parameters:
+            wal_level: replica
+            max_wal_senders: 10
+            max_replication_slots: 10
+            wal_keep_size: 8GB
+            wal_compression: lz4
+            hot_standby: 'on'
+            hot_standby_feedback: 'on'
+            archive_mode: 'on'
+            archive_command: 'wal-g wal-push %p'
+            checkpoint_timeout: '10min'
+            checkpoint_completion_target: 0.9
+            shared_buffers: {{ .Values.postgres.config.shared_buffers | default "512MB" | quote }}
+            work_mem: {{ .Values.postgres.config.work_mem | default "16MB" | quote }}
+            maintenance_work_mem: 512MB
+            effective_cache_size: 12GB
+            random_page_cost: 1.1
+            effective_io_concurrency: 200
+            max_connections: {{ .Values.postgres.config.max_connections | default 200 }}
+            password_encryption: scram-sha-256
+            row_security: 'on'
+            statement_timeout: {{ .Values.postgres.config.statement_timeout | default 60000 }}
+            idle_in_transaction_session_timeout: {{ .Values.postgres.config.idle_in_transaction_session_timeout | default 60000 }}
+            deadlock_timeout: '1s'
+            log_min_duration_statement: '250ms'
+            log_lock_waits: 'on'
+            log_temp_files: '10MB'
+            log_checkpoints: 'on'
+            log_connections: 'on'
+            log_disconnections: 'on'
+            log_statement: 'ddl'
+            timezone: 'Africa/Douala'
+            log_timezone: 'Africa/Douala'
+            synchronous_commit: 'on'
+      initdb:
+        - encoding: UTF8
+        - locale: en_US.UTF-8
+        - data-checksums
+      pg_hba:
+        - host  replication replicator  10.244.0.0/16  scram-sha-256
+        - host  replication replicator  0.0.0.0/0      scram-sha-256
+        - host  all         all         10.244.0.0/16  scram-sha-256
+        - host  all         all         0.0.0.0/0      scram-sha-256
+        - local all         postgres                   trust
+      users:
+        vigil:
+          password: '${VIGIL_APP_PASSWORD}'
+          options:
+            - createrole
+            - createdb
+{{- end }}
