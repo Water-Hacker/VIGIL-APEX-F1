@@ -3,7 +3,10 @@
 # Naming convention: every resource is `vigil-apex-<component>` so
 # multi-tenant clusters can install us into a non-default namespace
 # without collisions. The shared `_helpers.tpl` derives names from
-# `.Values.fullnameOverride` when set.
+# `.Values.fullnameOverride` when set — we pin it here so the rendered
+# name matches the convention regardless of the Helm release name.
+# Operators installing under a different release name must override.
+fullnameOverride: vigil-apex
 
 global:
   # Pinned by the architect; bumps require a decision-log entry.
