@@ -9,6 +9,8 @@ export * from './client.js';
 export * as schema from './schema/index.js';
 export * from './repos/audit.js';
 export * from './repos/dossier.js';
+export * from './repos/dossier-outcome.js';
+export * from './repos/pattern-discovery.js';
 export * from './repos/entity.js';
 export * from './repos/finding.js';
 export * from './repos/source.js';

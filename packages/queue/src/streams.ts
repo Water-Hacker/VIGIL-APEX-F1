@@ -26,6 +26,19 @@ export const STREAMS = {
   GOVERNANCE_EVENT: 'vigil:governance:event',
   TIP_TRIAGE: 'vigil:tip:triage',
 
+  // Ring 5 — multi-channel tip ingestion (FRONTIER-AUDIT E1.4).
+  // Telecom-gateway webhook handlers (MTN, Orange) write inbound USSD /
+  // SMS / voice descriptors here. worker-tip-channels drains, encrypts
+  // against the council pubkey, persists to `tip.tip`, and returns the
+  // TIP-YYYY-NNNN reference via the synchronous webhook response path.
+  TIP_CHANNELS_INCOMING: 'vigil:tip:channels:incoming',
+
+  // Ring 5 — outcome feedback signal ingestion (FRONTIER-AUDIT Layer-7).
+  // adapter-runner feeds (CONAC press, Cour Suprême roll, ARMP debarment,
+  // ANIF bulletin, MINFI clawback) write signals here. worker-outcome-
+  // feedback matches against delivered dossiers and persists outcomes.
+  OUTCOME_SIGNAL: 'vigil:outcome:signal',
+
   // Cross-cutting
   DEAD_LETTER: 'vigil:dead-letter',
   AUDIT_PUBLISH: 'vigil:audit:publish',

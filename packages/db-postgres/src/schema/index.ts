@@ -21,3 +21,4 @@ export * from './tip.js';
 export * from './calibration.js';
 export * from './certainty.js';
 export * from './audit-log.js';
+export * from './pattern-discovery.js';
