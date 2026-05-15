@@ -1,18 +1,11 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
-/**
- * P-I-004 — Falsified wages / overtime (ACFE Fraud Tree).
- *
- * Payroll fraud where actual hours / rate are inflated. Detection
- * from upstream HR-feed reconciliation: payroll `gross_amount` >
- * declared `contractual_amount × allowed_overtime_max` for the period,
- * across >= 3 consecutive periods. Source: ACFE.
- */
 const PID = Ids.asPatternId('P-I-004');
 const definition: PatternDef = {
   id: PID,
@@ -29,16 +22,29 @@ const definition: PatternDef = {
   defaultWeight: 0.5,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const consec = Number(meta.consecutive_overpaid_periods ?? 0);
-    const excessRatio = Number(meta.payroll_excess_ratio ?? 0);
-    if (consec < 3) return notMatched(PID, `consecutive_overpaid_periods=${consec} < 3`);
-    if (excessRatio < 0.15) return notMatched(PID, `payroll_excess_ratio=${excessRatio} < 0.15`);
-    const strength = Math.min(0.95, 0.3 + consec * 0.08 + Math.min(0.4, excessRatio));
+    const consec = readNumericWithFallback(
+      subject,
+      'consecutive_overpaid_periods',
+      'consecutive_overpaid_periods',
+      ['payment_order', 'audit_observation'],
+    );
+    const excess = readNumericWithFallback(
+      subject,
+      'payroll_excess_ratio',
+      'payroll_excess_ratio',
+      ['payment_order', 'audit_observation'],
+    );
+    if (consec.value < 3)
+      return notMatched(PID, `consecutive_overpaid_periods=${consec.value} < 3`);
+    if (excess.value < 0.15) return notMatched(PID, `payroll_excess_ratio=${excess.value} < 0.15`);
+    const strength = Math.min(0.95, 0.5 + consec.value * 0.05 + Math.min(0.3, excess.value));
+    const ev = evidenceFrom([...consec.contributors, ...excess.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `payroll over-pay across ${consec} periods, excess ratio ${(excessRatio * 100).toFixed(0)}%.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `payroll over-pay across ${consec.value} periods, excess ratio ${(excess.value * 100).toFixed(0)}%.`,
     });
   },
 };

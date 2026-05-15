@@ -1,18 +1,11 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readBoolWithFallback, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
-/**
- * P-L-005 — Post-award employment of decision-maker / family member (OECD / FCPA).
- *
- * Revolving-door pattern: the official who chaired the award commission
- * (or a 1st-degree family member) takes paid employment with the
- * awardee within 24 months of award. Source: OECD + FCPA enforcement
- * guidance.
- */
 const PID = Ids.asPatternId('P-L-005');
 const definition: PatternDef = {
   id: PID,
@@ -29,16 +22,47 @@ const definition: PatternDef = {
   defaultWeight: 0.7,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const flag = meta.revolving_door_detected === true;
-    const familyDegree = Number(meta.relation_degree ?? 0); // 1 = self, 2 = family
-    const months = Number(meta.months_after_award ?? Infinity);
-    if (!flag || months > 24) return notMatched(PID, `flag=${flag} months=${months}`);
-    const strength = Math.min(0.95, 0.5 + (familyDegree === 1 ? 0.3 : 0.15) + (24 - months) * 0.01);
+    const sources: ReadonlyArray<Schemas.SourceEventKind> = [
+      'gazette_appointment',
+      'company_filing',
+      'audit_observation',
+    ];
+    const flag = readBoolWithFallback(
+      subject,
+      'revolving_door_detected',
+      'revolving_door_detected',
+      sources,
+    );
+    const familyDegree = readNumericWithFallback(
+      subject,
+      'relation_degree',
+      'relation_degree',
+      sources,
+    );
+    const months = readNumericWithFallback(
+      subject,
+      'months_after_award',
+      'months_after_award',
+      sources,
+    );
+    if (!flag.value || months.from === 'none' || months.value > 24) {
+      return notMatched(PID, `flag=${flag.value} months=${months.value}`);
+    }
+    const strength = Math.min(
+      0.95,
+      0.55 + (familyDegree.value === 1 ? 0.25 : 0.12) + (24 - months.value) * 0.008,
+    );
+    const ev = evidenceFrom([
+      ...flag.contributors,
+      ...familyDegree.contributors,
+      ...months.contributors,
+    ]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Decision-maker hired by awardee ${months} months post-award (relation degree ${familyDegree}).`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Decision-maker hired by awardee ${months.value} months post-award (relation degree ${familyDegree.value}).`,
     });
   },
 };

@@ -1,18 +1,11 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
-/**
- * P-L-004 — Pre-award gift / travel to decision-maker (OECD).
- *
- * A material gift (luxury watch, hospitality, sponsored conference
- * travel) provided to the contract decision-maker in the 12 months
- * preceding award. Source: OECD Foreign Bribery Report,
- * UK Bribery Act §1 hospitality conversion test.
- */
 const PID = Ids.asPatternId('P-L-004');
 const definition: PatternDef = {
   id: PID,
@@ -29,16 +22,29 @@ const definition: PatternDef = {
   defaultWeight: 0.5,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const giftXaf = Number(meta.pre_award_gift_value_xaf ?? 0);
-    const months = Number(meta.gift_months_before_award ?? Infinity);
-    if (giftXaf < 500_000 || months > 12)
-      return notMatched(PID, `gift=${giftXaf} months=${months}`);
-    const strength = Math.min(0.95, 0.3 + Math.log10(giftXaf / 500_000) * 0.2);
+    const gift = readNumericWithFallback(
+      subject,
+      'pre_award_gift_value_xaf',
+      'pre_award_gift_value_xaf',
+      ['gazette_appointment', 'audit_observation', 'court_judgement'],
+    );
+    const months = readNumericWithFallback(
+      subject,
+      'gift_months_before_award',
+      'gift_months_before_award',
+      ['gazette_appointment', 'audit_observation', 'court_judgement'],
+    );
+    if (gift.value < 500_000 || months.from === 'none' || months.value > 12) {
+      return notMatched(PID, `gift=${gift.value} months=${months.value}`);
+    }
+    const strength = Math.min(0.95, 0.5 + Math.log10(gift.value / 500_000) * 0.18);
+    const ev = evidenceFrom([...gift.contributors, ...months.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Pre-award gift valued ${giftXaf.toLocaleString('fr-CM')} XAF, ${months} months before award.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Pre-award gift valued ${gift.value.toLocaleString('fr-CM')} XAF, ${months.value} months before award.`,
     });
   },
 };

@@ -1,22 +1,16 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readBoolWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
 /**
- * P-I-003 — Ghost employee on payroll (ACFE Fraud Tree).
+ * P-I-003 — Ghost employee on payroll (ACFE).
  *
- * Asset Misappropriation → Cash → Fraudulent Disbursements → Payroll
- * → Ghost Employees. An entity paid as "employee" but with no
- * corresponding HR record, no NIU under personal-income tax, or whose
- * declared identity matches a fictitious person.
- *
- * Detection: flag when payroll-stream events for an entity have
- * `niu` matching a known-fictitious blocklist OR no entry in the
- * pension fund database OR matched to a deceased person's national ID.
- * Source: ACFE Report to the Nations.
+ * Detection: any of 4 markers from `company_filing` / `audit_observation` /
+ * `payment_order` payloads — falls back to canonical.metadata.
  */
 const PID = Ids.asPatternId('P-I-003');
 const definition: PatternDef = {
@@ -34,17 +28,48 @@ const definition: PatternDef = {
   defaultWeight: 0.7,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
+    const sources: ReadonlyArray<Schemas.SourceEventKind> = [
+      'company_filing',
+      'audit_observation',
+      'payment_order',
+    ];
+    const noHr = readBoolWithFallback(subject, 'no_hr_record', 'no_hr_record', sources);
+    const noNiu = readBoolWithFallback(
+      subject,
+      'niu_absent_from_personal_tax',
+      'niu_absent_from_personal_tax',
+      sources,
+    );
+    const deceased = readBoolWithFallback(
+      subject,
+      'matched_deceased_identity',
+      'matched_deceased_identity',
+      sources,
+    );
+    const noPension = readBoolWithFallback(
+      subject,
+      'no_pension_fund_entry',
+      'no_pension_fund_entry',
+      sources,
+    );
     const markers: string[] = [];
-    if (meta.no_hr_record === true) markers.push('no_hr_record');
-    if (meta.niu_absent_from_personal_tax === true) markers.push('niu_absent_from_personal_tax');
-    if (meta.matched_deceased_identity === true) markers.push('matched_deceased_identity');
-    if (meta.no_pension_fund_entry === true) markers.push('no_pension_fund_entry');
+    if (noHr.value) markers.push('no_hr_record');
+    if (noNiu.value) markers.push('niu_absent_from_personal_tax');
+    if (deceased.value) markers.push('matched_deceased_identity');
+    if (noPension.value) markers.push('no_pension_fund_entry');
     if (markers.length === 0) return notMatched(PID, 'no ghost-employee markers');
-    const strength = Math.min(0.95, 0.4 + markers.length * 0.2);
+    const strength = Math.min(0.95, 0.5 + markers.length * 0.15);
+    const ev = evidenceFrom([
+      ...noHr.contributors,
+      ...noNiu.contributors,
+      ...deceased.contributors,
+      ...noPension.contributors,
+    ]);
     return matched({
       pattern_id: PID,
       strength,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
       rationale: `Ghost-employee markers: ${markers.join(', ')}.`,
     });
   },

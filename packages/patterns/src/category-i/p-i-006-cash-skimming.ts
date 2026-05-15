@@ -1,17 +1,11 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
-/**
- * P-I-006 — Cash skimming (ACFE).
- *
- * Receipts taken before being recorded in the books. Detection from
- * cash-vs-deposit reconciliation: declared cash receipts persistently
- * below benchmarked-volume for entity type. Source: ACFE.
- */
 const PID = Ids.asPatternId('P-I-006');
 const definition: PatternDef = {
   id: PID,
@@ -28,17 +22,30 @@ const definition: PatternDef = {
   defaultWeight: 0.5,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const ratio = Number(meta.deposit_to_expected_ratio ?? NaN);
-    const sustainedMonths = Number(meta.sustained_low_deposit_months ?? 0);
-    if (!Number.isFinite(ratio) || ratio >= 0.75)
-      return notMatched(PID, `deposit_ratio=${ratio} not low`);
-    if (sustainedMonths < 3) return notMatched(PID, `sustained_months=${sustainedMonths} < 3`);
-    const strength = Math.min(0.95, 0.3 + (0.75 - ratio) * 1.5 + sustainedMonths * 0.04);
+    const ratio = readNumericWithFallback(
+      subject,
+      'deposit_to_expected_ratio',
+      'deposit_to_expected_ratio',
+      ['audit_observation', 'company_filing'],
+    );
+    const sustained = readNumericWithFallback(
+      subject,
+      'sustained_low_deposit_months',
+      'sustained_low_deposit_months',
+      ['audit_observation', 'company_filing'],
+    );
+    if (ratio.from === 'none' || ratio.value >= 0.75) {
+      return notMatched(PID, `deposit_ratio=${ratio.value} not low`);
+    }
+    if (sustained.value < 3) return notMatched(PID, `sustained_months=${sustained.value} < 3`);
+    const strength = Math.min(0.95, 0.5 + (0.75 - ratio.value) * 1.2 + sustained.value * 0.03);
+    const ev = evidenceFrom([...ratio.contributors, ...sustained.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Cash receipts at ${(ratio * 100).toFixed(0)}% of benchmark for ${sustainedMonths} months.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Cash receipts at ${(ratio.value * 100).toFixed(0)}% of benchmark for ${sustained.value} months.`,
     });
   },
 };

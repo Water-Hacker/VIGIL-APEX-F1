@@ -1,17 +1,11 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readBoolWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
-/**
- * P-I-005 — Fictitious expense reimbursement (ACFE).
- *
- * Reimbursement claim with receipt that does not match a real
- * transaction (vendor doesn't exist, receipt number sequence
- * impossible, duplicate of an earlier claim). Source: ACFE.
- */
 const PID = Ids.asPatternId('P-I-005');
 const definition: PatternDef = {
   id: PID,
@@ -28,16 +22,41 @@ const definition: PatternDef = {
   defaultWeight: 0.45,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
+    const sources: ReadonlyArray<Schemas.SourceEventKind> = ['payment_order', 'audit_observation'];
+    const noVendor = readBoolWithFallback(
+      subject,
+      'receipt_vendor_unknown',
+      'receipt_vendor_unknown',
+      sources,
+    );
+    const invalidNumber = readBoolWithFallback(
+      subject,
+      'receipt_number_invalid',
+      'receipt_number_invalid',
+      sources,
+    );
+    const dup = readBoolWithFallback(
+      subject,
+      'duplicate_of_prior_claim',
+      'duplicate_of_prior_claim',
+      sources,
+    );
     const flags: string[] = [];
-    if (meta.receipt_vendor_unknown === true) flags.push('vendor_unknown');
-    if (meta.receipt_number_invalid === true) flags.push('receipt_number_invalid');
-    if (meta.duplicate_of_prior_claim === true) flags.push('duplicate_claim');
+    if (noVendor.value) flags.push('vendor_unknown');
+    if (invalidNumber.value) flags.push('receipt_number_invalid');
+    if (dup.value) flags.push('duplicate_claim');
     if (flags.length === 0) return notMatched(PID, 'no fictitious-expense markers');
-    const strength = Math.min(0.95, 0.4 + flags.length * 0.2);
+    const strength = Math.min(0.95, 0.55 + flags.length * 0.15);
+    const ev = evidenceFrom([
+      ...noVendor.contributors,
+      ...invalidNumber.contributors,
+      ...dup.contributors,
+    ]);
     return matched({
       pattern_id: PID,
       strength,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
       rationale: `Expense markers: ${flags.join(', ')}.`,
     });
   },

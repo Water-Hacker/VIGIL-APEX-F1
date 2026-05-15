@@ -1,17 +1,11 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
-/**
- * P-I-007 — Cash larceny (ACFE).
- *
- * Cash that was recorded in the books is subsequently stolen. Detection:
- * recorded-deposits vs. bank-statement-deposits gap; pattern persists
- * across multiple reconciliation periods. Source: ACFE.
- */
 const PID = Ids.asPatternId('P-I-007');
 const definition: PatternDef = {
   id: PID,
@@ -28,19 +22,30 @@ const definition: PatternDef = {
   defaultWeight: 0.55,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const gapXaf = Number(meta.deposit_reconciliation_gap_xaf ?? 0);
-    const periods = Number(meta.gap_periods ?? 0);
-    if (gapXaf < 1_000_000 || periods < 2)
-      return notMatched(PID, `gap=${gapXaf} periods=${periods}`);
+    const gap = readNumericWithFallback(
+      subject,
+      'deposit_reconciliation_gap_xaf',
+      'deposit_reconciliation_gap_xaf',
+      ['audit_observation', 'company_filing'],
+    );
+    const periods = readNumericWithFallback(subject, 'gap_periods', 'gap_periods', [
+      'audit_observation',
+      'company_filing',
+    ]);
+    if (gap.value < 1_000_000 || periods.value < 2) {
+      return notMatched(PID, `gap=${gap.value} periods=${periods.value}`);
+    }
     const strength = Math.min(
       0.95,
-      0.3 + Math.min(0.4, Math.log10(gapXaf / 1_000_000) * 0.2) + periods * 0.06,
+      0.5 + Math.min(0.3, Math.log10(gap.value / 1_000_000) * 0.15) + periods.value * 0.04,
     );
+    const ev = evidenceFrom([...gap.contributors, ...periods.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Reconciliation gap of ${gapXaf.toLocaleString('fr-CM')} XAF across ${periods} periods.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Reconciliation gap of ${gap.value.toLocaleString('fr-CM')} XAF across ${periods.value} periods.`,
     });
   },
 };
