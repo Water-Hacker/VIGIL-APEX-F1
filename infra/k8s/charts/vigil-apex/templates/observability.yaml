@@ -1,0 +1,345 @@
+{{- if .Values.observability.prometheus.enabled }}
+# Prometheus — single instance, pinned to node-c (where the warm tier
+# has spare capacity). 30-day retention. Thanos sidecar added in Phase 3
+# for HA scrape continuity.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "prometheus") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus-headless") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "prometheus") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "prometheus") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.pinToNode" (dict "node" (.Values.observability.prometheus.pinnedNode | default "c")) | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: prometheus
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.observability.prometheus.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.observability.prometheus.retention | default "30d" }}
+            - --web.console.libraries=/usr/share/prometheus/console_libraries
+            - --web.console.templates=/usr/share/prometheus/consoles
+            - --web.enable-lifecycle
+            - --web.enable-admin-api
+          ports:
+            - { name: http, containerPort: 9090, protocol: TCP }
+          {{- include "vigil-apex.httpProbes" (dict "port" "http" "path" "/-/healthy") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.observability.prometheus.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus, readOnly: true }
+            - { name: data, mountPath: /prometheus }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus-config") }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.observability.prometheus.persistence.size | default "100Gi" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "prometheus") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "prometheus") | nindent 4 }}
+  ports:
+    - { name: http, port: 9090, targetPort: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "prometheus") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "prometheus") | nindent 4 }}
+  ports:
+    - { name: http, port: 9090, targetPort: http }
+{{- end }}
+{{- if .Values.observability.alertmanager.enabled }}
+---
+# Alertmanager — 3-replica gossip mesh. Each replica is anti-affinity-
+# spread; alerts are deduplicated cluster-wide via gossip.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "alertmanager") | nindent 4 }}
+spec:
+  replicas: {{ .Values.observability.alertmanager.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-headless") }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "alertmanager") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "alertmanager") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "alertmanager") | nindent 8 }}
+      containers:
+        - name: alertmanager
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.observability.alertmanager.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=0.0.0.0:9094
+            - --cluster.peer={{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}-0.{{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-headless") }}.{{ .Release.Namespace }}.svc.cluster.local:9094
+            - --cluster.peer={{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}-1.{{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-headless") }}.{{ .Release.Namespace }}.svc.cluster.local:9094
+            - --cluster.peer={{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}-2.{{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-headless") }}.{{ .Release.Namespace }}.svc.cluster.local:9094
+          ports:
+            - { name: http, containerPort: 9093, protocol: TCP }
+            - { name: gossip, containerPort: 9094, protocol: TCP }
+          {{- include "vigil-apex.httpProbes" (dict "port" "http" "path" "/-/healthy") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.observability.alertmanager.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/alertmanager, readOnly: true }
+            - { name: data, mountPath: /alertmanager }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-config") }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "alertmanager") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "alertmanager") | nindent 4 }}
+  ports:
+    - { name: http, port: 9093, targetPort: http }
+    - { name: gossip, port: 9094, targetPort: gossip }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "alertmanager") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "alertmanager") | nindent 4 }}
+  ports:
+    - { name: http, port: 9093, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager") }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "alertmanager") | nindent 6 }}
+{{- end }}
+{{- if .Values.observability.grafana.enabled }}
+---
+# Grafana — 2-replica anti-affinity. Sessions are stateless (anonymous
+# read-only access for civil-society users; OIDC for operators).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "grafana") | nindent 4 }}
+spec:
+  replicas: {{ .Values.observability.grafana.replicaCount | default 2 }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "grafana") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "grafana") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "grafana") | nindent 8 }}
+      containers:
+        - name: grafana
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.observability.grafana.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana-secrets") }}
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana-secrets") }}
+                  key: admin-password
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_LOG_MODE
+              value: console
+          ports:
+            - { name: http, containerPort: 3000, protocol: TCP }
+          {{- include "vigil-apex.httpProbes" (dict "port" "http" "path" "/api/health") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.observability.grafana.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "grafana") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "grafana") | nindent 4 }}
+  ports:
+    - { name: http, port: 3000, targetPort: http }
+{{- end }}
+{{- if .Values.observability.falco.enabled }}
+---
+# Falco — DaemonSet, one pod per cluster node. eBPF-based host-level
+# syscall monitoring; rules from infra/observability/falco/.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "falco") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "falco") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "falco") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "falco") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "falco") }}
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+      containers:
+        - name: falco
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.observability.falco.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            privileged: true   # required for eBPF probe attach
+          args:
+            - /usr/bin/falco
+            - --modern-bpf
+            - -K
+            - /var/run/secrets/kubernetes.io/serviceaccount/token
+            - -k
+            - https://kubernetes.default.svc.cluster.local
+          ports:
+            - { name: http, containerPort: 8765, protocol: TCP }
+          {{- include "vigil-apex.httpProbes" (dict "port" "http" "path" "/healthz") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.observability.falco.resources | nindent 12 }}
+          volumeMounts:
+            - { name: dev, mountPath: /host/dev }
+            - { name: proc, mountPath: /host/proc, readOnly: true }
+            - { name: boot, mountPath: /host/boot, readOnly: true }
+            - { name: lib-modules, mountPath: /host/lib/modules, readOnly: true }
+            - { name: usr, mountPath: /host/usr, readOnly: true }
+            - { name: etc, mountPath: /host/etc, readOnly: true }
+      volumes:
+        - { name: dev, hostPath: { path: /dev } }
+        - { name: proc, hostPath: { path: /proc } }
+        - { name: boot, hostPath: { path: /boot } }
+        - { name: lib-modules, hostPath: { path: /lib/modules } }
+        - { name: usr, hostPath: { path: /usr } }
+        - { name: etc, hostPath: { path: /etc } }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "falco") }}
+{{- end }}

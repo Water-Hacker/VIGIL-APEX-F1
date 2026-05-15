@@ -1,4 +1,7 @@
-{{- if .Values.redis.enabled }}
+{{- if and .Values.redis.enabled (not .Values.redis.ha.enabled) }}
+# Single-replica Redis — DEV / single-node only. HA path
+# (redis-sentinel-statefulset.yaml) takes over when
+# .Values.redis.ha.enabled = true.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

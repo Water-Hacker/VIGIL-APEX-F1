@@ -23,6 +23,37 @@ data:
     maxmemory {{ .Values.redis.config.maxmemory }}
     maxmemory-policy {{ .Values.redis.config.maxmemoryPolicy }}
     loglevel notice
+{{- if .Values.redis.ha.enabled }}
+    # HA-mode: Sentinel-aware durability + replication backlog.
+    masterauth /run/secrets/redis_password
+    masteruser vigil_app
+    min-replicas-to-write {{ .Values.redis.ha.masterReplica.minReplicasToWrite | default 1 }}
+    min-replicas-max-lag {{ .Values.redis.ha.masterReplica.minReplicasMaxLag | default 10 }}
+    replica-read-only yes
+    replica-serve-stale-data yes
+    repl-diskless-sync no
+    repl-diskless-sync-delay 5
+    repl-backlog-size 256mb
+    repl-backlog-ttl 3600
+  sentinel.conf: |
+    # Redis Sentinel — quorum-2 of 3.
+    port 26379
+    bind 0.0.0.0
+    protected-mode no
+    sentinel auth-pass vigil-master /run/secrets/redis_password
+    sentinel auth-user vigil-master vigil_app
+    sentinel monitor vigil-master MASTER_HOST 6379 {{ .Values.redis.ha.sentinel.quorum | default 2 }}
+    sentinel down-after-milliseconds vigil-master {{ .Values.redis.ha.sentinel.downAfterMilliseconds | default 5000 }}
+    sentinel failover-timeout vigil-master {{ .Values.redis.ha.sentinel.failoverTimeout | default 30000 }}
+    sentinel parallel-syncs vigil-master {{ .Values.redis.ha.sentinel.parallelSyncs | default 1 }}
+    sentinel resolve-hostnames yes
+    sentinel announce-hostnames yes
+    sentinel announce-ip ANNOUNCE_IP
+    sentinel announce-port 26379
+    sentinel deny-scripts-reconfig yes
+    loglevel notice
+    logfile ""
+{{- end }}
   users.acl.template: |
     user default off nopass nocommands
     user vigil_app on >__VIGIL_REDIS_PASSWORD__ ~* &* +@all

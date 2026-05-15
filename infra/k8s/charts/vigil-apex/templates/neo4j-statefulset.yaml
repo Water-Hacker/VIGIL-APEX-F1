@@ -1,0 +1,213 @@
+{{- if .Values.neo4j.enabled }}
+# Neo4j Community — single-node, pinned to cluster node-b. Workers
+# fall back to Postgres entity tables when Neo4j is down (see
+# worker-pattern fallback). A CronJob dumps the graph DB to node-c
+# every 6 hours for fast restore.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-headless") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "neo4j") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 7474
+        runAsGroup: 7474
+        fsGroup: 7474
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.pinToNode" (dict "node" (.Values.neo4j.pinnedNode | default "b")) | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: neo4j
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.neo4j.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 7474
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false
+            seccompProfile: { type: RuntimeDefault }
+          env:
+            - name: NEO4J_ACCEPT_LICENSE_AGREEMENT
+              value: "yes"
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-secrets") }}
+                  key: auth
+            - name: NEO4J_server_memory_heap_initial__size
+              value: "{{ .Values.neo4j.heap.initial | default "4G" }}"
+            - name: NEO4J_server_memory_heap_max__size
+              value: "{{ .Values.neo4j.heap.max | default "16G" }}"
+            - name: NEO4J_server_memory_pagecache_size
+              value: "{{ .Values.neo4j.pageCache | default "8G" }}"
+            - name: NEO4J_server_default__listen__address
+              value: "0.0.0.0"
+            - name: NEO4J_dbms_security_procedures_unrestricted
+              value: "apoc.*,gds.*"
+          ports:
+            - { name: http, containerPort: 7474, protocol: TCP }
+            - { name: bolt, containerPort: 7687, protocol: TCP }
+            - { name: backup, containerPort: 6362, protocol: TCP }
+          livenessProbe:
+            tcpSocket: { port: bolt }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.neo4j.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: logs, mountPath: /logs }
+      volumes:
+        - { name: logs, emptyDir: { sizeLimit: 2Gi } }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.neo4j.persistence.size | default "200Gi" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "neo4j") | nindent 4 }}
+  ports:
+    - { name: http, port: 7474, targetPort: http }
+    - { name: bolt, port: 7687, targetPort: bolt }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "neo4j") | nindent 4 }}
+  ports:
+    - { name: http, port: 7474, targetPort: http }
+    - { name: bolt, port: 7687, targetPort: bolt }
+{{- if .Values.neo4j.backup.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-backup") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.storageClass }}
+  storageClassName: {{ .Values.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.neo4j.backup.size | default "100Gi" }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-backup") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+spec:
+  schedule: {{ .Values.neo4j.backup.schedule | default "0 */6 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 12 }}
+            app.kubernetes.io/role: backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j") }}
+          # Pin the backup job to node-c so a node-b failure doesn't lose
+          # both the primary and the most recent backup at once.
+          affinity:
+            {{- include "vigil-apex.pinToNode" (dict "node" (.Values.neo4j.backup.pinnedNode | default "c")) | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 7474
+            runAsGroup: 7474
+            fsGroup: 7474
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: backup
+              image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.neo4j.image) }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  neo4j-admin database dump neo4j \
+                    --to-path=/backup \
+                    --verbose
+                  mv /backup/neo4j.dump /backup/neo4j-${TS}.dump
+                  # Retain last 28 dumps (≈ 7 days at 6h cadence).
+                  ls -1t /backup/neo4j-*.dump | tail -n +29 | xargs -r rm -f
+              env:
+                - name: NEO4J_AUTH
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-secrets") }}
+                      key: auth
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+                - { name: data, mountPath: /data, readOnly: true }
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-backup") }}
+            - name: data
+              persistentVolumeClaim:
+                claimName: data-{{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j") }}-0
+{{- end }}
+{{- end }}

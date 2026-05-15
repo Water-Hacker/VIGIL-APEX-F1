@@ -1,0 +1,192 @@
+{{- if .Values.ipfs.enabled }}
+# IPFS — 3 Kubo peers with anti-affinity. Co-located ipfs-cluster
+# sidecar handles pin coordination across all 3 peers (replication
+# factor 2 minimum, 3 maximum).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ipfs.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs-headless") }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "ipfs") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "ipfs") | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        # ──────────────────────────────────────────────────────────────────
+        # Kubo (the IPFS daemon)
+        # ──────────────────────────────────────────────────────────────────
+        - name: kubo
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.ipfs.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false  # Kubo init writes to /data/ipfs
+            seccompProfile: { type: RuntimeDefault }
+          env:
+            - name: IPFS_PROFILE
+              value: server
+            - name: IPFS_PATH
+              value: /data/ipfs
+          ports:
+            - { name: api, containerPort: 5001, protocol: TCP }
+            - { name: gateway, containerPort: 8080, protocol: TCP }
+            - { name: swarm, containerPort: 4001, protocol: TCP }
+          {{- include "vigil-apex.tcpProbes" (dict "port" "api") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.ipfs.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data/ipfs }
+            - { name: export, mountPath: /export }
+        # ──────────────────────────────────────────────────────────────────
+        # ipfs-cluster sidecar — one per Kubo peer (matches the codebase's
+        # 1:1 peer↔cluster pairing from docker-compose).
+        # ──────────────────────────────────────────────────────────────────
+        - name: cluster
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.ipfsCluster.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false
+            seccompProfile: { type: RuntimeDefault }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: CLUSTER_PEERNAME
+              value: $(POD_NAME)
+            - name: CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs-cluster-secret") }}
+                  key: cluster-secret
+            - name: CLUSTER_IPFSHTTP_NODEMULTIADDRESS
+              value: /ip4/127.0.0.1/tcp/5001
+            - name: CLUSTER_CRDT_TRUSTEDPEERS
+              value: "*"
+            - name: CLUSTER_REPLICATION_FACTOR_MIN
+              value: "{{ .Values.ipfsCluster.config.replicationFactorMin | default 2 }}"
+            - name: CLUSTER_REPLICATION_FACTOR_MAX
+              value: "{{ .Values.ipfsCluster.config.replicationFactorMax | default 3 }}"
+            - name: CLUSTER_MONITORPINGINTERVAL
+              value: 15s
+            - name: CLUSTER_RESTAPI_HTTPLISTENMULTIADDRESS
+              value: /ip4/0.0.0.0/tcp/9094
+            - name: CLUSTER_IPFSPROXY_LISTENMULTIADDRESS
+              value: /ip4/0.0.0.0/tcp/9095
+            - name: CLUSTER_LISTENMULTIADDRESS
+              value: /ip4/0.0.0.0/tcp/9096
+          ports:
+            - { name: cluster-api, containerPort: 9094, protocol: TCP }
+            - { name: cluster-proxy, containerPort: 9095, protocol: TCP }
+            - { name: cluster-swarm, containerPort: 9096, protocol: TCP }
+          {{- include "vigil-apex.tcpProbes" (dict "port" "cluster-api") | nindent 10 }}
+          resources:
+            {{- toYaml .Values.ipfsCluster.resources | nindent 12 }}
+          volumeMounts:
+            - { name: cluster-data, mountPath: /data/ipfs-cluster }
+      volumes:
+        - { name: export, emptyDir: { sizeLimit: 1Gi } }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ipfs.persistence.size | default "500Gi" }}
+    - metadata:
+        name: cluster-data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs-cluster") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "ipfs") | nindent 4 }}
+  ports:
+    - { name: api, port: 5001, targetPort: api, protocol: TCP }
+    - { name: gateway, port: 8080, targetPort: gateway, protocol: TCP }
+    - { name: swarm, port: 4001, targetPort: swarm, protocol: TCP }
+    - { name: cluster-api, port: 9094, targetPort: cluster-api, protocol: TCP }
+    - { name: cluster-swarm, port: 9096, targetPort: cluster-swarm, protocol: TCP }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "ipfs") | nindent 4 }}
+  ports:
+    - { name: api, port: 5001, targetPort: api, protocol: TCP }
+    - { name: gateway, port: 8080, targetPort: gateway, protocol: TCP }
+    - { name: cluster-api, port: 9094, targetPort: cluster-api, protocol: TCP }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 4 }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "ipfs") | nindent 6 }}
+{{- end }}

@@ -1,4 +1,7 @@
-{{- if .Values.vault.enabled }}
+{{- if and .Values.vault.enabled (not .Values.vault.ha.enabled) }}
+# Single-replica Vault — DEV / single-node only. In production the HA
+# path (vault-raft-statefulset.yaml) takes over when
+# .Values.vault.ha.enabled = true (set via values-cluster.yaml).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
