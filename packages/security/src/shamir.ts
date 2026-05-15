@@ -52,6 +52,25 @@ function gfDiv(a: number, b: number): number {
  *
  * Throws if the shares disagree on length, if X coordinates collide, or
  * if any X coordinate is zero (which would be the secret itself).
+ *
+ * Hardening mode 5.9 — IMPORTANT: this function does NOT verify Y-byte
+ * integrity. Lagrange interpolation over GF(256) is bytes-in, bytes-out:
+ * a single flipped Y byte produces a SILENTLY WRONG secret. The
+ * combiner cannot distinguish "valid shares for a different secret"
+ * from "tampered shares for the original secret."
+ *
+ * Share-integrity validation is an UPSTREAM responsibility:
+ *   - Production: each share is age-encrypted to a council member's
+ *     YubiKey via age-plugin-yubikey. age uses authenticated
+ *     encryption; ciphertext tampering fails the MAC and age refuses
+ *     to decrypt. Corrupted shares never reach shamirCombine.
+ *   - Tests/dev: callers passing raw shares must verify integrity
+ *     themselves (e.g. via a separate sha256 prefix per share).
+ *
+ * Regression-locked by `mode 5.9 — corrupted-share detection is
+ * upstream of shamirCombine` test suite in shamir.test.ts. If a future
+ * PR adds in-combiner integrity, that test will fail and force the
+ * change to be coordinated with the age-plugin-yubikey path.
  */
 export function shamirCombine(shares: ReadonlyArray<Uint8Array>): Uint8Array {
   if (shares.length < 2) {
