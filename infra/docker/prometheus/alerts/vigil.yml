@@ -204,6 +204,22 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 1.5 — global retry-budget exhaustion.
+      # RetryBudget.tryReserve() increments
+      # vigil_retry_budget_exhausted_total when the per-window ceiling
+      # is exceeded — that's the signal that a shared dependency
+      # (Polygon, LLM provider, Fabric) is in trouble and workers
+      # across the fleet are correctly backing off. Sustained
+      # exhaustion is critical: it means the actual failure rate is
+      # above the operator-configured ceiling.
+      - alert: RetryBudgetExhausted
+        expr: rate(vigil_retry_budget_exhausted_total[5m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Retry budget {{ $labels.name }} exhausted'
+          description: 'vigil_retry_budget_exhausted_total{name="{{ $labels.name }}"} has fired for 5 minutes. The shared dependency under this budget is failing and the fleet is throttling its retries to avoid a cascade. Investigate the dependency (logs at the worker level will show the underlying error).'
+
       # Hardening mode 1.7 — startup-failure circuit breaker pressure.
       # StartupGuard.check() emits this counter when a worker has
       # tripped the failure ceiling within its window (defaults: 5

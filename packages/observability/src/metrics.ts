@@ -293,6 +293,28 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 1.5 — global retry budget counters. Every call to
+ * `RetryBudget.tryReserve()` increments `vigil_retry_budget_reserved_total`
+ * regardless of outcome; when the ceiling is crossed the call also
+ * increments `vigil_retry_budget_exhausted_total`. The exhausted
+ * counter rising is the operator's signal that the shared dependency
+ * is in trouble and workers are correctly backing off.
+ */
+export const retryBudgetTotalReserved = new Counter({
+  name: 'vigil_retry_budget_reserved_total',
+  help: 'Retry-budget reservation attempts (mode 1.5)',
+  labelNames: ['name'] as const,
+  registers: [registry],
+});
+
+export const retryBudgetExhaustedTotal = new Counter({
+  name: 'vigil_retry_budget_exhausted_total',
+  help: 'Retry-budget exhaustion events — global retry storm signal (mode 1.5)',
+  labelNames: ['name'] as const,
+  registers: [registry],
+});
+
+/**
  * In-flight gauge for adaptive concurrency (D9). Each worker reports its
  * own slot count.
  */
