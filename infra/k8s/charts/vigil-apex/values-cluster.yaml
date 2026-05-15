@@ -1,5 +1,18 @@
 # VIGIL APEX — HA-cluster overrides for the 3-node DL380 Gen11 deployment.
 #
+# Hardware tier: AI / Security Node (per DECISION-020) —
+#   2× Intel Xeon Platinum 8xxx (32c+/socket = 64c+ per node)
+#   1 TB+ DDR5-5200 RDIMM
+#   ~19 TB usable NVMe per node (4× 1.92 TB hot + 8× 3.84 TB warm, RAID-10)
+#   4–8× NVIDIA L4 (24 GB GDDR6 each; 96–192 GB pooled VRAM per node)
+#   2× 1600 W Platinum PSU, HPE iLO 6, TPM 2.0
+# Reference: docs/decisions/decision-020-dl380-ai-security-tier.md
+#
+# Resource limits below are scaled to the AI/Security tier — 4× the
+# leaner Gold/256 GB spec the previous revision targeted. If procurement
+# falls back to the leaner spec (see DECISION-020 re-open triggers),
+# halve every memory limit and drop the `nvidia.com/gpu:` sections.
+#
 # Apply on top of values-prod.yaml:
 #   helm upgrade --install vigil-apex ./infra/k8s/charts/vigil-apex \
 #     -f infra/k8s/charts/vigil-apex/values.yaml \
@@ -148,8 +161,11 @@ postgres:
         enabled: true
         destination: rclone:hetzner-n02:/vigil/wal-archive/
   resources:
-    requests: { memory: '2Gi', cpu: '1' }
-    limits: { memory: '16Gi', cpu: '4' }
+    # DECISION-020: 4× memory budget for Postgres on the AI/Security tier.
+    # shared_buffers can be sized to ~256 GB (25% of 1 TB node RAM) — moves
+    # heavy OLTP working set into RAM.
+    requests: { memory: '32Gi', cpu: '4' }
+    limits: { memory: '64Gi', cpu: '16' }
   persistence:
     size: 1Ti # NVMe hot tier on each node
   affinity:
@@ -179,8 +195,10 @@ redis:
   persistence:
     size: 50Gi
   resources:
-    requests: { memory: '512Mi', cpu: '250m' }
-    limits: { memory: '8Gi', cpu: '2' }
+    # DECISION-020: 4× memory budget for Redis. Larger maxmemory absorbs
+    # higher stream-length retention + LLM call-result cache.
+    requests: { memory: '4Gi', cpu: '1' }
+    limits: { memory: '32Gi', cpu: '4' }
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -210,8 +228,11 @@ neo4j:
     schedule: '0 */6 * * *' # every 6 hours
     destinationPVC: neo4j-backup-pvc
   resources:
-    requests: { memory: '8Gi', cpu: '2' }
-    limits: { memory: '32Gi', cpu: '4' }
+    # DECISION-020: 4× memory budget for Neo4j. 96 GB heap +
+    # 32 GB page cache fits the entity graph at the projected
+    # entity-resolution corpus size.
+    requests: { memory: '32Gi', cpu: '4' }
+    limits: { memory: '128Gi', cpu: '16' }
   persistence:
     size: 200Gi
 
@@ -223,10 +244,17 @@ ipfs:
     tag: 'v0.30.0'
   replicaCount: 3
   resources:
-    requests: { memory: '1Gi', cpu: '500m' }
-    limits: { memory: '8Gi', cpu: '2' }
+    # DECISION-020: with no SAS HDD bulk tier, IPFS pinset lives on the
+    # warm NVMe tier (~15.36 TB usable per node). The increased memory
+    # accommodates a larger pin index + pin-cache.
+    requests: { memory: '4Gi', cpu: '1' }
+    limits: { memory: '32Gi', cpu: '4' }
   persistence:
-    size: 500Gi # bulk tier on each node
+    # DECISION-020: bulk-tier collapse — IPFS now lives on the warm
+    # NVMe pool (was SAS HDD bulk in the previous spec). 5 TiB per
+    # node leaves headroom for evidence growth without committing the
+    # full warm budget.
+    size: 5Ti
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -348,3 +376,134 @@ observability:
   falco:
     enabled: true
     daemonSet: true # one per node — host-level eBPF telemetry
+
+# ============================================================================
+# GPU-bound workloads (DECISION-020 — AI/Security Node tier)
+# ============================================================================
+#
+# These sections are gated off until:
+#   (a) NVIDIA device plugin is installed in the k3s cluster
+#       (`kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/.../nvidia-device-plugin.yml`).
+#   (b) DECISION-011 (AI-SAFETY-DOCTRINE) review for local-LLM lands.
+#   (c) The architect's procurement closure on the actual GPU count
+#       (4× L4 minimum, 8× L4 maximum per node).
+#
+# Each section's `enabled: false` is the safe default; flip to true
+# once the gates above are met and the corresponding worker images
+# are published.
+
+# Local LLM inference — Qwen-72B-Instruct-Q4 or DeepSeek-V3-Q4 served
+# via vLLM. Wraps the existing `packages/llm/src/providers/` interface
+# so the rest of the codebase consumes it through the same LlmRouter.
+# Requires a follow-up `packages/llm/src/providers/local-vllm.ts`.
+workerLocalLlm:
+  enabled: false # DECISION-011 review gate
+  image:
+    repository: vllm/vllm-openai
+    # Pin a specific patch; DECISION-020 §"Procurement order-of-events"
+    # marks model-weight verification as a per-deploy step.
+    tag: 'v0.6.4'
+  replicaCount: 2 # 1 GPU node per replica; cluster has 3 GPU-equipped nodes
+  resources:
+    requests:
+      cpu: '4'
+      memory: '32Gi'
+      nvidia.com/gpu: 2 # half of a 4-L4 node, or quarter of an 8-L4 node
+    limits:
+      cpu: '16'
+      memory: '128Gi'
+      nvidia.com/gpu: 2
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+  # Model weights live on a persistent volume so the pod doesn't re-download
+  # on every restart. The volume is sha256-verified at mount (cosign + the
+  # weight-signing key, landing in the same Phase 12 closure as the image
+  # cosign chain).
+  modelVolume:
+    enabled: true
+    size: 200Gi # Qwen-72B-Q4 ≈ 40 GB; DeepSeek-V3-Q4 ≈ 350 GB
+    storageClass: local-path
+
+# ZK proof generation — rapidsnark for the council-vote ceremony's
+# 3-of-5 partial-signature aggregation. Currently CPU-only at scale 10²;
+# moving to GPU keeps the ceremony under the 30-second decision window
+# as the council count scales toward 9-of-15 in Phase 3.
+workerZkProve:
+  enabled: false # follow-up; requires the worker code to land first
+  image:
+    repository: vigil-apex/worker-zk-prove
+    tag: '0.1.0'
+  replicaCount: 3 # one per node
+  resources:
+    requests:
+      cpu: '2'
+      memory: '8Gi'
+      nvidia.com/gpu: 1
+    limits:
+      cpu: '8'
+      memory: '32Gi'
+      nvidia.com/gpu: 1
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+
+# Satellite ML acceleration — CUDA-backed NDVI / NDBI computation and
+# the future built-up classifier. The existing `worker-satellite`
+# `compute_activity` is CPU-only (numpy); a CUDA variant via CuPy
+# or rasterio's GDAL-CUDA backend speeds large-scene processing by
+# 10-50×.
+workerSatelliteCuda:
+  enabled: false # follow-up; CuPy + rasterio-cuda pipeline not yet upstreamed
+  image:
+    repository: vigil-apex/worker-satellite
+    tag: '0.2.0-cuda'
+  replicaCount: 1 # one per node opportunistic; existing CPU workers handle baseline
+  resources:
+    requests:
+      cpu: '2'
+      memory: '8Gi'
+      nvidia.com/gpu: 1
+    limits:
+      cpu: '8'
+      memory: '32Gi'
+      nvidia.com/gpu: 1
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+
+# Image-forensics ML acceleration — currently OpenCV CPU; can move to
+# CUDA-OpenCV for font/signature similarity at higher throughput.
+# Same caveat as workerSatelliteCuda: opportunistic, baseline stays CPU.
+workerImageForensicsCuda:
+  enabled: false
+  image:
+    repository: vigil-apex/worker-image-forensics
+    tag: '0.2.0-cuda'
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: '2'
+      memory: '8Gi'
+      nvidia.com/gpu: 1
+    limits:
+      cpu: '8'
+      memory: '32Gi'
+      nvidia.com/gpu: 1
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+
+# Security-node workloads — NIDS/HIDS (Suricata + Falco rules engine
+# beyond the per-node DaemonSet) + behaviour-anomaly detection on
+# audit-chain traffic.
+workerSecurityAnomaly:
+  enabled: false # awaits architect's "Security Node" worker design
+  image:
+    repository: vigil-apex/worker-security-anomaly
+    tag: '0.1.0'
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: '2'
+      memory: '4Gi'
+    # CPU-only baseline; GPU optional for ML-classifier ensemble.
+    limits:
+      cpu: '8'
+      memory: '16Gi'

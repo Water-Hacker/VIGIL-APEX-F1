@@ -3959,6 +3959,30 @@ commit: fd38e2c
 
 ---
 
+## DECISION-020 DL380 cluster hardware tier — AI / Security Node spec
+
+**Status:** FINAL (procurement intent).
+
+**Date:** 2026-05-15.
+
+**Thesis.** Phase 2 procurement targets 3× HPE ProLiant DL380 Gen11 in the
+"Fully Loaded AI / Security Node" tier: 2× Xeon Platinum 8xxx (32c+/socket),
+1 TB+ DDR5, all-NVMe storage (~19 TB usable per node), 4–8× NVIDIA L4 GPUs.
+Per-node ~$55–80 k; cluster ~$165–240 k. Supersedes the leaner spec
+documented in `~/.claude/plans/crispy-pondering-teapot.md` (Gold 6442Y /
+256 GB / tiered NVMe+HDD / no GPUs / $85–105 k cluster). Unlocks local-LLM
+inference (Qwen-72B / DeepSeek-V3 quantised), ZK-proof generation, GPU-class
+satellite + image-forensics ML, and the "Security Node" role (NIDS/HIDS +
+behaviour-anomaly engines on audit chain). Requires DECISION-011 review pass
+before first local-LLM call (model-poisoning + signed-weights surface).
+
+Full rationale + procurement order-of-events + re-open triggers in
+`decision-020-dl380-ai-security-tier.md`.
+
+commit: PENDING
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
