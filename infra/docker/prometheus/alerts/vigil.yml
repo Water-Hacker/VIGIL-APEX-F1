@@ -204,6 +204,20 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 1.7 — startup-failure circuit breaker pressure.
+      # StartupGuard.check() emits this counter when a worker has
+      # tripped the failure ceiling within its window (defaults: 5
+      # failures in 5 minutes). The counter fires once per trip; a
+      # sustained rate indicates a worker that cannot start at all
+      # (missing env, unreachable dependency, container image bug).
+      - alert: WorkerStartupCrashLoop
+        expr: rate(vigil_worker_startup_failures_total[5m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Worker {{ $labels.service }} is in a startup crash-loop'
+          description: 'StartupGuard tripped — {{ $labels.service }} has failed to start at least 5 times in the last 5 minutes. The worker will sleep and exit with code 42 between attempts. Check logs for the root cause (missing env, Vault token, Postgres unavailable).'
+
       # Mode 2.1 companion — the pool-metrics scraper itself has stalled.
       # The scraper writes to `vigil_db_pool_total` every 5 s; if the
       # gauge isn't refreshed for > 60 s, either the worker that owns

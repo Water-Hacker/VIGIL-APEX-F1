@@ -278,6 +278,21 @@ export const repoCasConflictTotal = new Counter({
 });
 
 /**
+ * Hardening mode 1.7 — startup-failure circuit breaker counter.
+ * Incremented when StartupGuard observes that the worker has tripped
+ * the failure ceiling within the configured window. Visible via
+ * Prometheus even though the worker is about to exit; alerting on
+ * `rate(vigil_worker_startup_failures_total[5m]) > 0` surfaces
+ * crash-loop pressure to operators.
+ */
+export const startupGuardFailuresTotal = new Counter({
+  name: 'vigil_worker_startup_failures_total',
+  help: 'Startup-guard trips detected — crash-loop pressure (mode 1.7)',
+  labelNames: ['service'] as const,
+  registers: [registry],
+});
+
+/**
  * In-flight gauge for adaptive concurrency (D9). Each worker reports its
  * own slot count.
  */
