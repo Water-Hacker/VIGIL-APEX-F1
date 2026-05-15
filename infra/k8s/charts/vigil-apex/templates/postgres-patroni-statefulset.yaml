@@ -1,0 +1,161 @@
+{{- if and .Values.postgres.enabled .Values.postgres.ha.enabled }}
+# Patroni-managed Postgres for the 3-node DL380 Gen11 cluster.
+# Uses the Spilo image which bundles Patroni + Postgres + pg_basebackup
+# + the wal-g shipping CLI in a single container.
+#
+# Topology: 3 replicas across the 3 nodes via anti-affinity. The pod
+# with ordinal 0 is the initial leader; Patroni handles re-election
+# automatically thereafter using the etcd ensemble as DCS.
+#
+# The bootstrap config (postgresql.conf parameters, pg_hba rules,
+# Patroni TTL / sync mode) lives in postgres-patroni-configmap.yaml.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  replicas: {{ .Values.postgres.ha.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-headless") }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/postgres-patroni-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 103
+        fsGroup: 103
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "postgres") | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      # Wait for etcd to be ready — Patroni cannot start without DCS.
+      initContainers:
+        - name: wait-for-etcd
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w2 {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd") }} 2379; do
+                echo "waiting for etcd"
+                sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+      containers:
+        - name: postgres
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.postgres.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - { name: postgres, containerPort: 5432, protocol: TCP }
+            - { name: patroni, containerPort: 8008, protocol: TCP }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: SCOPE
+              value: {{ .Values.postgres.ha.clusterName | default "vigil-postgres-ha" }}
+            - name: SPILO_CONFIGURATION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-patroni") }}
+                  key: spilo.yaml
+            - name: ETCD3_HOSTS
+              value: {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd") }}:2379
+            - name: PGROOT
+              value: /home/postgres/pgdata/pgroot
+            - name: PGDATA
+              value: /home/postgres/pgdata/pgroot/data
+            - name: KUBERNETES_USE_CONFIGMAPS
+              value: "false"
+            - name: KUBERNETES_LABELS
+              value: '{"app.kubernetes.io/name":"postgres","app.kubernetes.io/instance":"{{ .Release.Name }}"}'
+            - name: PATRONI_SCOPE
+              value: {{ .Values.postgres.ha.clusterName | default "vigil-postgres-ha" }}
+            - name: PATRONI_NAME
+              value: $(POD_NAME)
+            - name: PATRONI_KUBERNETES_POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: PATRONI_KUBERNETES_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: PATRONI_POSTGRESQL_DATA_DIR
+              value: /home/postgres/pgdata/pgroot/data
+            - name: PATRONI_POSTGRESQL_LISTEN
+              value: 0.0.0.0:5432
+            - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+              value: $(POD_IP):5432
+            - name: PATRONI_RESTAPI_LISTEN
+              value: 0.0.0.0:8008
+            - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+              value: $(POD_IP):8008
+            # Superuser + replication-user passwords from ExternalSecret (Vault-projected).
+            - name: PATRONI_SUPERUSER_USERNAME
+              value: postgres
+            - name: PATRONI_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-secrets") }}
+                  key: superuser-password
+            - name: PATRONI_REPLICATION_USERNAME
+              value: replicator
+            - name: PATRONI_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "postgres-secrets") }}
+                  key: replication-password
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: patroni
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: patroni
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - { name: pgdata, mountPath: /home/postgres/pgdata }
+      volumes: []
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "postgres") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size | default "200Gi" }}
+{{- end }}

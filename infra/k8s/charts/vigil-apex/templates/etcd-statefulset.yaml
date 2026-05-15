@@ -1,0 +1,123 @@
+{{- if .Values.etcd.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "etcd") | nindent 4 }}
+spec:
+  replicas: {{ .Values.etcd.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd-headless") }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "etcd") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "etcd") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd") }}
+      securityContext:
+        {{- include "vigil-apex.podSecurityContext" . | nindent 8 }}
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "etcd") | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: etcd
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.etcd.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- include "vigil-apex.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            - name: POD_IP
+              valueFrom:
+                fieldRef: { fieldPath: status.podIP }
+            - name: SERVICE
+              value: {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd-headless") }}
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef: { fieldPath: metadata.namespace }
+            - name: REPLICAS
+              value: {{ .Values.etcd.replicaCount | default 3 | quote }}
+            # Build the initial-cluster string from the StatefulSet's deterministic pod ordinals.
+            {{- $name := include "vigil-apex.componentName" (dict "root" . "component" "etcd") }}
+            {{- $svc := include "vigil-apex.componentName" (dict "root" . "component" "etcd-headless") }}
+            {{- $ns := .Release.Namespace }}
+            {{- $members := list }}
+            {{- range $i, $_ := until (int .Values.etcd.replicaCount) }}
+            {{- $members = append $members (printf "%s-%d=http://%s-%d.%s.%s.svc.cluster.local:2380" $name $i $name $i $svc $ns) }}
+            {{- end }}
+            - name: ETCD_INITIAL_CLUSTER
+              value: {{ join "," $members | quote }}
+            - name: ETCD_INITIAL_CLUSTER_STATE
+              value: new
+            - name: ETCD_INITIAL_CLUSTER_TOKEN
+              value: vigil-patroni-dcs
+            - name: ETCD_NAME
+              value: $(POD_NAME)
+            - name: ETCD_DATA_DIR
+              value: /var/lib/etcd/data
+            - name: ETCD_LISTEN_PEER_URLS
+              value: http://0.0.0.0:2380
+            - name: ETCD_LISTEN_CLIENT_URLS
+              value: http://0.0.0.0:2379
+            - name: ETCD_ADVERTISE_CLIENT_URLS
+              value: http://$(POD_NAME).$(SERVICE).$(NAMESPACE).svc.cluster.local:2379
+            - name: ETCD_INITIAL_ADVERTISE_PEER_URLS
+              value: http://$(POD_NAME).$(SERVICE).$(NAMESPACE).svc.cluster.local:2380
+            - name: ETCD_AUTO_COMPACTION_MODE
+              value: periodic
+            - name: ETCD_AUTO_COMPACTION_RETENTION
+              value: 1h
+            - name: ETCD_QUOTA_BACKEND_BYTES
+              value: "{{ .Values.etcd.quotaBackendBytes | default 2147483648 }}"
+            - name: ETCD_SNAPSHOT_COUNT
+              value: "10000"
+            - name: ETCD_MAX_REQUEST_BYTES
+              value: "1572864"
+          ports:
+            - { name: client, containerPort: 2379, protocol: TCP }
+            - { name: peer, containerPort: 2380, protocol: TCP }
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 2379
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 2379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            {{- toYaml .Values.etcd.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/etcd }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "etcd") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.etcd.persistence.size | default "8Gi" }}
+{{- end }}

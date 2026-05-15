@@ -136,4 +136,345 @@ spec:
           port: 80
         - protocol: TCP
           port: 443
+{{- if .Values.etcd.enabled }}
+---
+# etcd: only Patroni Postgres pods reach the client (2379) and only
+# etcd members reach each other on the peer port (2380).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "etcd-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "etcd") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "etcd") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "etcd") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 2380
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "postgres") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 2379
+{{- end }}
+{{- if .Values.ipfs.enabled }}
+---
+# IPFS: swarm (4001) is peer-to-peer, gateway/api restricted to in-cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "ipfs-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "ipfs") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "ipfs") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Swarm — open to peers (the cluster mesh + external IPFS DHT).
+    - ports:
+        - protocol: TCP
+          port: 4001
+        - protocol: UDP
+          port: 4001
+    # ipfs-cluster mesh — peers gossip on 9096 + REST on 9094.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "ipfs") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: TCP
+          port: 9095
+        - protocol: TCP
+          port: 9096
+    # API + gateway — only from data-plane clients (workers + dashboard).
+    - from:
+        {{- range .Values.networkPolicy.dataPlaneClients }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 5001
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9094
+{{- end }}
+{{- if .Values.neo4j.enabled }}
+---
+# Neo4j: bolt (7687) reachable only from worker-pattern + dashboard.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "neo4j-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "neo4j") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.dataPlaneClients }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 7687
+        - protocol: TCP
+          port: 7474
+{{- end }}
+{{- if .Values.fabricOrderer.enabled }}
+---
+# Fabric orderer: Raft peers + fabric peer clients only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-orderer") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Raft membership cluster — orderers gossip with each other.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-orderer") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 7050
+        - protocol: TCP
+          port: 8443
+    # Peer broadcast/deliver — Fabric peers submit/receive blocks.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-peer") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 7050
+    # Worker-fabric-bridge submits envelopes.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: worker-fabric-bridge
+      ports:
+        - protocol: TCP
+          port: 7050
+{{- end }}
+{{- if .Values.fabricPeer.enabled }}
+---
+# Fabric peer: workers/bridge query/invoke chaincode.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-peer") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-peer") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Chaincode container (sidecar) talks back to peer on 7052.
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 7052
+    # Workers + audit-verifier query the peer on 7051.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: worker-fabric-bridge
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: audit-verifier
+        {{- range .Values.networkPolicy.dataPlaneClients }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 7051
+{{- end }}
+{{- if .Values.tor.enabled }}
+---
+# Tor: ingress only from the Caddy LoadBalancer pod (forwards SOCKS).
+# The hidden-service binds on localhost; outbound goes via egress (allow all).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "tor") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "tor") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "caddy") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9050
+        - protocol: TCP
+          port: 9051
+  egress:
+    # DNS (already covered by default-deny egress) + everything else
+    # (Tor needs outbound to the wider Tor network on arbitrary ports).
+    - {}
+{{- end }}
+{{- if .Values.keycloak.enabled }}
+---
+# Keycloak: Caddy (frontchannel) + Infinispan/JGroups intra-cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "keycloak-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "keycloak") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "keycloak") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Public HTTP/HTTPS via Caddy.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "caddy") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+    # JGroups DNS_PING discovery + intra-cluster TCP.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "keycloak") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 7800
+        - protocol: TCP
+          port: 7900
+{{- end }}
+{{- if or .Values.observability.prometheus.enabled .Values.observability.prometheusScrape }}
+---
+# Allow Prometheus to scrape every workload exposing :9100 (worker metrics)
+# and the component-specific exporter ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "prometheus-scrape") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "prometheus") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "prometheus") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9100   # workers (per-pod prom_client default)
+        - protocol: TCP
+          port: 9090   # Prometheus self-scrape
+        - protocol: TCP
+          port: 9093   # Alertmanager
+        - protocol: TCP
+          port: 9443   # Fabric peer/orderer ops
+        - protocol: TCP
+          port: 8200   # Vault metrics
+        - protocol: TCP
+          port: 5070   # IPFS-Cluster metrics
+{{- end }}
+{{- if .Values.observability.alertmanager.enabled }}
+---
+# Alertmanager mesh: gossip on TCP/UDP 9094 between peers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "alertmanager-mesh") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "alertmanager") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "alertmanager") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Peer gossip — TCP + UDP both on 9094.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "alertmanager") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: UDP
+          port: 9094
+    # Prometheus pushes alerts via the API.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "prometheus") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9093
+{{- end }}
+{{- if .Values.observability.grafana.enabled }}
+---
+# Grafana: dashboards reached only via Caddy (operator UI).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "grafana-allow") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "grafana") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "grafana") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "vigil-apex.componentSelector" (dict "root" . "component" "caddy") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3000
+{{- end }}
 {{- end }}

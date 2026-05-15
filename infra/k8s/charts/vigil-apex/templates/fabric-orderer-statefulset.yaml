@@ -1,0 +1,193 @@
+{{- if .Values.fabricOrderer.enabled }}
+# Hyperledger Fabric — 3-orderer Raft consenters block (one per cluster
+# node via anti-affinity). The MSP material + genesis block are
+# externally provisioned: the architect runs cryptogen + configtxgen
+# from infra/docker/fabric/configtx.yaml before `helm install` and
+# imports the resulting MSP + genesis.block as Kubernetes Secrets.
+#
+# Required Secrets (created out-of-band):
+#   fabric-orderer-a-msp   — MSP material for orderer-a
+#   fabric-orderer-b-msp   — MSP material for orderer-b
+#   fabric-orderer-c-msp   — MSP material for orderer-c
+#   fabric-genesis-block   — the channel genesis block
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 4 }}
+spec:
+  replicas: {{ .Values.fabricOrderer.replicaCount | default 3 }}
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer-headless") }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-orderer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.antiAffinity" (dict "root" . "component" "fabric-orderer") | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: orderer
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.fabricOrderer.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false
+            seccompProfile: { type: RuntimeDefault }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: FABRIC_LOGGING_SPEC
+              value: INFO
+            - name: ORDERER_GENERAL_LISTENADDRESS
+              value: 0.0.0.0
+            - name: ORDERER_GENERAL_LISTENPORT
+              value: "7050"
+            - name: ORDERER_GENERAL_LOCALMSPID
+              value: OrdererMSP
+            - name: ORDERER_GENERAL_LOCALMSPDIR
+              value: /var/hyperledger/fabric/msp
+            - name: ORDERER_GENERAL_TLS_ENABLED
+              value: "true"
+            - name: ORDERER_GENERAL_TLS_PRIVATEKEY
+              value: /var/hyperledger/fabric/tls/server.key
+            - name: ORDERER_GENERAL_TLS_CERTIFICATE
+              value: /var/hyperledger/fabric/tls/server.crt
+            - name: ORDERER_GENERAL_TLS_ROOTCAS
+              value: '[/var/hyperledger/fabric/tls/ca.crt]'
+            - name: ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE
+              value: /var/hyperledger/fabric/tls/server.crt
+            - name: ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY
+              value: /var/hyperledger/fabric/tls/server.key
+            - name: ORDERER_GENERAL_CLUSTER_ROOTCAS
+              value: '[/var/hyperledger/fabric/tls/ca.crt]'
+            - name: ORDERER_GENERAL_BOOTSTRAPMETHOD
+              value: file
+            - name: ORDERER_GENERAL_BOOTSTRAPFILE
+              value: /var/hyperledger/fabric/genesis/genesis.block
+            - name: ORDERER_FILELEDGER_LOCATION
+              value: /var/hyperledger/production/orderer
+            - name: ORDERER_OPERATIONS_LISTENADDRESS
+              value: 0.0.0.0:8443
+            - name: ORDERER_METRICS_PROVIDER
+              value: prometheus
+            - name: ORDERER_ADMIN_TLS_ENABLED
+              value: "true"
+            - name: ORDERER_ADMIN_TLS_CERTIFICATE
+              value: /var/hyperledger/fabric/tls/server.crt
+            - name: ORDERER_ADMIN_TLS_PRIVATEKEY
+              value: /var/hyperledger/fabric/tls/server.key
+            - name: ORDERER_ADMIN_TLS_ROOTCAS
+              value: '[/var/hyperledger/fabric/tls/ca.crt]'
+            - name: ORDERER_ADMIN_TLS_CLIENTROOTCAS
+              value: '[/var/hyperledger/fabric/tls/ca.crt]'
+            - name: ORDERER_ADMIN_LISTENADDRESS
+              value: 0.0.0.0:9443
+          ports:
+            - { name: orderer, containerPort: 7050, protocol: TCP }
+            - { name: ops, containerPort: 8443, protocol: TCP }
+            - { name: admin, containerPort: 9443, protocol: TCP }
+          livenessProbe:
+            httpGet: { path: /healthz, port: ops }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz, port: ops }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.fabricOrderer.resources | nindent 12 }}
+          volumeMounts:
+            # Per-pod MSP + TLS material — projected by a per-ordinal init
+            # container in production; here we mount the orderer-MSP Secret
+            # whose name follows the pod ordinal.
+            - { name: msp, mountPath: /var/hyperledger/fabric/msp, readOnly: true }
+            - { name: tls, mountPath: /var/hyperledger/fabric/tls, readOnly: true }
+            - { name: genesis, mountPath: /var/hyperledger/fabric/genesis, readOnly: true }
+            - { name: production, mountPath: /var/hyperledger/production }
+      volumes:
+        - name: msp
+          projected:
+            sources:
+              - secret:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer-msp") }}
+        - name: tls
+          projected:
+            sources:
+              - secret:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer-tls") }}
+        - name: genesis
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-genesis") }}
+            items:
+              - { key: genesis.block, path: genesis.block }
+  volumeClaimTemplates:
+    - metadata:
+        name: production
+        labels:
+          {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.fabricOrderer.persistence.size | default "20Gi" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-orderer") | nindent 4 }}
+  ports:
+    - { name: orderer, port: 7050, targetPort: orderer }
+    - { name: ops, port: 8443, targetPort: ops }
+    - { name: admin, port: 9443, targetPort: admin }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-orderer") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-orderer") | nindent 4 }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-orderer") | nindent 6 }}
+{{- end }}

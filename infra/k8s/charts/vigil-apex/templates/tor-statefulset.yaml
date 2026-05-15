@@ -1,0 +1,160 @@
+{{- if .Values.tor.enabled }}
+# Tor — singleton, pinned to a specific cluster node so the v3
+# hidden-service keys never re-key on pod restart. Multiple .onion
+# listeners would each generate distinct keys; we want a stable address
+# for the citizen tip portal.
+#
+# The hidden-service keys are pre-provisioned via a Secret named
+# `<release>-tor-hidden-service` containing:
+#   hs_ed25519_secret_key   — the persistent v3 secret
+#   hs_ed25519_public_key   — derivable from the secret
+#   hostname                — the .onion address
+# These come from the architect's bootstrap, not the chart.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "tor") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor-headless") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "tor") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "tor") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/tor-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.pinToNode" (dict "node" (.Values.tor.pinnedNode | default "a")) | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      # ──────────────────────────────────────────────────────────────────
+      # Hidden-service keys must be world-unreadable (mode 0700 dir + 0600
+      # files) or the Tor daemon refuses to start. We project from the
+      # Secret into an emptyDir via initContainer that sets correct perms.
+      # ──────────────────────────────────────────────────────────────────
+      initContainers:
+        - name: prepare-hidden-service
+          image: busybox:1.37
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 100
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: true
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /hs/vigil-tip
+              cp /secrets/hs_ed25519_secret_key /hs/vigil-tip/hs_ed25519_secret_key
+              cp /secrets/hs_ed25519_public_key /hs/vigil-tip/hs_ed25519_public_key
+              cp /secrets/hostname /hs/vigil-tip/hostname
+              chmod 0700 /hs/vigil-tip
+              chmod 0600 /hs/vigil-tip/hs_ed25519_secret_key
+              chmod 0600 /hs/vigil-tip/hs_ed25519_public_key
+              chmod 0644 /hs/vigil-tip/hostname
+          volumeMounts:
+            - { name: secrets, mountPath: /secrets, readOnly: true }
+            - { name: hidden-service, mountPath: /hs }
+      containers:
+        - name: tor
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.tor.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 100
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false
+            seccompProfile: { type: RuntimeDefault }
+          command:
+            - tor
+            - -f
+            - /etc/tor/torrc
+          ports:
+            - { name: socks, containerPort: 9050, protocol: TCP }
+            - { name: control, containerPort: 9051, protocol: TCP }
+          livenessProbe:
+            tcpSocket: { port: socks }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket: { port: socks }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.tor.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/tor, readOnly: true }
+            - { name: hidden-service, mountPath: /var/lib/tor/hidden-services }
+            - { name: data, mountPath: /var/lib/tor }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor-config") }}
+        - name: secrets
+          secret:
+            secretName: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor-hidden-service") }}
+            defaultMode: 0400
+        - name: hidden-service
+          emptyDir: { sizeLimit: 1Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.tor.persistence.size | default "2Gi" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "tor") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "tor") | nindent 4 }}
+  ports:
+    - { name: socks, port: 9050, targetPort: socks }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "tor-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "tor") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "tor") | nindent 4 }}
+  ports:
+    - { name: socks, port: 9050, targetPort: socks }
+{{- end }}

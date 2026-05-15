@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# Helm chart regression gate.
+#
+# Runs scripts/helm-render-smoke.sh on every PR touching the chart or the
+# script itself. The smoke script:
+#   1. helm lint (dev + cluster values)
+#   2. helm template (dev mode)        — asserts ≥ 30 resources
+#   3. helm template (cluster mode)    — asserts ≥ 80 resources
+#   4. asserts all 14 required HA components are present in cluster mode
+#   5. asserts all 7 required PodDisruptionBudgets are present
+#   6. asserts dev mode does NOT include HA-only services
+#
+# This is what guarantees the operator can run a single `helm install` once
+# the 3 DL380 Gen11 nodes are racked — without ever touching the codebase.
+name: chart-lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/k8s/charts/**'
+      - 'scripts/helm-render-smoke.sh'
+      - '.github/workflows/chart-lint.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/k8s/charts/**'
+      - 'scripts/helm-render-smoke.sh'
+      - '.github/workflows/chart-lint.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: chart-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  render:
+    name: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: helm version
+        run: helm version --short
+
+      - name: Render smoke test (both modes + structural assertions)
+        run: bash scripts/helm-render-smoke.sh
+
+      # Upload the rendered manifests as build artefacts so reviewers can
+      # diff them against main if they need to understand what the chart
+      # produces. This is the "what would `helm install` actually create?"
+      # artefact, kept for 14 days.
+      - name: Render and upload manifests
+        if: always()
+        run: |
+          mkdir -p /tmp/render
+          helm template vigil-apex infra/k8s/charts/vigil-apex \
+            -f infra/k8s/charts/vigil-apex/values.yaml > /tmp/render/dev.yaml
+          helm template vigil-apex infra/k8s/charts/vigil-apex \
+            -f infra/k8s/charts/vigil-apex/values.yaml \
+            -f infra/k8s/charts/vigil-apex/values-cluster.yaml > /tmp/render/cluster.yaml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: helm-rendered-manifests
+          path: /tmp/render/
+          retention-days: 14

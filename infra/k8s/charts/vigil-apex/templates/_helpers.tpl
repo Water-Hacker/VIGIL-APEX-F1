@@ -86,3 +86,94 @@ fsGroup: 1000
 seccompProfile:
   type: RuntimeDefault
 {{- end -}}
+
+{{/*
+DL380 Gen11 cluster: pod-anti-affinity on the per-node label so two
+replicas of the same component never share a node. Used by every
+multi-replica StatefulSet / Deployment in HA mode.
+*/}}
+{{- define "vigil-apex.antiAffinity" -}}
+{{- $component := .component -}}
+podAntiAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: {{ $component }}
+          app.kubernetes.io/instance: {{ .root.Release.Name }}
+      topologyKey: vigil.cluster/node
+{{- end -}}
+
+{{/*
+Pin a workload to a specific cluster node (a, b, or c). For singleton
+services with persistent host-local data (Neo4j on B, Tor on A,
+Prometheus on C).
+*/}}
+{{- define "vigil-apex.pinToNode" -}}
+nodeAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: vigil.cluster/node
+            operator: In
+            values: [ {{ .node | quote }} ]
+{{- end -}}
+
+{{/*
+Topology spread for multi-replica deployments — soft constraint
+(ScheduleAnyway) so workers can still come up if a node is briefly
+unavailable, but skew is minimised.
+*/}}
+{{- define "vigil-apex.topologySpread" -}}
+{{- $component := .component -}}
+- maxSkew: 1
+  topologyKey: vigil.cluster/node
+  whenUnsatisfiable: ScheduleAnyway
+  labelSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $component }}
+      app.kubernetes.io/instance: {{ .root.Release.Name }}
+{{- end -}}
+
+{{/*
+Standard liveness + readiness probe pattern for HTTP services.
+Use:
+  {{- include "vigil-apex.httpProbes" (dict "port" 8080 "path" "/healthz") | nindent 10 }}
+*/}}
+{{- define "vigil-apex.httpProbes" -}}
+livenessProbe:
+  httpGet:
+    path: {{ .path }}
+    port: {{ .port }}
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: {{ .path }}
+    port: {{ .port }}
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 2
+{{- end -}}
+
+{{/*
+Standard liveness + readiness probe pattern for TCP services.
+*/}}
+{{- define "vigil-apex.tcpProbes" -}}
+livenessProbe:
+  tcpSocket:
+    port: {{ .port }}
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  tcpSocket:
+    port: {{ .port }}
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 2
+{{- end -}}

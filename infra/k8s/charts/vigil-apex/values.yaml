@@ -3,7 +3,10 @@
 # Naming convention: every resource is `vigil-apex-<component>` so
 # multi-tenant clusters can install us into a non-default namespace
 # without collisions. The shared `_helpers.tpl` derives names from
-# `.Values.fullnameOverride` when set.
+# `.Values.fullnameOverride` when set — we pin it here so the rendered
+# name matches the convention regardless of the Helm release name.
+# Operators installing under a different release name must override.
+fullnameOverride: vigil-apex
 
 global:
   # Pinned by the architect; bumps require a decision-log entry.
@@ -47,6 +50,22 @@ postgres:
     work_mem: 16MB
     statement_timeout: 30000
     idle_in_transaction_session_timeout: 300000
+  # HA mode (Patroni). Off in dev; enabled in values-cluster.yaml for
+  # production. When enabled, postgres-patroni-statefulset.yaml ships
+  # the 3-replica Patroni cluster + ConfigMap; the single-replica
+  # statefulset is suppressed.
+  ha:
+    enabled: false
+    backend: patroni
+    image:
+      repository: ghcr.io/zalando/spilo-16
+      tag: '3.2-p2'
+    replicaCount: 3
+    clusterName: vigil-postgres-ha
+    synchronousMode: true
+    synchronousNodeCount: 1
+    maxLagOnFailover: 16777216
+    masterStartTimeout: 30
 
 redis:
   enabled: true
@@ -58,11 +77,26 @@ redis:
     limits: { memory: '8Gi', cpu: '2' }
   persistence:
     size: 50Gi
-  # ACL config is rendered from a ConfigMap template using the password
-  # synced in by ExternalSecrets at /etc/redis/secrets.
   config:
     maxmemory: '6gb'
     maxmemoryPolicy: 'noeviction'
+  # HA mode (Sentinel). Off in dev; enabled in values-cluster.yaml.
+  ha:
+    enabled: false
+    backend: sentinel
+    replicaCount: 3
+    sentinel:
+      enabled: true
+      replicaCount: 3
+      quorum: 2
+      downAfterMilliseconds: 5000
+      failoverTimeout: 30000
+      parallelSyncs: 1
+    masterReplica:
+      enabled: true
+      replicaCount: 3
+      minReplicasToWrite: 1
+      minReplicasMaxLag: 10
 
 vault:
   enabled: true
@@ -80,6 +114,15 @@ vault:
     address: '0.0.0.0:8200'
     api_addr: 'http://vigil-vault:8200'
     cluster_addr: 'http://vigil-vault:8201'
+  # HA mode (Raft). Off in dev; enabled in values-cluster.yaml.
+  ha:
+    enabled: false
+    replicaCount: 3
+    performanceMultiplier: 5
+    transit:
+      address: 'https://n02.vigilapex.cm:8200'
+      keyName: vigil-unseal
+      mountPath: 'transit/'
 
 # ----------------------------------------------------------------------
 # Worker plane (parametric fan-out)
@@ -172,11 +215,178 @@ networkPolicy:
     # other workers add themselves here as their charts land
 
 # ----------------------------------------------------------------------
-# Observability — most Phase-1 metrics ship via the worker side-car
+# Observability — most Phase-1 metrics ship via the worker side-car.
+# Cluster mode (values-cluster.yaml) enables full Prometheus +
+# Alertmanager + Grafana + Falco stack via the keys below.
 # ----------------------------------------------------------------------
 observability:
   prometheusScrape: true
   prometheusPort: 9100
+  prometheus:
+    enabled: false
+    image:
+      repository: prom/prometheus
+      tag: 'v2.55.0'
+    replicaCount: 1
+    pinnedNode: 'c'
+    retention: 30d
+    persistence:
+      size: 100Gi
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+  alertmanager:
+    enabled: false
+    image:
+      repository: prom/alertmanager
+      tag: 'v0.27.0'
+    replicaCount: 3
+    resources:
+      requests: { memory: '128Mi', cpu: '100m' }
+      limits: { memory: '512Mi', cpu: '500m' }
+  grafana:
+    enabled: false
+    image:
+      repository: grafana/grafana
+      tag: '11.2.2'
+    replicaCount: 2
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+  falco:
+    enabled: false
+    image:
+      repository: falcosecurity/falco-no-driver
+      tag: '0.39.0'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+
+# ----------------------------------------------------------------------
+# etcd — Patroni DCS. Only used when postgres.ha.enabled = true.
+# ----------------------------------------------------------------------
+etcd:
+  enabled: false
+  image:
+    repository: bitnami/etcd
+    tag: '3.5.16-debian-12-r1'
+  replicaCount: 3
+  quotaBackendBytes: 2147483648
+  persistence:
+    size: 8Gi
+  resources:
+    requests: { memory: '256Mi', cpu: '100m' }
+    limits: { memory: '1Gi', cpu: '500m' }
+
+# ----------------------------------------------------------------------
+# Neo4j — single-node, pinned to node-b (values-cluster.yaml override).
+# ----------------------------------------------------------------------
+neo4j:
+  enabled: false
+  image:
+    repository: neo4j
+    tag: '5.23-community'
+  pinnedNode: 'b'
+  heap:
+    initial: '4G'
+    max: '16G'
+  pageCache: '8G'
+  resources:
+    requests: { memory: '8Gi', cpu: '2' }
+    limits: { memory: '32Gi', cpu: '4' }
+  persistence:
+    size: 200Gi
+  backup:
+    enabled: true
+    schedule: '0 */6 * * *'
+    pinnedNode: 'c'
+    size: 100Gi
+
+# ----------------------------------------------------------------------
+# IPFS — Kubo + ipfs-cluster sidecar, 3 replicas anti-affinity.
+# ----------------------------------------------------------------------
+ipfs:
+  enabled: false
+  image:
+    repository: ipfs/kubo
+    tag: 'v0.30.0'
+  replicaCount: 3
+  persistence:
+    size: 500Gi
+  resources:
+    requests: { memory: '1Gi', cpu: '500m' }
+    limits: { memory: '8Gi', cpu: '2' }
+
+ipfsCluster:
+  enabled: false
+  image:
+    repository: ipfs/ipfs-cluster
+    tag: 'v1.1.2'
+  config:
+    replicationFactorMin: 2
+    replicationFactorMax: 3
+  resources:
+    requests: { memory: '256Mi', cpu: '100m' }
+    limits: { memory: '1Gi', cpu: '500m' }
+
+# ----------------------------------------------------------------------
+# Hyperledger Fabric — 3-orderer Raft + Org1 peer.
+# ----------------------------------------------------------------------
+fabricOrderer:
+  enabled: false
+  image:
+    repository: hyperledger/fabric-orderer
+    tag: '2.5.10'
+  replicaCount: 3
+  persistence:
+    size: 20Gi
+  resources:
+    requests: { memory: '512Mi', cpu: '250m' }
+    limits: { memory: '2Gi', cpu: '1' }
+
+fabricPeer:
+  enabled: false
+  image:
+    repository: hyperledger/fabric-peer
+    tag: '2.5.10'
+  pinnedNode: 'a'
+  persistence:
+    size: 20Gi
+  resources:
+    requests: { memory: '512Mi', cpu: '250m' }
+    limits: { memory: '2Gi', cpu: '1' }
+
+# ----------------------------------------------------------------------
+# Tor — singleton, pinned, hidden-service keys via Secret.
+# ----------------------------------------------------------------------
+tor:
+  enabled: false
+  image:
+    repository: dperson/torproxy
+    tag: 'latest'
+  pinnedNode: 'a'
+  upstream: 'vigil-apex-caddy:80'
+  bridges:
+    enabled: false
+  persistence:
+    size: 2Gi
+  resources:
+    requests: { memory: '128Mi', cpu: '100m' }
+    limits: { memory: '512Mi', cpu: '1' }
+
+# ----------------------------------------------------------------------
+# Keycloak — 3 replicas, anti-affinity, OIDC for operator dashboard.
+# ----------------------------------------------------------------------
+keycloak:
+  enabled: false
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: '25.0.6'
+  replicaCount: 3
+  hostname: 'kc.vigilapex.cm'
+  resources:
+    requests: { memory: '1Gi', cpu: '500m' }
+    limits: { memory: '4Gi', cpu: '2' }
 
 # ----------------------------------------------------------------------
 # Phase 12a — cosign image-signature verification (modes 9.9 + 10.8)
@@ -194,14 +404,6 @@ observability:
 # See docs/runbooks/cosign-rollout.md for end-to-end activation.
 cosignVerify:
   enabled: false
-  # Default to Audit when first activated; flip to Enforce after a
-  # 14-day window with zero unsigned-image findings.
   failureAction: Audit
-  # The architect's cosign public key (PEM-encoded). Empty in the
-  # checked-in chart; populated via `helm upgrade --set-file
-  # cosignVerify.publicKey=./cosign.pub ...` at activation time.
   publicKey: ''
-  # Rekor transparency log endpoint. The default is the public Sigstore
-  # Rekor instance; private deployments may override with a private
-  # Rekor URL for sovereign-only verification.
   rekorURL: https://rekor.sigstore.dev

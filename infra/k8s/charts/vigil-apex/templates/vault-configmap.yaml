@@ -7,6 +7,47 @@ metadata:
     {{- include "vigil-apex.componentLabels" (dict "root" . "component" "vault") | nindent 4 }}
 data:
   config.hcl: |
+{{- if .Values.vault.ha.enabled }}
+    # Raft integrated storage — 3-voter HA across the DL380 Gen11 cluster.
+    storage "raft" {
+      path    = "/vault/file"
+      node_id = "VAULT_NODE_ID"
+      {{- $name := include "vigil-apex.componentName" (dict "root" . "component" "vault") }}
+      {{- $svc := include "vigil-apex.componentName" (dict "root" . "component" "vault-headless") }}
+      {{- $ns := .Release.Namespace }}
+      {{- range $i, $_ := until (int .Values.vault.ha.replicaCount) }}
+      retry_join {
+        leader_api_addr     = "https://{{ $name }}-{{ $i }}.{{ $svc }}.{{ $ns }}.svc.cluster.local:8200"
+        leader_ca_cert_file = "/vault/tls/ca.crt"
+      }
+      {{- end }}
+      performance_multiplier = {{ .Values.vault.ha.performanceMultiplier | default 5 }}
+    }
+
+    # Transit auto-unseal — unsealing key on Hetzner N02 (off-jurisdiction).
+    seal "transit" {
+      address            = "{{ .Values.vault.ha.transit.address }}"
+      token              = "VAULT_TRANSIT_TOKEN"
+      disable_renewal    = "false"
+      key_name           = "{{ .Values.vault.ha.transit.keyName | default "vigil-unseal" }}"
+      mount_path         = "{{ .Values.vault.ha.transit.mountPath | default "transit/" }}"
+      tls_ca_cert        = "/vault/tls/n02-ca.crt"
+      tls_skip_verify    = "false"
+    }
+
+    listener "tcp" {
+      address                            = "0.0.0.0:8200"
+      cluster_address                    = "0.0.0.0:8201"
+      tls_disable                        = "false"
+      tls_cert_file                      = "/vault/tls/server.crt"
+      tls_key_file                       = "/vault/tls/server.key"
+      tls_client_ca_file                 = "/vault/tls/ca.crt"
+      tls_require_and_verify_client_cert = "true"
+      tls_min_version                    = "tls13"
+    }
+    api_addr     = "https://VAULT_NODE_HOSTNAME:8200"
+    cluster_addr = "https://VAULT_NODE_HOSTNAME:8201"
+{{- else }}
     storage "file" {
       path = "/vault/file"
     }
@@ -16,6 +57,7 @@ data:
     }
     api_addr     = "{{ .Values.vault.config.api_addr }}"
     cluster_addr = "{{ .Values.vault.config.cluster_addr }}"
+{{- end }}
     ui = false
     disable_mlock = false
     log_level = "info"

@@ -1,0 +1,158 @@
+{{- if .Values.fabricPeer.enabled }}
+# Hyperledger Fabric peer — Org1 anchor peer for the vigil-audit
+# channel. Phase-1 single peer; Phase-2 multi-org expansion adds CONAC
+# and Cour-des-Comptes peers on their own infrastructure.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-peer") | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer-headless") }}
+  selector:
+    matchLabels:
+      {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-peer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-peer") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer") }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      affinity:
+        {{- include "vigil-apex.pinToNode" (dict "node" (.Values.fabricPeer.pinnedNode | default "a")) | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: peer
+          image: {{ include "vigil-apex.image" (dict "root" . "image" .Values.fabricPeer.image) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false
+            seccompProfile: { type: RuntimeDefault }
+          env:
+            - name: POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: FABRIC_LOGGING_SPEC
+              value: INFO
+            - name: CORE_PEER_ID
+              value: vigil-fabric-peer0-org1
+            - name: CORE_PEER_ADDRESS
+              value: 0.0.0.0:7051
+            - name: CORE_PEER_LISTENADDRESS
+              value: 0.0.0.0:7051
+            - name: CORE_PEER_CHAINCODELISTENADDRESS
+              value: 0.0.0.0:7052
+            - name: CORE_PEER_GOSSIP_EXTERNALENDPOINT
+              value: $(POD_IP):7051
+            - name: CORE_PEER_GOSSIP_BOOTSTRAP
+              value: $(POD_IP):7051
+            - name: CORE_PEER_LOCALMSPID
+              value: Org1MSP
+            - name: CORE_PEER_MSPCONFIGPATH
+              value: /var/hyperledger/fabric/msp
+            - name: CORE_PEER_TLS_ENABLED
+              value: "true"
+            - name: CORE_PEER_TLS_CERT_FILE
+              value: /var/hyperledger/fabric/tls/server.crt
+            - name: CORE_PEER_TLS_KEY_FILE
+              value: /var/hyperledger/fabric/tls/server.key
+            - name: CORE_PEER_TLS_ROOTCERT_FILE
+              value: /var/hyperledger/fabric/tls/ca.crt
+            - name: CORE_LEDGER_STATE_STATEDATABASE
+              value: CouchDB
+            - name: CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS
+              value: localhost:5984
+            - name: CORE_PEER_FILESYSTEMPATH
+              value: /var/hyperledger/production
+            - name: CORE_OPERATIONS_LISTENADDRESS
+              value: 0.0.0.0:9443
+            - name: CORE_METRICS_PROVIDER
+              value: prometheus
+          ports:
+            - { name: peer, containerPort: 7051, protocol: TCP }
+            - { name: chaincode, containerPort: 7052, protocol: TCP }
+            - { name: ops, containerPort: 9443, protocol: TCP }
+          livenessProbe:
+            httpGet: { path: /healthz, port: ops }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /healthz, port: ops }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.fabricPeer.resources | nindent 12 }}
+          volumeMounts:
+            - { name: msp, mountPath: /var/hyperledger/fabric/msp, readOnly: true }
+            - { name: tls, mountPath: /var/hyperledger/fabric/tls, readOnly: true }
+            - { name: production, mountPath: /var/hyperledger/production }
+      volumes:
+        - name: msp
+          projected:
+            sources:
+              - secret:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer-msp") }}
+        - name: tls
+          projected:
+            sources:
+              - secret:
+                  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer-tls") }}
+  volumeClaimTemplates:
+    - metadata:
+        name: production
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.fabricPeer.persistence.size | default "20Gi" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer-headless") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-peer") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-peer") | nindent 4 }}
+  ports:
+    - { name: peer, port: 7051, targetPort: peer }
+    - { name: ops, port: 9443, targetPort: ops }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vigil-apex.componentName" (dict "root" . "component" "fabric-peer") }}
+  labels:
+    {{- include "vigil-apex.componentLabels" (dict "root" . "component" "fabric-peer") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vigil-apex.componentSelector" (dict "root" . "component" "fabric-peer") | nindent 4 }}
+  ports:
+    - { name: peer, port: 7051, targetPort: peer }
+{{- end }}

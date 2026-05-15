@@ -24,9 +24,10 @@ docs/patterns/catalogue.md
 docs/patterns/index.md
 docs/patterns/P-*.md
 
-# Helm chart templates contain Go-template syntax ({{ }} + {{/* */}})
-# that prettier does not understand. Existing chart templates predate
-# this hook; the kyverno-cosign-policy.yaml landed in Phase 12a hit it
-# first. Helm has its own canonical formatter (helm template + manual
-# review); prettier would corrupt the syntax.
-infra/k8s/charts/*/templates/**
+# Helm chart templates — these are Go-template-flavoured YAML, not pure
+# YAML. Prettier's YAML parser rejects the `{{- if }}` directives and the
+# multi-doc layout (manifests separated by `---` without a leading
+# document separator in helm templates). `helm lint` + the chart-lint
+# CI gate (.github/workflows/chart-lint.yml) is the authority.
+infra/k8s/charts/**/templates/**/*.yaml
+infra/k8s/charts/**/templates/**/*.tpl
