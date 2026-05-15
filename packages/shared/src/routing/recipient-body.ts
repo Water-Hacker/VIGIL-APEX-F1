@@ -50,17 +50,10 @@ export interface RecommendRecipientBodyInput {
   readonly preDisbursementFlag?: boolean;
 }
 
-export function recommendRecipientBody(
-  input: RecommendRecipientBodyInput,
-): RecipientBody {
+export function recommendRecipientBody(input: RecommendRecipientBodyInput): RecipientBody {
   if (input.preDisbursementFlag === true) return 'MINFI';
 
-  const procurementAdjacent: ReadonlySet<PatternCategoryLetter> = new Set([
-    'A',
-    'B',
-    'C',
-    'F',
-  ]);
+  const procurementAdjacent: ReadonlySet<PatternCategoryLetter> = new Set(['A', 'B', 'C', 'F']);
   if (procurementAdjacent.has(input.patternCategory) && input.severity === 'critical') {
     return 'COUR_DES_COMPTES';
   }
@@ -82,6 +75,23 @@ export function recommendRecipientBody(
       return 'COUR_DES_COMPTES';
     case 'H':
       return 'CONAC';
+    // 2026-05-14 — FRONTIER-AUDIT E1.1 categories I–P
+    case 'I':
+      return 'COUR_DES_COMPTES'; // ACFE asset misappropriation → audit court
+    case 'J':
+      return 'COUR_DES_COMPTES'; // ACFE financial-statement fraud → audit court
+    case 'K':
+      return 'ANIF'; // FATF trade-based ML → AML/CFT body
+    case 'L':
+      return 'CONAC'; // OECD foreign bribery → anti-corruption commission
+    case 'M':
+      return 'CONAC'; // WB INT procurement collusion → anti-corruption commission
+    case 'N':
+      return 'ANIF'; // Beneficial-ownership layering → AML/CFT body
+    case 'O':
+      return 'COUR_DES_COMPTES'; // Extractive sector → audit court
+    case 'P':
+      return 'ANIF'; // Post-award personal enrichment (Loi 2018/011 patrimoine inexpliqué) → ANIF
   }
 }
 
@@ -90,7 +100,8 @@ export interface PatternCategoryFromIdResult {
   readonly index: number; // numeric portion, e.g. 1 for P-A-001
 }
 
-const PATTERN_ID_RE = /^P-([A-H])-(\d{3})$/;
+// Extended 2026-05-14 per FRONTIER-AUDIT E1.1 — categories I-P added.
+const PATTERN_ID_RE = /^P-([A-P])-(\d{3})$/;
 
 /** Extracts category letter + numeric index from a pattern_id like "P-A-001". */
 export function parsePatternId(patternId: string): PatternCategoryFromIdResult | null {
@@ -149,8 +160,7 @@ export function recipientBodyHeaders(body: RecipientBody): {
     case 'ANIF':
       return {
         fr: {
-          addressee:
-            "À l'attention du Directeur de l'Agence Nationale d'Investigation Financière",
+          addressee: "À l'attention du Directeur de l'Agence Nationale d'Investigation Financière",
           title: 'Déclaration de soupçon — Élément AML / CTF',
         },
         en: {
@@ -161,8 +171,7 @@ export function recipientBodyHeaders(body: RecipientBody): {
     case 'CDC':
       return {
         fr: {
-          addressee:
-            'À Monsieur le Directeur Général de la Caisse de Dépôts et Consignations',
+          addressee: 'À Monsieur le Directeur Général de la Caisse de Dépôts et Consignations',
           title: 'Notification — Décaissement marqué pour vérification',
         },
         en: {

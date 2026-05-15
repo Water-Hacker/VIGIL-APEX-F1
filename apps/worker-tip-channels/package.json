@@ -1,0 +1,33 @@
+{
+  "name": "worker-tip-channels",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FRONTIER-AUDIT Layer-1 E1.4 closure — server-side handlers for USSD, SMS, and voice tip submission channels. Each channel encrypts the tip with the same libsodium sealed-box used by the browser portal before persistence, so a citizen who only has a feature phone has the same privacy guarantees as a smartphone user. Telecom-gateway integration (MTN Cameroon / Orange Cameroon) is configured via env at deploy time; handlers ship deploy-ready.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
+    "@vigil/db-postgres": "workspace:*",
+    "@vigil/observability": "workspace:*",
+    "@vigil/queue": "workspace:*",
+    "@vigil/security": "workspace:*",
+    "@vigil/shared": "workspace:*",
+    "drizzle-orm": "^0.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.9"
+  }
+}

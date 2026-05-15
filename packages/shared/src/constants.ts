@@ -50,6 +50,15 @@ export const PATTERN_CATEGORIES = [
   { letter: 'F', name: 'network_anomalies' },
   { letter: 'G', name: 'document_integrity' },
   { letter: 'H', name: 'temporal_anomalies' },
+  // Extended 2026-05-14 per FRONTIER-AUDIT Layer-1 E1.1 closure.
+  { letter: 'I', name: 'asset_misappropriation' },
+  { letter: 'J', name: 'financial_statement_fraud' },
+  { letter: 'K', name: 'trade_based_money_laundering' },
+  { letter: 'L', name: 'foreign_bribery' },
+  { letter: 'M', name: 'procurement_collusion' },
+  { letter: 'N', name: 'beneficial_ownership_layering' },
+  { letter: 'O', name: 'extractive_sector' },
+  { letter: 'P', name: 'post_award_personal_enrichment' },
 ] as const;
 
 export type PatternCategoryLetter = (typeof PATTERN_CATEGORIES)[number]['letter'];
