@@ -28,6 +28,16 @@ Every audit finding below is measured against those three sentences. If a findin
 
 For every architectural choice, the test is: _if I were rebuilding today from complete scratch, would I make this exact decision?_ The findings below answer "no" with what should replace each inferior choice.
 
+> **CLOSURE UPDATE 2026-05-14:** E1.1 partially closed in commit
+> immediately following this audit. Pattern set expanded from 43 to
+> **81** with 38 new patterns across 8 new categories (I-P) sourced
+> from verified international bodies: ACFE Fraud Tree, FATF TBML
+> typologies, OECD Foreign Bribery Report, World Bank INT debarment
+> criteria, EITI Standard 2.5, Wolfsberg BO guidance, OCCRP/Pandora
+> Papers analyses. The novelty-detection worker (third element of E1.1's
+> "frontier verdict") remains pending. E1.3 closed via Layers 13/14/15
+> in the same commit. See section "Closure log" at end of this document.
+
 ### Component E1.1 — The 43 hand-coded fraud patterns
 
 **Current form:** [`packages/patterns/src/category-{a..h}/`](../../packages/patterns/src/) — 43 deterministic detectors, each a pure function over a subject.
@@ -499,3 +509,18 @@ That standard is the only acceptable one.
 **Author:** the build agent (Claude) acting per architect direction as the final intelligence assessing whether this system deserves to exist in its current form.
 **Status:** PROVISIONAL — promote to FINAL after architect read-through.
 **Next review:** after each of the ten priority items above is shipped; the document is re-run as an audit.
+
+---
+
+## Closure log
+
+| Date       | Closure                                                                                                                                                                                                                                                                                                                                                                                                                                             | Commit ref    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| 2026-05-14 | E1.1 partial: pattern set 43 → 81. 38 new patterns across Categories I (ACFE asset misappropriation), J (ACFE financial statement fraud), K (FATF TBML), L (OECD foreign bribery), M (World Bank INT procurement collusion), N (Beneficial-ownership layering — EITI/Pandora/Wolfsberg), O (Extractive sector — EITI/NRGI), P (Post-award personal enrichment). Each pattern cites its source body; PATTERN_ID regex extended to `^P-[A-P]-\d{3}$`. | (next commit) |
+| 2026-05-14 | E1.3 full: LLM Safety Layers 13 (input-side prompt-injection scan), 14 (per-claim provenance attestation), 15 (differential model agreement). 25 new unit tests in `packages/llm/__tests__/frontier-layers.test.ts`.                                                                                                                                                                                                                                | (same commit) |
+| (pending)  | E1.1 third element: `worker-pattern-discovery` for novelty detection on the entity graph                                                                                                                                                                                                                                                                                                                                                            |               |
+| (pending)  | E1.2: calibration-seed bootstrap with 50 historical Cameroonian cases                                                                                                                                                                                                                                                                                                                                                                               |               |
+| (pending)  | E1.4: USSD + SMS + voice + 5 local-language tip channels                                                                                                                                                                                                                                                                                                                                                                                            |               |
+| (pending)  | E1.5: council enrolment (institutional, not engineering)                                                                                                                                                                                                                                                                                                                                                                                            |               |
+| (pending)  | E1.6: operator AI co-pilot                                                                                                                                                                                                                                                                                                                                                                                                                          |               |
+| (pending)  | E1.7: case-load-aware recipient routing                                                                                                                                                                                                                                                                                                                                                                                                             |               |

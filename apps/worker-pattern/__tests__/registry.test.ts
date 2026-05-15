@@ -26,9 +26,9 @@ describe('worker-pattern registry', () => {
     }
   });
 
-  it('every registered pattern id matches /^P-[A-H]-\\d{3}$/', () => {
+  it('every registered pattern id matches /^P-[A-P]-\\d{3}$/ (extended 2026-05-14 per FRONTIER-AUDIT E1.1)', () => {
     for (const p of PatternRegistry.all()) {
-      expect(p.id, p.id).toMatch(/^P-[A-H]-\d{3}$/);
+      expect(p.id, p.id).toMatch(/^P-[A-P]-\d{3}$/);
     }
   });
 

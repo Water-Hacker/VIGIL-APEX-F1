@@ -41,7 +41,12 @@ export type Sha256Hex = Brand<string, 'Sha256Hex'>;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UUID_ANY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{3,4}-[0-9a-f]{3,4}-[0-9a-f]{12}$/i;
-const PATTERN_ID = /^P-[A-H]-\d{3}$/;
+// Pattern IDs were originally P-[A-H]-NNN per the Cameroon-tuned
+// taxonomy. Extended 2026-05-14 per FRONTIER-AUDIT Layer-1 E1.1 closure
+// to include categories I–P sourced from verified international bodies
+// (ACFE, FATF, OECD, World Bank INT, EITI, Wolfsberg, OCCRP). See
+// packages/patterns/src/category-{i..p}/README.md for citations.
+const PATTERN_ID = /^P-[A-P]-\d{3}$/;
 const SOURCE_ID = /^[a-z][a-z0-9-]{2,49}$/;
 const DOSSIER_REF = /^VA-\d{4}-\d{4,6}$/;
 const TIP_REF = /^TIP-\d{4}-\d{4,6}$/;
