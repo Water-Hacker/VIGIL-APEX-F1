@@ -9,28 +9,28 @@ from .config import Settings
 from .errors import VigilError, asVigilError
 from .logging import bind_correlation, get_logger, init_logging
 from .metrics import errors_total, events_consumed, events_emitted, processing_duration
-from .redis_consumer import Envelope, HandlerOutcome, RedisStreamWorker
 from .pg import PgPool
+from .redis_consumer import Envelope, HandlerOutcome, RedisStreamWorker
 from .secrets import read_secret_file
 from .shutdown import install_shutdown
 from .vault import VaultClient
 
 __all__ = [
+    "Envelope",
+    "HandlerOutcome",
+    "PgPool",
+    "RedisStreamWorker",
     "Settings",
+    "VaultClient",
     "VigilError",
     "asVigilError",
     "bind_correlation",
-    "get_logger",
-    "init_logging",
+    "errors_total",
     "events_consumed",
     "events_emitted",
-    "errors_total",
-    "processing_duration",
-    "Envelope",
-    "HandlerOutcome",
-    "RedisStreamWorker",
-    "PgPool",
-    "read_secret_file",
+    "get_logger",
+    "init_logging",
     "install_shutdown",
-    "VaultClient",
+    "processing_duration",
+    "read_secret_file",
 ]

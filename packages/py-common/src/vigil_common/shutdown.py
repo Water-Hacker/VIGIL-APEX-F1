@@ -6,15 +6,18 @@ from __future__ import annotations
 import asyncio
 import signal
 from collections.abc import Awaitable, Callable
-from typing import TypeAlias
+
+import structlog
 
 from .logging import get_logger
 
-ShutdownCallback: TypeAlias = Callable[[], Awaitable[None] | None]
+type ShutdownCallback = Callable[[], Awaitable[None] | None]
 
 _callbacks: list[tuple[str, ShutdownCallback]] = []
 _installed = False
 _shutting = False
+# Strong refs to graceful-shutdown background tasks (per RUF006).
+_shutdown_tasks: set[asyncio.Task[None]] = set()
 
 
 def register_shutdown(name: str, cb: ShutdownCallback) -> None:
@@ -38,13 +41,15 @@ def install_shutdown(*, hard_timeout_s: float = 30.0) -> None:
             raise SystemExit(1)
         _shutting = True
         log.info("graceful-shutdown-start", signal=signal.Signals(signum).name)
-        loop.create_task(_run_callbacks(hard_timeout_s, log))
+        task = loop.create_task(_run_callbacks(hard_timeout_s, log))
+        _shutdown_tasks.add(task)
+        task.add_done_callback(_shutdown_tasks.discard)
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _handler, sig)
 
 
-async def _run_callbacks(hard_timeout_s: float, log) -> None:  # type: ignore[no-untyped-def]
+async def _run_callbacks(hard_timeout_s: float, log: structlog.stdlib.BoundLogger) -> None:
     try:
         async with asyncio.timeout(hard_timeout_s):
             for name, cb in reversed(_callbacks):
@@ -53,9 +58,9 @@ async def _run_callbacks(hard_timeout_s: float, log) -> None:  # type: ignore[no
                     if asyncio.iscoroutine(res):
                         await res
                     log.info("shutdown-callback-ok", name=name)
-                except Exception as e:  # noqa: BLE001
-                    log.error("shutdown-callback-failed", name=name, error=str(e))
+                except Exception as e:
+                    log.exception("shutdown-callback-failed", name=name, error=str(e))
     except TimeoutError:
-        log.error("graceful-shutdown-hard-timeout", hard_timeout_s=hard_timeout_s)
+        log.exception("graceful-shutdown-hard-timeout", hard_timeout_s=hard_timeout_s)
     log.info("graceful-shutdown-complete")
     raise SystemExit(0)

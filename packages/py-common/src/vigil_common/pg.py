@@ -94,7 +94,7 @@ class PgPool:
     async def healthcheck(self) -> None:
         try:
             await asyncio.wait_for(self.fetchone("SELECT 1"), timeout=2.0)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise VigilError(
                 code="PG_HEALTHCHECK_FAILED",
                 message=f"postgres healthcheck failed: {e}",

@@ -15,8 +15,17 @@ import type { Envelope } from './types.js';
  * If none are present we return null and connect anonymously — Redis
  * will reject on AUTH-required clusters, which is the loud failure
  * mode we want.
+ *
+ * Per `docs/runbooks/secret-rotation.md` (mode 9.2 closure), this function
+ * is called EXACTLY ONCE from `QueueClient`'s constructor. A rotated Redis
+ * password requires the worker process to restart — there is no in-process
+ * watcher. The function itself re-reads the file on every invocation (no
+ * caching here), but only the constructor invokes it. Hot-reload via a
+ * Vault Agent sidecar was considered + deferred per orientation Q4.
+ *
+ * Exported for the secret-rotation contract test in `__tests__/secret-rotation.test.ts`.
  */
-function loadRedisPassword(explicit: string | undefined): string | null {
+export function loadRedisPassword(explicit: string | undefined): string | null {
   const candidates = [
     explicit,
     process.env.REDIS_PASSWORD_FILE,

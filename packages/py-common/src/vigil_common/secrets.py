@@ -12,14 +12,14 @@ point of use (e.g. when building an HTTP header).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from .errors import VigilError
 
 T = TypeVar("T")
 
 
-class Secret(Generic[T]):
+class Secret[T]:
     """Opaque wrapper that prints `[Secret]` instead of the underlying value."""
 
     __slots__ = ("_value",)
@@ -34,8 +34,8 @@ class Secret(Generic[T]):
         return "[Secret]"
 
 
-def expose(secret: Secret[T]) -> T:
-    return secret._value  # noqa: SLF001 — intentional escape hatch
+def expose[T](secret: Secret[T]) -> T:
+    return secret._value
 
 
 def read_secret_file(path: str | Path) -> Secret[str]:

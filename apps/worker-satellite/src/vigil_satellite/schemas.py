@@ -8,9 +8,9 @@ the TS satellite-client; both sides validate against the same fields.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class GeoPoint(BaseModel):
@@ -26,7 +26,7 @@ class GeoBBox(BaseModel):
 
     @field_validator("max_lon")
     @classmethod
-    def _check_lon(cls, v: float, info) -> float:  # type: ignore[no-untyped-def]
+    def _check_lon(cls, v: float, info: ValidationInfo) -> float:
         lo = info.data.get("min_lon")
         if lo is not None and v < lo:
             raise ValueError("max_lon must be >= min_lon")
@@ -46,7 +46,7 @@ class ContractWindow(BaseModel):
 
     @field_validator("end")
     @classmethod
-    def _end_after_start(cls, v: datetime, info) -> datetime:  # type: ignore[no-untyped-def]
+    def _end_after_start(cls, v: datetime, info: ValidationInfo) -> datetime:
         start = info.data.get("start")
         if start is not None and v <= start:
             raise ValueError("contract end must be after start")

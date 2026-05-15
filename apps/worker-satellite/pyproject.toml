@@ -7,7 +7,15 @@ license = { text = "UNLICENSED" }
 authors = [{ name = "Junior Thuram Nana", email = "satoshinakamotobull@gmail.com" }]
 
 dependencies = [
-  "vigil-common @ file:///app/packages/py-common",
+  # Resolved by name from the env. The Dockerfile installs
+  # py-common in a prior layer (PythonWorker.Dockerfile:73-74);
+  # CI installs it in a prior step (python-ci.yml: `pip install -e
+  # packages/py-common[test]` before this package). A file:// URL
+  # was previously hardcoded to /app/packages/py-common — but
+  # neither Docker (which uses /repo/) nor CI (which checks out at
+  # /home/runner/work/...) actually has /app/, so the URL was a
+  # latent bug surfaced when python-ci's path-filter re-fired.
+  "vigil-common",
   "rasterio>=1.3.10,<2",
   "numpy>=1.26.0,<3",
   "shapely>=2.0.0,<3",

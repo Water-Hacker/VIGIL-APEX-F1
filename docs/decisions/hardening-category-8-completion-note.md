@@ -99,15 +99,29 @@ Estimated 2–4 days total. **Larger than Cat 6 in scope** because 9.1 is
 the only "medium" partial left in the pass after 9.1 itself; everything else
 is sub-day work.
 
-**Five open questions from §7 of the orientation:**
+**Five open questions from §7 of the orientation** (verified against
+`docs/audit/hardening-orientation.md:748-760` at this commit's time; an
+earlier revision of this note carried a fabricated Q2–Q5 list, corrected
+in-place here per posture-4 honest-reporting):
 
-- **Q1 (8.5 acceptability)** — _resolved by this category._ Closure
-  doc explicitly records the architect's concurrence.
-- Q2–Q5 — still pending; none block Category 9.
-
-I'll surface Q2–Q5 again when their categories come up:
-
-- Q2 (Cat 9 / config-drift CI gate scope)
-- Q3 (Cat 10 / runbook authority — code vs. wiki)
-- Q4 (Cat 10 / post-incident audit-chain reconciliation cadence)
-- Q5 (post-pass / external red-team scope)
+- **Q1 (8.5 timing side-channel acceptability)** — _resolved by this
+  category._ Closure doc explicitly records the architect's concurrence
+  on accept-as-is.
+- **Q2 (Cosign closure scope: full Kyverno in k3s OR init-container
+  verify in compose)** — relevant when Phase 12 cross-cutting cosign
+  work begins (modes 9.9 + 10.8). Not blocking Category 9 non-cosign
+  work (9.1, 9.2, 9.3, 9.6, 9.7).
+- **Q3 (9.7 forward-incompatible code: policy-only doc OR tooling-level
+  gate)** — relevant during Category 9. Agent default: policy-only doc
+  per orientation recommendation; 5+ days for a real schema-compat
+  checker is too costly for a currently-low-risk mode.
+- **Q4 (9.2 secret rotation: restart-on-rotate + tests OR Vault Agent
+  sidecar hot-reload)** — relevant during Category 9. Agent default:
+  restart-on-rotate + tests per orientation recommendation; revisit
+  during M5 prep.
+- **Q5 (Pre-existing PR #5 Helm chart coordination)** — partially
+  resolved by observation: `infra/k8s/charts/vigil-apex/` already
+  contains `values.yaml`, `values-dev.yaml`, `values-prod.yaml`,
+  `values-cluster.yaml` at this commit, suggesting the chart has merged
+  to the working branch since orientation. Closures touching deployment
+  artefacts will apply to BOTH compose and the chart in a single commit.

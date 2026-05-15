@@ -8,11 +8,11 @@ returns no Sentinel scenes (e.g. heavy cloud).
 
 from __future__ import annotations
 
-import io
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -26,6 +26,11 @@ from vigil_common.errors import VigilError
 from vigil_common.logging import get_logger
 
 from .schemas import GeoBBox, GeoPoint
+
+try:
+    import planetary_computer as _pc
+except Exception:  # optional dep; absence is non-fatal — callers fall through
+    _pc = None
 
 _logger = get_logger("vigil-satellite.stac")
 
@@ -113,7 +118,7 @@ def search_scenes(
                         bands=bands,
                     )
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             _logger.warning("stac-search-failed", sensor=sensor, error=str(e))
     if not found:
         raise VigilError(
@@ -126,17 +131,15 @@ def search_scenes(
     return found[:limit]
 
 
-def _planetary_computer_signer():  # type: ignore[no-untyped-def]
+def _planetary_computer_signer() -> Callable[[Any], Any] | None:
     """Return a `pystac-client` modifier that signs MPC asset URLs.
 
-    Imported lazily so a missing planetary_computer doesn't break offline tests.
+    `planetary_computer` is imported at module load (top-level, guarded);
+    its absence is non-fatal — we return None and callers fall through.
     """
-    try:
-        import planetary_computer as pc
-
-        return pc.sign_inplace
-    except Exception:  # noqa: BLE001
+    if _pc is None:
         return None
+    return _pc.sign_inplace
 
 
 def read_band(href: str, aoi: GeoBBox, target_resolution_m: float = 10.0) -> NDArray[np.float32]:
@@ -151,7 +154,7 @@ def read_band(href: str, aoi: GeoBBox, target_resolution_m: float = 10.0) -> NDA
 
     # Normalise to surface-reflectance scale [0, 1] for both Sentinel-2 (10000)
     # and Landsat-C2 (0.0000275 * x + -0.2). We use the simpler /10000 path since
-    # both COGs we read carry uint16 reflectance × 10000 in their default form.
+    # both COGs we read carry uint16 reflectance * 10000 in their default form.
     arr = np.asarray(data.filled(np.nan), dtype=np.float32)
     if arr.size == 0:
         raise VigilError(
@@ -165,10 +168,20 @@ def read_band(href: str, aoi: GeoBBox, target_resolution_m: float = 10.0) -> NDA
 
 def read_cog_to_bytes(href: str) -> bytes:
     """Read a COG into bytes — used by tests / archival."""
-    with rasterio.open(href) as src, MemoryFile() as memfile, memfile.open(
-        driver="GTiff", count=1, dtype=src.dtypes[0], crs=src.crs, transform=src.transform,
-        width=src.width, height=src.height, compress="deflate",
-    ) as dst:
+    with (
+        rasterio.open(href) as src,
+        MemoryFile() as memfile,
+        memfile.open(
+            driver="GTiff",
+            count=1,
+            dtype=src.dtypes[0],
+            crs=src.crs,
+            transform=src.transform,
+            width=src.width,
+            height=src.height,
+            compress="deflate",
+        ) as dst,
+    ):
         dst.write(src.read(1), 1)
         memfile.seek(0)
         return memfile.read()

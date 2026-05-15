@@ -64,7 +64,7 @@ class ImageForensicsError(VigilError):
     pass
 
 
-def asVigilError(e: BaseException) -> VigilError:
+def asVigilError(e: BaseException) -> VigilError:  # noqa: N802 — TS-parity name mirrors `@vigil/shared/errors.asVigilError`
     """Wrap any exception into a VigilError so callers can route uniformly."""
     if isinstance(e, VigilError):
         return e

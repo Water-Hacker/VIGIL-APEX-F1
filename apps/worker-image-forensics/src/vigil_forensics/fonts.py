@@ -40,7 +40,11 @@ def _glyph_metrics(bw: np.ndarray) -> tuple[float, float, float, float]:
     if not contours:
         return (float(dist[bw > 0].mean() * 2), 0.0, 0.0, 0.0)
     bboxes = sorted(
-        (cv2.boundingRect(c) for c in contours if cv2.boundingRect(c)[2] >= 2 and cv2.boundingRect(c)[3] >= 4),
+        (
+            cv2.boundingRect(c)
+            for c in contours
+            if cv2.boundingRect(c)[2] >= 2 and cv2.boundingRect(c)[3] >= 4
+        ),
         key=lambda b: b[0],
     )
     heights = np.array([b[3] for b in bboxes], dtype=np.float32)
@@ -88,12 +92,12 @@ def detect_font_anomaly(
         )
 
     bw_page = _binarise(page_bgr)
-    bw_field = bw_page[y:y + h, x:x + w]
+    bw_field = bw_page[y : y + h, x : x + w]
     # "Surrounding": page minus the field rectangle
     bw_surround = bw_page.copy()
-    bw_surround[y:y + h, x:x + w] = 0
+    bw_surround[y : y + h, x : x + w] = 0
 
-    stroke_f, stroke_f_std, height_f, spacing_f_std = _glyph_metrics(bw_field)
+    stroke_f, _stroke_f_std, height_f, spacing_f_std = _glyph_metrics(bw_field)
     stroke_s, stroke_s_std, height_s, spacing_s_std = _glyph_metrics(bw_surround)
 
     def z(value: float, mean: float, std: float) -> float:
@@ -110,8 +114,9 @@ def detect_font_anomaly(
         f"height={height_f:.1f}/{height_s:.1f} (z={z_height:.2f}); "
         f"spacing-std={spacing_f_std:.2f}/{spacing_s_std:.2f} (z={z_spacing:.2f})"
     )
+    _allowed_labels = {"amount", "supplier_name", "officer_name", "date"}
     return FontAnomaly(
         score=score,
-        field=field_label if field_label in {"amount", "supplier_name", "officer_name", "date"} else "other",
+        field=field_label if field_label in _allowed_labels else "other",
         details=details,
     )

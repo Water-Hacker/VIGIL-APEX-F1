@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     """Subset of the workspace `.env` exposed to the Python workers."""
 
     model_config = SettingsConfigDict(
-        env_file=None,                   # Compose feeds env directly
+        env_file=None,  # Compose feeds env directly
         env_prefix="",
         case_sensitive=False,
         extra="ignore",

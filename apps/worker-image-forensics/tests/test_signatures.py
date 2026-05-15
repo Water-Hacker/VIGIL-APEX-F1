@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from io import BytesIO
 
-import numpy as np
+import pytest
 from PIL import Image, ImageDraw, ImageFont
 
+from vigil_common.errors import VigilError
 from vigil_forensics.signatures import compare_signatures
 
 
@@ -46,9 +47,5 @@ def test_minor_jitter_still_high() -> None:
 
 
 def test_bad_image_raises() -> None:
-    from vigil_common.errors import VigilError
-
-    import pytest
-
     with pytest.raises(VigilError):
         compare_signatures(reference_bytes=b"not-an-image", candidate_bytes=b"\x00\x01\x02")

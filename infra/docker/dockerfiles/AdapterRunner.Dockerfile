@@ -2,7 +2,7 @@
 # VIGIL APEX adapter-runner — runs all 26 scrapers on Hetzner N02.
 # Includes Playwright Chromium + Tor.
 
-FROM mcr.microsoft.com/playwright:v1.47.2-jammy AS base
+FROM mcr.microsoft.com/playwright:v1.60.0-jammy AS base
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tor torsocks dumb-init tzdata && \
@@ -19,7 +19,7 @@ RUN corepack enable && corepack prepare pnpm@9.7.0 --activate
 RUN pnpm install --frozen-lockfile
 RUN pnpm run build --filter "@vigil/*..." --filter "...^./apps/adapter-runner"
 
-FROM mcr.microsoft.com/playwright:v1.47.2-jammy AS runtime
+FROM mcr.microsoft.com/playwright:v1.60.0-jammy AS runtime
 ENV NODE_ENV=production TZ=Africa/Douala
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tor torsocks dumb-init tzdata curl && \

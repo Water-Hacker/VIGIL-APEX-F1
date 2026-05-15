@@ -13,8 +13,6 @@ and 0 means "no resemblance". Below 0.85 fires the P-G-002 pattern.
 
 from __future__ import annotations
 
-from io import BytesIO
-
 import cv2
 import imagehash
 import numpy as np
@@ -45,7 +43,7 @@ def _normalise(img: np.ndarray, target_size: tuple[int, int] = (256, 96)) -> np.
     if coords is None:
         return cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
     x, y, w, h = cv2.boundingRect(coords)
-    cropped = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
+    cropped = img[y : y + h, x : x + w] if w > 0 and h > 0 else img
     return cv2.resize(cropped, target_size, interpolation=cv2.INTER_AREA)
 
 

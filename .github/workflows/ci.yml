@@ -28,21 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 9.7.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Cache pnpm store
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -53,10 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint -- --max-warnings=0
@@ -73,10 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - name: enforce migration-lock discipline
@@ -92,14 +92,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - name: enforce compose dependency-DAG acyclicity
         run: pnpm exec tsx scripts/check-compose-deps.ts
+
+  helm-values-drift:
+    # Hardening mode 9.1 — Tier 1 config-drift gate for the Helm chart
+    # values files. Asserts that values-prod.yaml pins images, sets
+    # >= 2 replicas, sets resource limits, uses a non-staging cert
+    # issuer, doesn't fall back to the kind/minikube `standard`
+    # storage class, and is in worker + top-level-key parity with
+    # values-dev.yaml. The orientation's "medium 1-3 days" closure
+    # also includes a `helm template`-rendered diff against a
+    # committed golden + an ArgoCD ApplicationSet; those are Phase
+    # 12+ work. See scripts/check-helm-values-drift.ts.
+    name: helm-values-drift
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: enforce values-prod.yaml drift discipline
+        run: pnpm exec tsx scripts/check-helm-values-drift.ts
 
   api-error-leaks:
     # Hardening mode 4.9 — reject `message: String(err)` and
@@ -111,14 +135,53 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - name: enforce no caught-error echo in API responses
         run: pnpm exec tsx scripts/check-api-error-leaks.ts
+
+  migration-rollback:
+    # Hardening modes 9.3 + 9.6 — round-trip rollback gate for the
+    # hand-curated Drizzle migrations. Runs forward → reverse-order
+    # down → forward against an ephemeral Postgres service. Catches
+    # broken `*_down.sql` files (forgotten DROPs, bad SQL, dependency
+    # violations) before they reach a dev who needs to roll back.
+    # Prod rollback still uses PITR per docs/RESTORE.md; this gate
+    # protects the dev-environment path that the `*_down.sql` headers
+    # promise. See scripts/check-migration-rollback.ts.
+    name: migration-rollback
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16.2-alpine
+        env:
+          POSTGRES_USER: vigil
+          POSTGRES_PASSWORD: vigil_test_password
+          POSTGRES_DB: vigil_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vigil -d vigil_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: forward → down → forward round-trip
+        run: pnpm exec tsx scripts/check-migration-rollback.ts
+        env:
+          INTEGRATION_DB_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
 
   typecheck:
     name: typecheck
@@ -126,10 +189,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
@@ -163,10 +226,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
@@ -234,7 +297,7 @@ jobs:
         # is declared as a workspace-root devDependency (commit 94235d4)
         # — pnpm 9 symlinks it to `node_modules/.bin/tsx` reliably.
         run: pnpm exec tsx scripts/check-pattern-coverage.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage
           path: '**/coverage/**'
@@ -247,10 +310,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
@@ -275,10 +338,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
       # `@playwright/test` is a devDep of apps/dashboard, not the
@@ -297,7 +360,7 @@ jobs:
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
           CI: '1'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: playwright-a11y-report
@@ -332,7 +395,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Check baselines exist
         id: baselines
         run: |
@@ -344,10 +407,10 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Visual-regression baselines not yet stamped (Block-E E.5 D7 pending architect-side run); skipping playwright + reporting OK."
           fi
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         if: steps.baselines.outputs.present == 'true'
         with: { version: 9.7.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: steps.baselines.outputs.present == 'true'
         with: { node-version-file: '.nvmrc', cache: 'pnpm' }
       - run: pnpm install --frozen-lockfile
@@ -367,7 +430,7 @@ jobs:
         env:
           POSTGRES_URL: postgres://vigil:vigil_test_password@localhost:5432/vigil_test
           CI: '1'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always() && steps.baselines.outputs.present == 'true'
         with:
           name: playwright-visual-report
@@ -381,8 +444,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build all images (no push)
         run: |
           docker buildx bake \
@@ -392,3 +455,105 @@ jobs:
             --set '*.cache-to=type=gha,mode=max' \
             --load
         continue-on-error: true # bake file emerges with R0.D
+
+  trivy-base-images:
+    # Hardening modes 10.7 + 10.2(a) — base-image CVE gate.
+    #
+    # Scans every base image referenced by a Dockerfile under
+    # `infra/docker/dockerfiles/` for HIGH + CRITICAL CVEs. Trivy pulls
+    # each image, inventories its OS-package + library layer, and
+    # cross-references against its CVE database. Hard fails on any HIGH
+    # or CRITICAL finding — base-image compromise (mode 10.2) and CVE
+    # drift (mode 10.7) close on this gate.
+    #
+    # The image list is enumerated dynamically by
+    # `scripts/enumerate-base-images.ts` so adding a new Dockerfile
+    # automatically extends the scan. Refresh procedure is documented in
+    # `docs/runbooks/base-image-refresh.md` (mode 10.2(c)).
+    #
+    # Digest-pinning of FROM lines (mode 10.2(b)) is deferred to Phase 12
+    # alongside the cosign chain (modes 9.8 + 9.9 + 10.8).
+    name: trivy-base-images
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Enumerate base images from Dockerfiles
+        id: enum
+        run: |
+          set -euo pipefail
+          IMAGES=$(pnpm exec tsx scripts/enumerate-base-images.ts)
+          {
+            echo 'images<<EOF'
+            echo "$IMAGES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "Will scan:"
+          echo "$IMAGES"
+      # Mirrors the gitleaks install pattern from secret-scan.yml: pinned
+      # version + sha256 checksum verify. Closes part of mode 10.3
+      # (Compromised build tool) for the trivy binary surface. When
+      # bumping the version, refresh BOTH the version string AND the
+      # sha256 below; the new checksum is at
+      # https://github.com/aquasecurity/trivy/releases/download/v$VERSION/trivy_${VERSION}_checksums.txt.
+      - name: Install Trivy (sha256-verified)
+        run: |
+          set -euo pipefail
+          TRIVY_VERSION=0.70.0
+          TRIVY_SHA256=8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
+          trivy --version
+      - name: Trivy scan each base image (HIGH + CRITICAL hard gate)
+        env:
+          IMAGES: ${{ steps.enum.outputs.images }}
+        run: |
+          set -euo pipefail
+          trivy --version
+          FAIL=0
+          # Iterate the enumerated list. `trivy image --exit-code 1`
+          # returns non-zero ONLY when a finding at the requested
+          # severity is present. Image-pull or scan-engine errors are
+          # caught separately and treated as failures — a base image
+          # we can't scan is a 10.2 signal worth surfacing.
+          while IFS= read -r IMG; do
+            [ -z "$IMG" ] && continue
+            echo "::group::trivy image $IMG"
+            # --vuln-type os scope: this gate's purpose is mode 10.2
+            # (Compromised container base image), i.e. OS-layer CVEs in the
+            # FROM image's distro packages. Application-binary findings
+            # (caddy gobinary, playwright node-pkg) are the upstream
+            # maintainer's responsibility — caddy releases a patched
+            # binary, we pull the new tag. Our own npm/pip CVEs are
+            # covered by Snyk + frozen-lockfile (modes 10.1, 10.4, 10.5).
+            # The OS scope keeps this gate authoritative for what it can
+            # remediate (bump the base image to a newer alpine/debian).
+            if ! trivy image \
+                --quiet \
+                --severity HIGH,CRITICAL \
+                --ignore-unfixed \
+                --vuln-type os \
+                --exit-code 1 \
+                --format table \
+                "$IMG"; then
+              echo "::endgroup::"
+              echo "::error::Trivy found HIGH or CRITICAL CVEs (or could not scan) in $IMG"
+              FAIL=$((FAIL + 1))
+            else
+              echo "::endgroup::"
+              echo "OK: $IMG"
+            fi
+          done <<< "$IMAGES"
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::Trivy gate failed for $FAIL image(s). See per-image groups above."
+            exit 1
+          fi
+          echo "Trivy gate passed for all base images."

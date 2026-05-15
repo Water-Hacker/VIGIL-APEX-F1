@@ -9,11 +9,12 @@ bbox.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
 
+from vigil_common.errors import VigilError
 from vigil_satellite.main import (
     ProviderResult,
     SatelliteWorker,
@@ -26,7 +27,6 @@ from vigil_satellite.schemas import (
     PolygonGeoJson,
     SatelliteRequest,
 )
-from vigil_common.errors import VigilError
 
 
 def _aoi() -> PolygonGeoJson:
@@ -51,8 +51,8 @@ def _request(providers: list[str]) -> SatelliteRequest:
         finding_id=None,
         aoi_geojson=_aoi(),
         contract_window=ContractWindow(
-            start=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            end=datetime(2025, 4, 1, tzinfo=timezone.utc),
+            start=datetime(2025, 1, 1, tzinfo=UTC),
+            end=datetime(2025, 4, 1, tzinfo=UTC),
         ),
         providers=providers,  # type: ignore[arg-type]
         max_cloud_pct=20.0,
@@ -84,7 +84,7 @@ def _fake_finding(score: float) -> ActivityFinding:
     return ActivityFinding(
         scene_id="X-1",
         sensor="nicfi",
-        captured_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
+        captured_at=datetime(2025, 2, 1, tzinfo=UTC),
         cloud_pct=5.0,
         activity_score=score,
         rationale="test",
@@ -139,14 +139,17 @@ def test_provider_dispatch_falls_through_on_empty_provider() -> None:
     worker._settings = settings_mock  # type: ignore[attr-defined]
 
     aoi = _polygon_to_bbox(_aoi())
-    mid = datetime(2025, 1, 5, tzinfo=timezone.utc)
-    late = datetime(2025, 3, 30, tzinfo=timezone.utc)
+    mid = datetime(2025, 1, 5, tzinfo=UTC)
+    late = datetime(2025, 3, 30, tzinfo=UTC)
 
-    def _fake_run(provider, _aoi, _mid, _late, _max_cloud):  # type: ignore[no-untyped-def]
+    # mock arity must match SatelliteWorker._run_provider(self, ...)
+    def _fake_run(_self, provider, _aoi, _mid, _late, _max_cloud):
         if provider == "nicfi":
             raise VigilError(
-                code="SATELLITE_NICFI_NO_SCENES", message="empty",
-                severity="info", retryable=True,
+                code="SATELLITE_NICFI_NO_SCENES",
+                message="empty",
+                severity="info",
+                retryable=True,
             )
         if provider == "sentinel-2":
             return ProviderResult(

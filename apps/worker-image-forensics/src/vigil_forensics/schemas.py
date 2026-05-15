@@ -27,14 +27,14 @@ class ForensicsRequest(BaseModel):
 
 
 class SignatureSimilarity(BaseModel):
-    score: float = Field(ge=0.0, le=1.0)        # 1 = identical
+    score: float = Field(ge=0.0, le=1.0)  # 1 = identical
     ssim: float = Field(ge=-1.0, le=1.0)
     phash_distance: int = Field(ge=0, le=128)
     rationale: str = Field(min_length=4, max_length=300)
 
 
 class FontAnomaly(BaseModel):
-    score: float = Field(ge=0.0, le=1.0)        # 1 = strong anomaly
+    score: float = Field(ge=0.0, le=1.0)  # 1 = strong anomaly
     field: Literal["amount", "supplier_name", "officer_name", "date", "other"] = "other"
     details: str = Field(min_length=4, max_length=500)
 
