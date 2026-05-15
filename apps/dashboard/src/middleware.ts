@@ -107,12 +107,42 @@ function matchRule(pathname: string): RouteRule | null {
   return null;
 }
 
-function rolesFromToken(payload: VigilJwtPayload): Set<string> {
-  const roles = new Set<string>();
-  for (const r of payload.realm_access?.roles ?? []) roles.add(r);
-  const clientRoles = payload.resource_access?.[KEYCLOAK_CLIENT_ID]?.roles ?? [];
-  for (const r of clientRoles) roles.add(r);
-  return roles;
+/**
+ * Hardening mode 4.2 — confused-deputy across service boundary.
+ *
+ * `rolesFromToken` previously returned a flat Set<string> that merged
+ * realm-level roles (assigned to the user globally in Keycloak) with
+ * resource-level roles (assigned within this client's role-mapper).
+ * The merge meant downstream consumers couldn't tell whether a role
+ * came from the trusted realm root or from a per-client mapping that
+ * a different Keycloak admin might be able to mutate.
+ *
+ * Phase-1 closure: KEYCLOAK_ISSUER is the sole trusted root by policy
+ * (architect-managed; no other realms can issue these tokens). Both
+ * realm and resource roles are treated as authoritative for
+ * authorisation decisions, but we now emit them under DISTINCT
+ * downstream headers so a future consumer that wants stricter
+ * provenance can require specifically realm-level roles.
+ *
+ * Headers emitted:
+ *   x-vigil-roles            — merged set (back-compat for existing
+ *                              consumers; same contract as before).
+ *   x-vigil-roles-realm      — roles from realm_access.roles.
+ *   x-vigil-roles-resource   — roles from resource_access[CLIENT_ID].roles.
+ *
+ * Consumers requiring realm-level provenance read the realm header
+ * directly and intersect with the operator-level role set.
+ */
+// Exported for unit tests; not re-exported from any barrel.
+export function rolesFromToken(payload: VigilJwtPayload): {
+  realm: ReadonlyArray<string>;
+  resource: ReadonlyArray<string>;
+  merged: Set<string>;
+} {
+  const realm = payload.realm_access?.roles ?? [];
+  const resource = payload.resource_access?.[KEYCLOAK_CLIENT_ID]?.roles ?? [];
+  const merged = new Set<string>([...realm, ...resource]);
+  return { realm, resource, merged };
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
@@ -162,8 +192,8 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 
   const rule = matchRule(pathname);
   if (rule) {
-    const roles = rolesFromToken(payload);
-    const allowed = rule.allow.some((r) => roles.has(r));
+    const { realm, resource, merged } = rolesFromToken(payload);
+    const allowed = rule.allow.some((r) => merged.has(r));
     if (!allowed) {
       if (pathname.startsWith('/api/')) {
         return NextResponse.json({ error: 'forbidden' }, { status: 403 });
@@ -178,12 +208,17 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
       fwd.delete('x-vigil-user');
       fwd.delete('x-vigil-username');
       fwd.delete('x-vigil-roles');
+      fwd.delete('x-vigil-roles-realm');
+      fwd.delete('x-vigil-roles-resource');
       if (payload.sub) fwd.set('x-vigil-user', payload.sub);
       if (payload.preferred_username) {
         fwd.set('x-vigil-username', payload.preferred_username);
       }
-      const denyRoles = Array.from(roles);
+      const denyRoles = Array.from(merged);
       if (denyRoles.length > 0) fwd.set('x-vigil-roles', denyRoles.join(','));
+      // Mode 4.2 — preserve provenance on the deny rewrite too.
+      if (realm.length > 0) fwd.set('x-vigil-roles-realm', realm.join(','));
+      if (resource.length > 0) fwd.set('x-vigil-roles-resource', resource.join(','));
       fwd.set('x-vigil-forbidden-path', pathname);
       // The rule's allow-list is informational for the audit row so a
       // reviewer can see which roles WOULD have been sufficient.
@@ -197,12 +232,22 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const headers = new Headers(req.headers);
   headers.delete('x-vigil-user');
   headers.delete('x-vigil-roles');
+  headers.delete('x-vigil-roles-realm');
+  headers.delete('x-vigil-roles-resource');
   if (payload.sub) headers.set('x-vigil-user', payload.sub);
   if (payload.preferred_username) {
     headers.set('x-vigil-username', payload.preferred_username);
   }
-  const roles = Array.from(rolesFromToken(payload));
-  if (roles.length > 0) headers.set('x-vigil-roles', roles.join(','));
+  const { realm, resource, merged } = rolesFromToken(payload);
+  const allRoles = Array.from(merged);
+  if (allRoles.length > 0) headers.set('x-vigil-roles', allRoles.join(','));
+  // Mode 4.2 — emit role provenance separately so downstream consumers
+  // that need realm-level guarantees (i.e. roles assigned by the
+  // canonical Keycloak realm admin, not by a per-client role mapper)
+  // can require specifically realm-sourced roles. Back-compat:
+  // x-vigil-roles continues to carry the merged set.
+  if (realm.length > 0) headers.set('x-vigil-roles-realm', realm.join(','));
+  if (resource.length > 0) headers.set('x-vigil-roles-resource', resource.join(','));
   // Surface the path to the root layout's NavBar so active-link
   // styling works without each page passing the prop.
   headers.set('x-vigil-pathname', pathname);
