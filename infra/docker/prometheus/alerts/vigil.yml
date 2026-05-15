@@ -204,6 +204,27 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 6.8 — Redis stream backpressure.
+      # vigil_redis_stream_length is set by the QueueClient's periodic
+      # scraper. Stream caps are MAXLEN=1M; we warn at 50% capacity
+      # (500k) so the operator has time to investigate the backlog
+      # before the cap-and-drop kicks in.
+      - alert: RedisStreamBackpressure
+        expr: vigil_redis_stream_length > 500000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Redis stream {{ $labels.stream }} length is {{ $value }} (> 500k)'
+          description: 'Stream {{ $labels.stream }} has grown above 50% of the MAXLEN cap (1M). Consumer fleet is not keeping up; investigate worker concurrency, downstream dependency health, or scale out.'
+
+      - alert: RedisStreamNearCap
+        expr: vigil_redis_stream_length > 900000
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Redis stream {{ $labels.stream }} is near its MAXLEN cap ({{ $value }} / 1M)'
+          description: 'EMERGENCY: stream {{ $labels.stream }} is within 10% of the 1M MAXLEN. Once it hits the cap Redis will drop the oldest entries. Triage immediately.'
+
       # Hardening mode 6.2 — backup component status.
       # The vigil-backup script writes vigil_backup_component_status
       # via node_exporter's textfile collector. Per-component values:

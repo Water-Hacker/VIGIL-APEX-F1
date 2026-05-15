@@ -293,6 +293,23 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 6.8 — Redis stream length gauge.
+ *
+ * Redis streams are MAXLEN-trimmed at 1M entries by the queue client.
+ * Pre-closure, operators couldn't see how close any stream was to
+ * the cap. This gauge is set periodically by `startRedisStreamScraper`
+ * (in `packages/queue/src/client.ts`) — XLEN per stream every 30 s.
+ * Alertmanager fires `RedisStreamBackpressure` when any stream is
+ * sustained > 500 000 entries (50% of the cap).
+ */
+export const redisStreamLength = new Gauge({
+  name: 'vigil_redis_stream_length',
+  help: 'Length of a Redis stream — backpressure indicator (mode 6.8)',
+  labelNames: ['stream'] as const,
+  registers: [registry],
+});
+
+/**
  * Hardening mode 6.9 — feature-flag boot audit.
  *
  * Set on worker boot for every env-var-driven feature toggle. Value
