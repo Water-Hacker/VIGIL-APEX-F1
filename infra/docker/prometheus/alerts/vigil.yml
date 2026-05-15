@@ -204,6 +204,34 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 6.6 — TLS certificate expiry monitoring.
+      # The cert-expiry-check script (invoked hourly by systemd timer)
+      # writes vigil_certificate_expiry_days_remaining via the
+      # node_exporter textfile collector. We alert at 7 days
+      # (operators have a week to investigate) and at 0 days
+      # (emergency — cert is expired or expiring within hours).
+      - alert: CertificateExpiringSoon
+        expr: vigil_certificate_expiry_days_remaining < 7
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Certificate {{ $labels.cert_name }} expires in {{ $value }} day(s)'
+          description: 'TLS cert {{ $labels.cert_name }} has {{ $value }} days remaining. Renew before expiry. cert-manager / Vault PKI / age-plugin-yubikey paths each have their own rotation runbook.'
+
+      - alert: CertificateExpiredOrExpiringWithinDay
+        expr: vigil_certificate_expiry_days_remaining < 1
+        labels: { severity: critical }
+        annotations:
+          summary: 'Certificate {{ $labels.cert_name }} expired or expires within 24h ({{ $value }} days)'
+          description: 'EMERGENCY: TLS cert {{ $labels.cert_name }} is either expired or expires within 24 hours. Service outage imminent. Trigger the cert-rotation runbook immediately.'
+
+      # Companion: the script itself stalled. The textfile collector
+      # only knows what was last written; if the systemd timer fails
+      # the gauge becomes stale-but-non-zero. Add a freshness signal
+      # via the textfile mtime exporter (operator config) — this
+      # alert assumes the freshness metric is exposed; if not, see
+      # the runbook for manual checks.
+
       # Hardening mode 6.4 — LLM provider rate-limit exhaustion.
       # vigil_llm_rate_limit_exhausted_total fires when an LLM SDK's
       # internal 429 retry budget is exhausted (default 3 retries

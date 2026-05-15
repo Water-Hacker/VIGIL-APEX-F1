@@ -293,6 +293,25 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 6.6 — TLS certificate expiry monitoring.
+ *
+ * The scripts/cert-expiry-check.ts script writes this gauge for each
+ * certificate in /srv/vigil/certs/. node_exporter scrapes via its
+ * textfile collector. Alertmanager fires `CertificateExpiringSoon`
+ * when any cert has < 7 days remaining.
+ *
+ * Why a gauge (not a counter): the value is days-remaining at the
+ * time of the last scan. Counters don't fit this shape; gauges
+ * naturally express "current state."
+ */
+export const certificateExpiryDaysRemaining = new Gauge({
+  name: 'vigil_certificate_expiry_days_remaining',
+  help: 'Days remaining until each TLS certificate expires (mode 6.6)',
+  labelNames: ['cert_name'] as const,
+  registers: [registry],
+});
+
+/**
  * Hardening mode 6.4 — LLM provider rate-limit detection. The
  * Anthropic / Bedrock / Local providers' SDKs retry 429 internally,
  * but exhaustion of those retries was previously caught by a generic
