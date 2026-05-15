@@ -1,16 +1,17 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, eventsOfKind, meta, readBoolWithFallback, str } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
 /**
- * P-O-001 — Mining concession without environmental impact assessment (EITI 2.5).
+ * P-O-001 — Mining concession without environmental impact assessment.
  *
- * Cameroon's Mining Code (Loi 2016/017 art. 24) requires an EIA
- * before any concession is granted. Absent EIA = procedural defect
- * + potential corruption signal.
+ * Detection: pull `sector` and `eia_present` from `tender_notice` or
+ * `gazette_decree` events; mining sector with no EIA on file fires.
+ * Falls back to `metadata.sector` + `metadata.eia_present`.
  */
 const PID = Ids.asPatternId('P-O-001');
 const definition: PatternDef = {
@@ -28,13 +29,34 @@ const definition: PatternDef = {
   defaultWeight: 0.6,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    if (meta.sector !== 'mining') return notMatched(PID, 'not mining sector');
-    const eiaPresent = meta.eia_present === true;
-    if (eiaPresent) return notMatched(PID, 'EIA present');
+    const tenders = eventsOfKind(subject, ['tender_notice', 'gazette_decree', 'company_filing']);
+    let sector: string | null = null;
+    let sectorEvent: (typeof tenders)[number] | null = null;
+    for (const t of tenders) {
+      const s = str(t.payload['sector']);
+      if (s !== null) {
+        sector = s;
+        sectorEvent = t;
+        break;
+      }
+    }
+    if (sector === null) {
+      sector = str(meta(subject).sector);
+    }
+    if (sector !== 'mining') return notMatched(PID, `sector=${sector ?? 'unknown'} not mining`);
+
+    const eia = readBoolWithFallback(subject, 'eia_present', 'eia_present', [
+      'tender_notice',
+      'gazette_decree',
+      'company_filing',
+    ]);
+    if (eia.value) return notMatched(PID, 'EIA present');
+    const ev = evidenceFrom([...(sectorEvent ? [sectorEvent] : []), ...eia.contributors]);
     return matched({
       pattern_id: PID,
       strength: 0.85,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
       rationale: 'Mining concession granted without EIA on file.',
     });
   },

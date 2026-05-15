@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -26,14 +27,22 @@ const definition: PatternDef = {
   defaultWeight: 0.6,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const ratio = Number(meta.unit_price_to_world_reference_ratio ?? 1);
-    if (ratio > 0.67) return notMatched(PID, `ratio=${ratio} > 0.67`);
-    const strength = Math.min(0.95, 0.3 + (0.67 - ratio) * 1.2);
+    const r = readNumericWithFallback(
+      subject,
+      'unit_price_to_world_reference_ratio',
+      'unit_price_to_world_reference_ratio',
+      ['company_filing', 'payment_order'],
+    );
+    if (r.from === 'none') return notMatched(PID, 'no unit-price evidence');
+    if (r.value > 0.67) return notMatched(PID, `ratio=${r.value.toFixed(2)} > 0.67`);
+    const strength = Math.min(0.95, 0.5 + (0.67 - r.value) * 1.2);
+    const ev = evidenceFrom(r.contributors);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Export at ${(ratio * 100).toFixed(0)}% of world-reference price.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Export at ${(r.value * 100).toFixed(0)}% of world-reference price.`,
     });
   },
 };

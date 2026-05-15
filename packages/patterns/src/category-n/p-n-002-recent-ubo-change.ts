@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, eventsOfKind, meta, num } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -8,9 +9,10 @@ import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 /**
  * P-N-002 — UBO changed within 90 days before award (EITI 2.5).
  *
- * Recent UBO change immediately preceding a contract award is a
- * specific Cameroonian AML decree red flag (Loi 2010/012) and an
- * EITI Standard 2.5 disclosure marker.
+ * Detection: look for a `company_filing` event whose payload kind is
+ * 'ubo_change' AND an `award` event whose observed_at is at most 90 days
+ * after. If both exist, compute the gap days. Falls back to
+ * `metadata.days_ubo_change_to_award` for legacy.
  */
 const PID = Ids.asPatternId('P-N-002');
 const definition: PatternDef = {
@@ -28,13 +30,42 @@ const definition: PatternDef = {
   defaultWeight: 0.55,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const days = Number(meta.days_ubo_change_to_award ?? Infinity);
+    const filings = eventsOfKind(subject, ['company_filing']);
+    const awards = eventsOfKind(subject, ['award']);
+
+    let days = Infinity;
+    let contributors: ReadonlyArray<(typeof subject.events)[number]> = [];
+
+    for (const filing of filings) {
+      const isUboChange =
+        filing.payload['change_kind'] === 'ubo_change' || filing.payload['ubo_changed'] === true;
+      if (!isUboChange) continue;
+      const filingT = Date.parse(filing.observed_at);
+      if (!Number.isFinite(filingT)) continue;
+      for (const a of awards) {
+        const awardT = Date.parse(a.observed_at);
+        if (!Number.isFinite(awardT)) continue;
+        const gap = (awardT - filingT) / 86_400_000;
+        if (gap >= 0 && gap < days) {
+          days = gap;
+          contributors = [filing, a];
+        }
+      }
+    }
+
+    if (days === Infinity) {
+      const m = num(meta(subject).days_ubo_change_to_award);
+      if (m !== null) days = m;
+    }
+
     if (days > 90) return notMatched(PID, `days_ubo_change_to_award=${days} > 90`);
-    const strength = Math.min(0.95, 0.4 + (90 - Math.max(0, days)) * 0.005);
+    const strength = Math.min(0.95, 0.55 + (90 - Math.max(0, days)) * 0.004);
+    const ev = evidenceFrom(contributors);
     return matched({
       pattern_id: PID,
       strength,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
       rationale: `UBO changed ${days} days before award.`,
     });
   },

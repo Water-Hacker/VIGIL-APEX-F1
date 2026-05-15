@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readBoolWithFallback, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -8,10 +9,9 @@ import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 /**
  * P-M-002 — Bid suppression (WB INT / OECD).
  *
- * Bidders deliberately withdraw their bids after the open period
- * begins, clearing the way for a pre-selected winner. Detection:
- * withdrawal-rate for the entity submitting bids is elevated for
- * tenders won by a specific pre-determined supplier.
+ * Detection: `bid_withdrawal_rate` ≥ 0.5 on `audit_observation` or
+ * `tender_notice` events, paired with `same_winner_post_withdrawals:true`
+ * on the same tender. Falls back to metadata for both fields.
  */
 const PID = Ids.asPatternId('P-M-002');
 const definition: PatternDef = {
@@ -29,20 +29,31 @@ const definition: PatternDef = {
   defaultWeight: 0.65,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const withdrawalRate = Number(meta.bid_withdrawal_rate ?? 0);
-    const consistentWinner = meta.same_winner_post_withdrawals === true;
-    if (withdrawalRate < 0.5 || !consistentWinner) {
+    const rate = readNumericWithFallback(subject, 'bid_withdrawal_rate', 'bid_withdrawal_rate', [
+      'audit_observation',
+      'tender_notice',
+      'cancellation',
+    ]);
+    const consistent = readBoolWithFallback(
+      subject,
+      'same_winner_post_withdrawals',
+      'same_winner_post_withdrawals',
+      ['audit_observation', 'award'],
+    );
+    if (rate.value < 0.5 || !consistent.value) {
       return notMatched(
         PID,
-        `withdrawal_rate=${withdrawalRate}, consistent_winner=${consistentWinner}`,
+        `withdrawal_rate=${rate.value.toFixed(2)}, consistent_winner=${consistent.value}`,
       );
     }
-    const strength = Math.min(0.95, 0.4 + withdrawalRate * 0.5);
+    const strength = Math.min(0.95, 0.4 + rate.value * 0.5);
+    const ev = evidenceFrom([...rate.contributors, ...consistent.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `${(withdrawalRate * 100).toFixed(0)}% withdrawal rate with consistent post-withdrawal winner.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `${(rate.value * 100).toFixed(0)}% withdrawal rate with consistent post-withdrawal winner.`,
     });
   },
 };

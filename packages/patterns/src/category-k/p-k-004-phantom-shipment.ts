@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readBoolWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -8,10 +9,11 @@ import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 /**
  * P-K-004 — Phantom shipment (FATF TBML).
  *
- * Goods invoiced and paid for that were never actually shipped.
  * Detection: invoiced shipment with no matching customs declaration
- * (Cameroon Douanes) or no bill of lading on file with the carrier.
- * Source: FATF.
+ * (Cameroon Douanes adapter writes `no_customs_declaration:true` on the
+ * payment_order event when reconciliation fails) or no bill of lading
+ * on file with the carrier (`no_bill_of_lading:true`). Falls back to
+ * the same fields on `subject.canonical.metadata`.
  */
 const PID = Ids.asPatternId('P-K-004');
 const definition: PatternDef = {
@@ -29,15 +31,25 @@ const definition: PatternDef = {
   defaultWeight: 0.75,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const noCustoms = meta.no_customs_declaration === true;
-    const noBol = meta.no_bill_of_lading === true;
-    if (!noCustoms && !noBol) return notMatched(PID, 'shipment evidence present');
-    const strength = noCustoms && noBol ? 0.92 : 0.6;
+    const customs = readBoolWithFallback(
+      subject,
+      'no_customs_declaration',
+      'no_customs_declaration',
+      ['payment_order', 'company_filing'],
+    );
+    const bol = readBoolWithFallback(subject, 'no_bill_of_lading', 'no_bill_of_lading', [
+      'payment_order',
+      'company_filing',
+    ]);
+    if (!customs.value && !bol.value) return notMatched(PID, 'shipment evidence present');
+    const strength = customs.value && bol.value ? 0.92 : 0.65;
+    const ev = evidenceFrom([...customs.contributors, ...bol.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Phantom-shipment markers: noCustoms=${noCustoms}, noBoL=${noBol}.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Phantom-shipment markers: noCustoms=${customs.value}, noBoL=${bol.value}.`,
     });
   },
 };

@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readBoolWithFallback, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -8,9 +9,13 @@ import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 /**
  * P-N-004 — Declared ownership < 25% but de-facto control (Wolfsberg / FATF R.24).
  *
- * Entity claims no person holds ≥ 25% (so no UBO declared), yet a
- * single individual controls the board through dual-class shares,
- * voting trust, or a majority of independent directors are co-aligned.
+ * Detection: 4 markers, of which ≥ 2 must fire:
+ *   - no_ubo_declared (filing flag)
+ *   - dual_class_shares (filing flag)
+ *   - voting_trust_present (filing flag)
+ *   - director_alignment_ratio > 0.66 (board cohesion metric)
+ *
+ * Sources: company_filing event payloads OR canonical.metadata.
  */
 const PID = Ids.asPatternId('P-N-004');
 const definition: PatternDef = {
@@ -28,20 +33,46 @@ const definition: PatternDef = {
   defaultWeight: 0.55,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const noUboDeclared = meta.no_ubo_declared === true;
-    const dualClass = meta.dual_class_shares === true;
-    const votingTrust = meta.voting_trust_present === true;
-    const directorAlignment = Number(meta.director_alignment_ratio ?? 0);
-    const flags = [noUboDeclared, dualClass, votingTrust, directorAlignment > 0.66].filter(
-      Boolean,
-    ).length;
-    if (flags < 2) return notMatched(PID, `de-facto-control flags ${flags}/4`);
-    const strength = Math.min(0.95, 0.3 + flags * 0.2);
+    const noUbo = readBoolWithFallback(subject, 'no_ubo_declared', 'no_ubo_declared', [
+      'company_filing',
+      'audit_observation',
+    ]);
+    const dual = readBoolWithFallback(subject, 'dual_class_shares', 'dual_class_shares', [
+      'company_filing',
+      'audit_observation',
+    ]);
+    const trust = readBoolWithFallback(subject, 'voting_trust_present', 'voting_trust_present', [
+      'company_filing',
+      'audit_observation',
+    ]);
+    const align = readNumericWithFallback(
+      subject,
+      'director_alignment_ratio',
+      'director_alignment_ratio',
+      ['company_filing', 'audit_observation'],
+    );
+
+    const markers: { name: string; on: boolean }[] = [
+      { name: 'noUbo', on: noUbo.value },
+      { name: 'dualClass', on: dual.value },
+      { name: 'trust', on: trust.value },
+      { name: 'dirAlign', on: align.value > 0.66 },
+    ];
+    const hits = markers.filter((m) => m.on).length;
+    if (hits < 2) return notMatched(PID, `de-facto-control flags ${hits}/4`);
+    const strength = Math.min(0.95, 0.5 + hits * 0.15);
+    const ev = evidenceFrom([
+      ...noUbo.contributors,
+      ...dual.contributors,
+      ...trust.contributors,
+      ...align.contributors,
+    ]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `De-facto control markers: ${flags}/4 (noUbo=${noUboDeclared}, dualClass=${dualClass}, trust=${votingTrust}, dirAlign=${directorAlignment.toFixed(2)}).`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `De-facto control markers: ${hits}/4 (noUbo=${noUbo.value}, dualClass=${dual.value}, trust=${trust.value}, dirAlign=${align.value.toFixed(2)}).`,
     });
   },
 };

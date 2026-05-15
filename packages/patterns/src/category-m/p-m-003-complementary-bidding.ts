@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -8,10 +9,8 @@ import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 /**
  * P-M-003 — Complementary bidding (WB INT / OECD).
  *
- * Losing bidders deliberately submit non-competitive offers to give
- * the appearance of competition. Detection: bid spreads are too even
- * (variance < threshold) OR losing bids contain elementary errors
- * (round numbers, missing technical fields) at suspicious rate.
+ * Detection: `bid_spread_evenness_score` and `losing_bid_defect_rate`
+ * from `audit_observation` events. Falls back to metadata fields.
  */
 const PID = Ids.asPatternId('P-M-003');
 const definition: PatternDef = {
@@ -29,17 +28,32 @@ const definition: PatternDef = {
   defaultWeight: 0.6,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const evenSpreadScore = Number(meta.bid_spread_evenness_score ?? 0); // higher = more suspicious
-    const losingDefectRate = Number(meta.losing_bid_defect_rate ?? 0);
-    if (evenSpreadScore < 0.7 && losingDefectRate < 0.5) {
-      return notMatched(PID, `evenness=${evenSpreadScore}, defects=${losingDefectRate}`);
+    const even = readNumericWithFallback(
+      subject,
+      'bid_spread_evenness_score',
+      'bid_spread_evenness_score',
+      ['audit_observation', 'tender_notice'],
+    );
+    const defects = readNumericWithFallback(
+      subject,
+      'losing_bid_defect_rate',
+      'losing_bid_defect_rate',
+      ['audit_observation', 'tender_notice'],
+    );
+    if (even.value < 0.7 && defects.value < 0.5) {
+      return notMatched(
+        PID,
+        `evenness=${even.value.toFixed(2)}, defects=${defects.value.toFixed(2)}`,
+      );
     }
-    const strength = Math.min(0.95, 0.3 + evenSpreadScore * 0.4 + losingDefectRate * 0.3);
+    const strength = Math.min(0.95, 0.5 + even.value * 0.3 + defects.value * 0.2);
+    const ev = evidenceFrom([...even.contributors, ...defects.contributors]);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Spread-evenness ${evenSpreadScore.toFixed(2)}, losing-bid defect rate ${(losingDefectRate * 100).toFixed(0)}%.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Spread-evenness ${even.value.toFixed(2)}, losing-bid defect rate ${(defects.value * 100).toFixed(0)}%.`,
     });
   },
 };

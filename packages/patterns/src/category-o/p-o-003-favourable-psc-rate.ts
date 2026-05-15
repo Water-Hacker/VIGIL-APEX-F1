@@ -1,17 +1,17 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
 import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 
 /**
- * P-O-003 — Production-sharing rate anomalously favourable to operator (EITI 2.6 + IMF FAD).
+ * P-O-003 — PSC rate anomalously favourable to operator.
  *
- * PSC (Production Sharing Contract) state share is below the
- * IMF Fiscal Affairs Department's regional benchmark for similar
- * basins. Marker: cost-recovery cap > 80% (industry norm 60-70%) OR
- * royalty rate < 5% (basin norm > 10%).
+ * Detection: `cost_recovery_cap` and `royalty_rate` on a `company_filing`
+ * or `gazette_decree` event. Falls back to metadata fields. Fires when
+ * either is anomalous; strength is higher when both are.
  */
 const PID = Ids.asPatternId('P-O-003');
 const definition: PatternDef = {
@@ -29,17 +29,28 @@ const definition: PatternDef = {
   defaultWeight: 0.55,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const recoveryCap = Number(meta.cost_recovery_cap ?? 0);
-    const royalty = Number(meta.royalty_rate ?? 1);
+    const cap = readNumericWithFallback(subject, 'cost_recovery_cap', 'cost_recovery_cap', [
+      'gazette_decree',
+      'company_filing',
+    ]);
+    const royalty = readNumericWithFallback(subject, 'royalty_rate', 'royalty_rate', [
+      'gazette_decree',
+      'company_filing',
+    ]);
     const flags: string[] = [];
-    if (recoveryCap > 0.8) flags.push(`recovery_cap=${(recoveryCap * 100).toFixed(0)}%`);
-    if (royalty < 0.05) flags.push(`royalty=${(royalty * 100).toFixed(1)}%`);
+    if (cap.value > 0.8) flags.push(`recovery_cap=${(cap.value * 100).toFixed(0)}%`);
+    // Treat royalty=0 as no signal (default), only flag actual < 5% when known.
+    if (royalty.from !== 'none' && royalty.value < 0.05 && royalty.value > 0) {
+      flags.push(`royalty=${(royalty.value * 100).toFixed(1)}%`);
+    }
     if (flags.length === 0) return notMatched(PID, 'PSC terms within norm');
-    const strength = flags.length === 2 ? 0.85 : 0.55;
+    const strength = flags.length === 2 ? 0.88 : 0.6;
+    const ev = evidenceFrom([...cap.contributors, ...royalty.contributors]);
     return matched({
       pattern_id: PID,
       strength,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
       rationale: `Anomalous PSC terms: ${flags.join(', ')}.`,
     });
   },

@@ -1,5 +1,6 @@
 import { Ids, type Schemas } from '@vigil/shared';
 
+import { evidenceFrom, readNumericWithFallback } from '../_event-helpers.js';
 import { matched, notMatched } from '../_pattern-helpers.js';
 import { registerPattern } from '../registry.js';
 
@@ -8,10 +9,11 @@ import type { PatternContext, PatternDef, SubjectInput } from '../types.js';
 /**
  * P-K-001 — Over-invoicing (FATF TBML).
  *
- * Import declared at a price materially above world-market price for
- * the same HS code, allowing currency exfiltration. Detection:
- * `unit_price / world_reference_price > 1.5` for a transaction
- * matched to its HS classification.
+ * Source channel: customs-declaration events emitted by the Cameroon
+ * Douanes adapter (event kind `company_filing`, payload field
+ * `unit_price_to_world_reference_ratio`). Falls back to the same field
+ * on `subject.canonical.metadata` for the legacy code path. Fires at
+ * ratio ≥ 1.5 (declared price ≥ 50% above world reference).
  *
  * Source: FATF Trade-Based ML (2020), Annex A typology #1.
  */
@@ -31,14 +33,21 @@ const definition: PatternDef = {
   defaultWeight: 0.65,
   status: 'live',
   async detect(subject: SubjectInput, _ctx: PatternContext): Promise<Schemas.PatternResult> {
-    const meta = (subject.canonical?.metadata ?? {}) as Record<string, unknown>;
-    const ratio = Number(meta.unit_price_to_world_reference_ratio ?? 0);
-    if (ratio < 1.5) return notMatched(PID, `ratio=${ratio} < 1.5`);
-    const strength = Math.min(0.95, 0.3 + Math.min(0.6, (ratio - 1.5) * 0.4));
+    const r = readNumericWithFallback(
+      subject,
+      'unit_price_to_world_reference_ratio',
+      'unit_price_to_world_reference_ratio',
+      ['company_filing', 'payment_order'],
+    );
+    if (r.value < 1.5) return notMatched(PID, `ratio=${r.value.toFixed(2)} < 1.5`);
+    const strength = Math.min(0.95, 0.5 + Math.min(0.45, (r.value - 1.5) * 0.4));
+    const ev = evidenceFrom(r.contributors);
     return matched({
       pattern_id: PID,
       strength,
-      rationale: `Unit price ${ratio.toFixed(2)}x world-reference for HS classification.`,
+      contributing_event_ids: ev.contributing_event_ids,
+      contributing_document_cids: ev.contributing_document_cids,
+      rationale: `Unit price ${r.value.toFixed(2)}x world-reference for HS classification.`,
     });
   },
 };
