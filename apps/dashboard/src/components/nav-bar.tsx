@@ -25,6 +25,9 @@ const OPERATOR_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   // FIND-009 closure: live RBAC matrix screen, gated for auditor/architect
   // by middleware. Visible in operator nav for the same tier.
   { href: '/audit/rbac-matrix', label: 'RBAC matrix' },
+  // FRONTIER-AUDIT E1.1 third-element closure: curation queue for
+  // worker-pattern-discovery output. Gated for auditor/architect.
+  { href: '/audit/discovery-queue', label: 'Discovery queue' },
 ];
 
 const CIVIC_LINKS: ReadonlyArray<{ href: string; label: string }> = [
