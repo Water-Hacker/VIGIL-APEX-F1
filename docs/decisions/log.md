@@ -3752,6 +3752,14 @@ forward-only (allow-listed)` — exactly the post-DECISION-017 shape.
    shrinks only by promoting a legacy migration to a paired pair —
    which is also non-trivial). If so, add the corresponding clause.
 
+**Cross-references.** Closes the AUDIT-051 migration round-trip
+discipline gap. Related weakness: W-27 (Decision log / migration
+discipline not CI-enforced) — this decision is the migration half of
+that W-27 closure (the decision-log half landed earlier via
+`scripts/check-decisions.ts`).
+
+commit: ca9020d0925f
+
 ---
 
 ## DECISION-018 Council vote design — on-chain multi-sig, NOT FROST (FIND-006 closure)
@@ -3829,6 +3837,16 @@ decision.
 
 3. Confirm `docs/audit/10-findings.md` should mark FIND-006 as
    closed with reference `DECISION-018`.
+
+**Cross-references.** Closes FIND-006 / F-CR-01 (FROST spec drift) per
+the whole-system audit catalogue + AUDIT-098 (Prometheus alert for
+high-sig anchor lag) referenced for the orthogonal monitoring concern.
+Related weakness: W-10 (WebAuthn → secp256k1 path) — this decision
+records the on-chain side; W-10 covers the off-chain hardware path the
+council vote depends on. Also touches W-12 (Vault Shamir storage,
+closed) since both decisions sit on the same hardware-key trust spine.
+
+commit: f960bcaf0f84
 
 ---
 
@@ -3928,6 +3946,16 @@ deferred-to-live-fire.
    `status: closed (commit <sha>)`.
 3. Confirm DECISION-018 (FROST framing) is acceptable for
    external review.
+
+**Cross-references.** Closure pass for the whole-system audit
+findings FIND-001..016; co-references AUDIT-095 (bounded-fetch
+migration shipped under the same pass) and AUDIT-098 (Prometheus
+high-sig anchor-lag alert, surfaced during the same audit cycle).
+Related weaknesses: W-03 (YubiKey count drift) and W-17 (Backup
+architect) are the institutional dependencies the engineering
+closures bottomed out on.
+
+commit: fd38e2c
 
 ---
 
