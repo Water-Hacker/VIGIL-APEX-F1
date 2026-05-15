@@ -13,6 +13,7 @@ Consumes from `vigil:document:fetch:image`. For each image:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 
 import cv2
@@ -112,7 +113,7 @@ class ForensicsWorker(RedisStreamWorker[ForensicsRequest]):
                 try:
                     page = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
                     if page is None:
-                        raise VigilError(
+                        raise VigilError(  # noqa: TRY301 — domain error surfaced inline; refactor not worth abstracting
                             code="FORENSICS_DECODE_FAILED",
                             message="cannot decode page image",
                             severity="warn",
@@ -120,10 +121,10 @@ class ForensicsWorker(RedisStreamWorker[ForensicsRequest]):
                     h, w = page.shape[:2]
                     x0, y0, x1, y1 = req.bbox
                     bbox_px = (
-                        int(round(x0 * w)),
-                        int(round(y0 * h)),
-                        int(round((x1 - x0) * w)),
-                        int(round((y1 - y0) * h)),
+                        round(x0 * w),
+                        round(y0 * h),
+                        round((x1 - x0) * w),
+                        round((y1 - y0) * h),
                     )
                     font = detect_font_anomaly(page, bbox_px, field_label="other")
                 except VigilError as e:
@@ -168,7 +169,8 @@ class ForensicsWorker(RedisStreamWorker[ForensicsRequest]):
             return Ack()
         except VigilError as ve:
             forensics_documents_processed.labels(
-                kind=req.document_kind, outcome="error",
+                kind=req.document_kind,
+                outcome="error",
             ).inc()
             if ve.retryable:
                 return Retry(reason=ve.message, delay_ms=2 * 60_000)
@@ -197,10 +199,8 @@ async def _async_main() -> None:
 
 
 def main() -> None:
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_async_main())
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

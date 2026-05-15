@@ -80,7 +80,7 @@ class AuditBridgeClient:
                         break
                     chunks.append(chunk)
             raw = b"".join(chunks)
-        except (OSError, socket.timeout) as e:
+        except (TimeoutError, OSError) as e:
             _logger.warning(
                 "audit-bridge-uds-unavailable",
                 socket_path=self._socket_path,

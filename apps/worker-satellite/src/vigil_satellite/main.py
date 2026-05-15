@@ -21,6 +21,7 @@ are gated off by default.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -166,9 +167,7 @@ class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
                 "provider": outcome.provider,
                 "activity_score": outcome.activity_score,
                 "activity_centroid": (
-                    outcome.activity_centroid.model_dump()
-                    if outcome.activity_centroid
-                    else None
+                    outcome.activity_centroid.model_dump() if outcome.activity_centroid else None
                 ),
                 "ndvi_delta": outcome.ndvi_delta,
                 "ndbi_delta": outcome.ndbi_delta,
@@ -427,8 +426,7 @@ def _s1_pipeline(
         ndvi_mean=None,
         ndbi_mean=None,
         rationale=(
-            "Sentinel-1 VV backscatter delta proxy — "
-            f"|Δσ°|/σ°(before) ≈ {score:.2f}"
+            f"Sentinel-1 VV backscatter delta proxy — |Δσ°|/σ°(before) ≈ {score:.2f}"  # noqa: RUF001 — sigma is the SAR backscatter symbol, not a Latin o
         ),
     )
     return ProviderResult(
@@ -476,10 +474,8 @@ async def _async_main() -> None:
 
 
 def main() -> None:
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_async_main())
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == "__main__":

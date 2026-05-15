@@ -20,11 +20,11 @@ def make_health_app(*, service: str) -> FastAPI:
     app = FastAPI(title=f"{service} health", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/healthz", response_class=PlainTextResponse)
-    async def healthz() -> str:  # noqa: RUF029
+    async def healthz() -> str:
         return "ok"
 
     @app.get("/metrics")
-    async def metrics() -> Response:  # noqa: RUF029
+    async def metrics() -> Response:
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app
@@ -33,6 +33,12 @@ def make_health_app(*, service: str) -> FastAPI:
 async def serve_health(*, service: str, port: int = 9100) -> asyncio.Task[Any]:
     """Start the health/metrics server as a background task. Returns the task."""
     app = make_health_app(service=service)
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning", access_log=False)
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",  # noqa: S104 — health/metrics must be reachable from container probes + Prometheus
+        port=port,
+        log_level="warning",
+        access_log=False,
+    )
     server = uvicorn.Server(config)
     return asyncio.create_task(server.serve(), name=f"{service}-health")

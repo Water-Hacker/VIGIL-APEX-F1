@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from typing import Any
 
 import hvac
@@ -56,7 +55,7 @@ class VaultClient:
                 path=full,
                 raise_on_deleted_version=True,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise VigilError(
                 code="VAULT_READ_FAILED",
                 message=f"Vault read failed: {full}/{field}",
@@ -86,7 +85,7 @@ class VaultClient:
             try:
                 self._client.auth.token.renew_self()
                 _logger.debug("vault-token-renewed")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 _logger.warning("vault-token-renew-failed", error=str(e))
             self._stop_event.wait(timeout=interval_s)
 

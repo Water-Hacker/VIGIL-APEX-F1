@@ -69,7 +69,7 @@ def search_s1_scenes(
                     bands={"vv": asset.href},
                 )
             )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _logger.warning("sentinel1-search-failed", error=str(e))
     if not found:
         raise VigilError(

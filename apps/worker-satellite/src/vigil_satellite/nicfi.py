@@ -13,7 +13,9 @@ Cost model: $0 / scene under the qualifying-organisation tier.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 
 from pystac_client import Client
 
@@ -33,20 +35,16 @@ def _has_credentials() -> bool:
     return bool(os.environ.get("PLANET_API_KEY"))
 
 
-def _bearer_signer():  # type: ignore[no-untyped-def]
+def _bearer_signer() -> Callable[[Any], Any] | None:
     """Return a pystac-client modifier that adds the Planet bearer token."""
 
     api_key = os.environ.get("PLANET_API_KEY")
     if not api_key:
         return None
 
-    def _sign(item) -> object:  # type: ignore[no-untyped-def]
+    def _sign(item: Any) -> object:  # noqa: ANN401 — pystac Item type leaks generic Any through its asset dict
         for asset in item.assets.values():
-            asset.href = (
-                asset.href
-                + ("&" if "?" in asset.href else "?")
-                + f"api_key={api_key}"
-            )
+            asset.href = asset.href + ("&" if "?" in asset.href else "?") + f"api_key={api_key}"
         return item
 
     return _sign
@@ -93,12 +91,16 @@ def search_nicfi_scenes(
             # activity computation. NDVI uses Red + NIR; NDBI uses SWIR which
             # NICFI lacks, so we set NDBI to NaN downstream when provider=nicfi.
             assets = item.assets
-            red_href = (assets.get("Red") or assets.get("red")).href if (
-                assets.get("Red") or assets.get("red")
-            ) else None
-            nir_href = (assets.get("NIR") or assets.get("nir")).href if (
-                assets.get("NIR") or assets.get("nir")
-            ) else None
+            red_href = (
+                (assets.get("Red") or assets.get("red")).href
+                if (assets.get("Red") or assets.get("red"))
+                else None
+            )
+            nir_href = (
+                (assets.get("NIR") or assets.get("nir")).href
+                if (assets.get("NIR") or assets.get("nir"))
+                else None
+            )
             if not red_href or not nir_href:
                 continue
             found.append(
@@ -116,7 +118,7 @@ def search_nicfi_scenes(
                     },
                 )
             )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _logger.warning("nicfi-search-failed", error=str(e))
     if not found:
         raise VigilError(

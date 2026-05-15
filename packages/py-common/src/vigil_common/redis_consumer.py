@@ -8,6 +8,7 @@ semantics, same XAUTOCLAIM crash recovery. Implementations override
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import socket
@@ -15,7 +16,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 import redis.asyncio as aioredis
 from pydantic import BaseModel
@@ -36,7 +37,7 @@ PayloadT = TypeVar("PayloadT", bound=BaseModel)
 
 
 @dataclass(frozen=True)
-class Envelope(Generic[PayloadT]):
+class Envelope[PayloadT: BaseModel]:
     """Same shape as TypeScript `Envelope<T>` (queue/types.ts)."""
 
     id: str
@@ -69,7 +70,7 @@ class DeadLetter:
 HandlerOutcome = Ack | Retry | DeadLetter
 
 
-class RedisStreamWorker(ABC, Generic[PayloadT]):
+class RedisStreamWorker[PayloadT: BaseModel](ABC):
     """Subclass and implement :meth:`handle`. Call :meth:`run` to start."""
 
     name: str
@@ -94,9 +95,7 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
         self._instance_id = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
         self._consumer_name = f"{self.name}-{self._instance_id}"
         self._group = f"cg:{self.name}"
-        password = (
-            expose(read_secret_file(redis_password_file)) if redis_password_file else None
-        )
+        password = expose(read_secret_file(redis_password_file)) if redis_password_file else None
         self._redis: aioredis.Redis = aioredis.Redis(
             host=redis_host,
             port=redis_port,
@@ -109,6 +108,9 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
         self._running = False
         self._stopping = False
         self._inflight = 0
+        # Hold strong refs to in-flight handler tasks so the event loop can't
+        # garbage-collect them mid-execution (per RUF006 / Python asyncio docs).
+        self._tasks: set[asyncio.Task[None]] = set()
 
     @abstractmethod
     async def handle(self, env: Envelope[PayloadT]) -> HandlerOutcome:
@@ -118,7 +120,12 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
         """Run consumer loops until stopped."""
         await self._ensure_group()
         self._running = True
-        self._logger.info("worker-started", stream=self.stream, group=self._group, instance=self._instance_id)
+        self._logger.info(
+            "worker-started",
+            stream=self.stream,
+            group=self._group,
+            instance=self._instance_id,
+        )
         await asyncio.gather(self._loop_xreadgroup(), self._loop_reclaim())
 
     async def stop(self) -> None:
@@ -128,10 +135,8 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
                 break
             await asyncio.sleep(0.1)
         self._running = False
-        try:
+        with contextlib.suppress(Exception):
             await self._redis.aclose()
-        except Exception:  # noqa: BLE001
-            pass
         self._logger.info("worker-stopped")
 
     async def publish(self, stream: str, envelope: dict[str, Any]) -> str:
@@ -141,7 +146,13 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
         return msg_id  # type: ignore[no-any-return]
 
     @staticmethod
-    def envelope_dict(*, producer: str, payload: dict[str, Any], dedup_key: str, correlation_id: str | None = None) -> dict[str, Any]:
+    def envelope_dict(
+        *,
+        producer: str,
+        payload: dict[str, Any],
+        dedup_key: str,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": str(uuid.uuid4()),
             "dedup_key": dedup_key,
@@ -158,7 +169,7 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
         try:
             await self._redis.xgroup_create(self.stream, self._group, id="$", mkstream=True)
             self._logger.info("consumer-group-created", stream=self.stream, group=self._group)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if "BUSYGROUP" not in str(e):
                 raise
 
@@ -181,10 +192,13 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
                 for _stream_name, entries in msgs:
                     for msg_id, fields in entries:
                         body = fields.get("body", "{}")
-                        # Fire and forget — bounded by `concurrency`
-                        asyncio.create_task(self._process(msg_id, body))
-            except Exception as e:  # noqa: BLE001
-                self._logger.error("read-group-error", error=str(e))
+                        # Fire and forget — bounded by `concurrency`; strong-ref
+                        # via self._tasks to prevent GC-mid-flight.
+                        task = asyncio.create_task(self._process(msg_id, body))
+                        self._tasks.add(task)
+                        task.add_done_callback(self._tasks.discard)
+            except Exception as e:
+                self._logger.exception("read-group-error", error=str(e))
                 await asyncio.sleep(1)
 
     async def _loop_reclaim(self) -> None:
@@ -206,12 +220,14 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
                     for msg_id, fields in claimed:
                         body = fields.get("body", "{}")
                         self._logger.warning("reclaimed-stale-message", id=msg_id)
-                        asyncio.create_task(self._process(msg_id, body))
+                        task = asyncio.create_task(self._process(msg_id, body))
+                        self._tasks.add(task)
+                        task.add_done_callback(self._tasks.discard)
                     if next_cursor in {"0-0", b"0-0", "0", b"0"}:
                         break
                     cursor = next_cursor if isinstance(next_cursor, str) else next_cursor.decode()
-            except Exception as e:  # noqa: BLE001
-                self._logger.error("autoclaim-error", error=str(e))
+            except Exception as e:
+                self._logger.exception("autoclaim-error", error=str(e))
             await asyncio.sleep(self.idle_reclaim_ms / 1000)
 
     async def _process(self, msg_id: str, body: str) -> None:
@@ -233,9 +249,9 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
                     schema_version=int(raw["schema_version"]),
                     payload=payload_obj,
                 )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors_total.labels(service=self.name, code="PARSE", severity="error").inc()
-                self._logger.error("envelope-parse-failed", error=str(e), msg_id=msg_id)
+                self._logger.exception("envelope-parse-failed", error=str(e), msg_id=msg_id)
                 await self._dead_letter(msg_id, body, "envelope-parse-failed")
                 return
 
@@ -265,13 +281,13 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
                 await self._redis.xack(self.stream, self._group, msg_id)
         except VigilError as ve:
             errors_total.labels(service=self.name, code=ve.code, severity=ve.severity).inc()
-            self._logger.error("handler-vigil-error", **ve.to_dict(), msg_id=msg_id)
+            self._logger.exception("handler-vigil-error", **ve.to_dict(), msg_id=msg_id)
             await self._dead_letter(msg_id, body, str(ve))
             await self._redis.xack(self.stream, self._group, msg_id)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             ve = asVigilError(e)
             errors_total.labels(service=self.name, code=ve.code, severity=ve.severity).inc()
-            self._logger.error("handler-threw", error=str(e), msg_id=msg_id)
+            self._logger.exception("handler-threw", error=str(e), msg_id=msg_id)
             await self._dead_letter(msg_id, body, str(e))
             await self._redis.xack(self.stream, self._group, msg_id)
         finally:
@@ -295,7 +311,7 @@ class RedisStreamWorker(ABC, Generic[PayloadT]):
         await self.publish(self.DEAD_LETTER_STREAM, dl_envelope)
 
 
-def _json_default(o: Any) -> Any:
+def _json_default(o: Any) -> Any:  # noqa: ANN401 — json.dumps `default=` callback signature is fixed by stdlib
     if isinstance(o, datetime):
         return o.isoformat()
     if isinstance(o, BaseModel):

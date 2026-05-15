@@ -43,8 +43,8 @@ class BandStack:
 
 @dataclass(frozen=True)
 class ActivityResult:
-    activity_score: float           # 0..1
-    activity_trend: float           # -1..1 (positive = construction-like)
+    activity_score: float  # 0..1
+    activity_trend: float  # -1..1 (positive = construction-like)
     centroid_pixel: tuple[int, int] | None
     ndvi_mean_before: float
     ndvi_mean_after: float
@@ -78,8 +78,12 @@ def compute_activity(
     floats; valid pixels are between 0 and 1, NaN for cloud / no-data.
     """
     if not (
-        before_red.shape == before_nir.shape == before_swir.shape
-        == after_red.shape == after_nir.shape == after_swir.shape
+        before_red.shape
+        == before_nir.shape
+        == before_swir.shape
+        == after_red.shape
+        == after_nir.shape
+        == after_swir.shape
     ):
         raise VigilError(
             code="SATELLITE_SHAPE_MISMATCH",
@@ -93,9 +97,7 @@ def compute_activity(
     ndbi_a = _ndbi(after_swir, after_nir)
 
     # Mask invalid pixels (cloud, snow, no-data → NaN somewhere)
-    valid = (
-        np.isfinite(ndvi_b) & np.isfinite(ndvi_a) & np.isfinite(ndbi_b) & np.isfinite(ndbi_a)
-    )
+    valid = np.isfinite(ndvi_b) & np.isfinite(ndvi_a) & np.isfinite(ndbi_b) & np.isfinite(ndbi_a)
     if not np.any(valid):
         raise VigilError(
             code="SATELLITE_NO_VALID_PIXELS",
@@ -118,14 +120,18 @@ def compute_activity(
     )
 
     w_b, w_v, w_t = weights
-    raw_trend = w_b * ndbi_change_norm + w_v * ndvi_change_norm + w_t * (spatial_extent * 2 - 1)
+    # spatial_extent is in [0, 1] — use it as a non-negative contribution so
+    # that "no detected construction" (spatial_extent=0) contributes 0 trend,
+    # not -w_t. Previously `(spatial_extent * 2 - 1)` biased neutral-input
+    # scenes to activity≈0.4 instead of 0.5 (see test_no_change_yields_low_activity).
+    raw_trend = w_b * ndbi_change_norm + w_v * ndvi_change_norm + w_t * spatial_extent
     activity = max(0.0, min(1.0, (raw_trend + 1.0) / 2.0))
 
     centroid_pixel: tuple[int, int] | None = None
     if np.any(construction_pixels):
         idx = np.argwhere(construction_pixels)
         cy, cx = (float(np.mean(idx[:, 0])), float(np.mean(idx[:, 1])))
-        centroid_pixel = (int(round(cy)), int(round(cx)))
+        centroid_pixel = (round(cy), round(cx))
 
     return ActivityResult(
         activity_score=activity,

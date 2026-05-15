@@ -12,14 +12,17 @@ import logging
 import os
 import socket
 import sys
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from typing import Any
 
 import structlog
 from structlog.types import EventDict, WrappedLogger
 
+Processor = Callable[[WrappedLogger, str, EventDict], EventDict]
+
 _correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "_vigil_correlation_id", default=None,
+    "_vigil_correlation_id",
+    default=None,
 )
 
 
@@ -48,7 +51,7 @@ def init_logging(*, service: str, level: str = "info") -> None:
     )
 
 
-def _add_static_fields(service: str):
+def _add_static_fields(service: str) -> Processor:
     hostname = socket.gethostname()
     pid = os.getpid()
     phase = os.environ.get("VIGIL_PHASE", "1")
@@ -103,6 +106,6 @@ def reset_correlation(token: contextvars.Token[str | None]) -> None:
     _correlation_id.reset(token)
 
 
-def merge_extras(record: MutableMapping[str, Any], **fields: Any) -> dict[str, Any]:
+def merge_extras(record: MutableMapping[str, Any], **fields: Any) -> dict[str, Any]:  # noqa: ANN401 — heterogeneous structlog kwargs by design
     """Helper used by tests to merge a record with extra fields."""
     return {**record, **fields}
