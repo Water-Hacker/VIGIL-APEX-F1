@@ -204,6 +204,21 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 6.4 — LLM provider rate-limit exhaustion.
+      # vigil_llm_rate_limit_exhausted_total fires when an LLM SDK's
+      # internal 429 retry budget is exhausted (default 3 retries
+      # for Anthropic). Sustained firing means the platform is being
+      # throttled by the provider — distinct signal from "model
+      # outage" or "auth error" so the operator can take the right
+      # action (back off, upgrade quota, fail over to Bedrock).
+      - alert: LlmRateLimitExhausted
+        expr: rate(vigil_llm_rate_limit_exhausted_total[5m]) > 0.083
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'LLM provider {{ $labels.provider }} rate-limit exhaustion (model {{ $labels.model }})'
+          description: 'vigil_llm_rate_limit_exhausted_total has fired > 5 times in 5 minutes (0.083 per second). The SDK retries 429 internally; sustained exhaustion means the platform is throttled. Investigate provider quota or fail over to a different tier.'
+
       # Hardening mode 1.5 — global retry-budget exhaustion.
       # RetryBudget.tryReserve() increments
       # vigil_retry_budget_exhausted_total when the per-window ceiling

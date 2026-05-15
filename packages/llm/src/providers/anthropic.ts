@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { createLogger, type Logger } from '@vigil/observability';
+import Anthropic, { RateLimitError } from '@anthropic-ai/sdk';
+import { createLogger, llmRateLimitExhaustedTotal, type Logger } from '@vigil/observability';
 import { expose, type Secret } from '@vigil/security';
 import { Errors } from '@vigil/shared';
 
@@ -147,7 +147,20 @@ export class AnthropicProvider implements ProviderClient {
       };
     } catch (e) {
       this.circuit.recordFailure();
-      this.logger.error({ err: e, model, task: opts.task }, 'anthropic-call-failed');
+      // Mode 6.4 — surface rate-limit exhaustion as a distinct signal.
+      // The SDK retries 429 internally (default 3); when those retries
+      // are exhausted the SDK throws RateLimitError. We log it
+      // separately and increment a typed Prometheus counter so
+      // operators see "we're being throttled" vs. "the model errored."
+      if (e instanceof RateLimitError) {
+        llmRateLimitExhaustedTotal.inc({ provider: this.name, model });
+        this.logger.warn(
+          { model, task: opts.task },
+          'anthropic-rate-limit-exhausted; SDK retries (default 3) were not enough',
+        );
+      } else {
+        this.logger.error({ err: e, model, task: opts.task }, 'anthropic-call-failed');
+      }
       throw e;
     }
   }

@@ -293,6 +293,25 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 6.4 — LLM provider rate-limit detection. The
+ * Anthropic / Bedrock / Local providers' SDKs retry 429 internally,
+ * but exhaustion of those retries was previously caught by a generic
+ * provider.call() catch block — operators couldn't tell apart "model
+ * outage" from "we're being rate-limited."
+ *
+ * Incremented from the provider's catch block when a RateLimitError
+ * (or message-parsed equivalent for SDKs that don't expose a typed
+ * error class) is detected. Alertmanager fires
+ * `LlmRateLimitExhausted` on `rate_increase(... [5m]) > 5`.
+ */
+export const llmRateLimitExhaustedTotal = new Counter({
+  name: 'vigil_llm_rate_limit_exhausted_total',
+  help: 'LLM provider 429 / rate-limit-exhausted events (mode 6.4)',
+  labelNames: ['provider', 'model'] as const,
+  registers: [registry],
+});
+
+/**
  * Hardening mode 1.5 — global retry budget counters. Every call to
  * `RetryBudget.tryReserve()` increments `vigil_retry_budget_reserved_total`
  * regardless of outcome; when the ceiling is crossed the call also
