@@ -204,6 +204,42 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 6.2 — backup component status.
+      # The vigil-backup script writes vigil_backup_component_status
+      # via node_exporter's textfile collector. Per-component values:
+      #   1 = ok, 0 = fail, -1 = skip (explicit operator-acknowledged
+      #   skip, e.g. VAULT_BACKUP_TOKEN unset). The pre-initialised
+      # value of 0 (fail) for every component means a partial-run
+      # leaves the un-reached components flagged as fail.
+      - alert: BackupComponentFailed
+        expr: vigil_backup_component_status == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: 'Backup component {{ $labels.component }} failed'
+          description: 'The most recent vigil-backup run reported {{ $labels.component }} = fail. Check backup logs under /var/log/vigil-backup/. Restore-ability is at risk for this component.'
+
+      - alert: BackupComponentSkipped
+        expr: vigil_backup_component_status == -1
+        for: 24h
+        labels: { severity: warning }
+        annotations:
+          summary: 'Backup component {{ $labels.component }} has been skipped for 24h+'
+          description: 'The vigil-backup script is skipping {{ $labels.component }} (likely VAULT_BACKUP_TOKEN unset). Operator action required to restore full backup coverage. See docs/runbooks/backup.md.'
+
+      # Companion: backup-not-run-recently. The script writes
+      # vigil_backup_last_run_timestamp_seconds on every run; if the
+      # nightly cron has stopped firing (cron failure, host down, timer
+      # disabled), this alert surfaces the missing backup before the
+      # operator notices via a recovery scenario.
+      - alert: BackupNotRunRecently
+        expr: time() - vigil_backup_last_run_timestamp_seconds > 86400 * 2
+        for: 1h
+        labels: { severity: critical }
+        annotations:
+          summary: 'vigil-backup has not run in > 48 hours'
+          description: 'No backup completion observed in 48h. The nightly cron may have stopped firing; the host may be down; the timer may be disabled. Investigate and restore the schedule.'
+
       # Hardening mode 6.7 — NTP clock skew.
       # The ntp-check script (invoked every 5 min by systemd timer)
       # writes vigil_ntp_synced + vigil_ntp_offset_seconds via the
