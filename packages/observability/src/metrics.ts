@@ -293,6 +293,38 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 6.7 — NTP clock-skew detection.
+ *
+ * `scripts/ntp-check.ts` (invoked every 5 min by a systemd timer)
+ * runs `timedatectl show` to read the kernel's NTP-sync state and
+ * writes two gauges via node_exporter's textfile collector:
+ *   - vigil_ntp_synced{host}: 1 when the local clock is sync'd to a
+ *     reachable NTP source, 0 otherwise.
+ *   - vigil_ntp_offset_seconds{host}: the kernel-reported offset (s)
+ *     between the local clock and the NTP server. Positive = ahead.
+ *
+ * Alertmanager fires `NtpClockSkew` when the offset exceeds 1 s or
+ * the sync flag is 0 for 5 min.
+ *
+ * Operators who graph these gauges spot drift BEFORE it produces
+ * downstream symptoms (Vault token TTL math wrong, audit timestamps
+ * non-monotonic, dedup-window violations).
+ */
+export const ntpSynced = new Gauge({
+  name: 'vigil_ntp_synced',
+  help: "NTP sync flag (1 = sync'd, 0 = not sync'd) (mode 6.7)",
+  labelNames: ['host'] as const,
+  registers: [registry],
+});
+
+export const ntpOffsetSeconds = new Gauge({
+  name: 'vigil_ntp_offset_seconds',
+  help: 'Kernel-reported NTP offset in seconds (positive = local clock ahead) (mode 6.7)',
+  labelNames: ['host'] as const,
+  registers: [registry],
+});
+
+/**
  * Hardening mode 6.6 — TLS certificate expiry monitoring.
  *
  * The scripts/cert-expiry-check.ts script writes this gauge for each

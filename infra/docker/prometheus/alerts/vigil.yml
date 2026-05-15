@@ -204,6 +204,28 @@ groups:
           summary: 'Postgres pool saturated (waiting = {{ $value }})'
           description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
 
+      # Hardening mode 6.7 — NTP clock skew.
+      # The ntp-check script (invoked every 5 min by systemd timer)
+      # writes vigil_ntp_synced + vigil_ntp_offset_seconds via the
+      # node_exporter textfile collector. Two alerts: sync flag
+      # (catches lost-NTP outright) and absolute offset > 1 s
+      # (catches drift even when the daemon claims sync).
+      - alert: NtpClockNotSynced
+        expr: vigil_ntp_synced == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'NTP not synced on {{ $labels.host }}'
+          description: 'systemd-timesyncd / chrony reports the local clock is NOT synchronised with an NTP source. Vault token TTL math + audit timestamps + dedup-window enforcement all rely on monotonic clock. Restore NTP before this cascades into downstream failures.'
+
+      - alert: NtpClockSkew
+        expr: abs(vigil_ntp_offset_seconds) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: 'NTP offset on {{ $labels.host }} is {{ $value }} seconds (> 1 s)'
+          description: 'Local clock has drifted > 1 second from NTP. Even with synced=1, sustained drift indicates a struggling time source or network issue between this host and the configured NTP server.'
+
       # Hardening mode 6.6 — TLS certificate expiry monitoring.
       # The cert-expiry-check script (invoked hourly by systemd timer)
       # writes vigil_certificate_expiry_days_remaining via the
