@@ -9,6 +9,7 @@ import {
 import { getPool } from '@vigil/db-postgres';
 import { FabricBridge } from '@vigil/fabric-bridge';
 import {
+  LoopBackoff,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -81,8 +82,7 @@ async function main(): Promise<void> {
         chaincodeName: process.env.FABRIC_CHAINCODE ?? 'audit-witness',
         tlsRootCertPath: process.env.FABRIC_TLS_ROOT ?? '/run/secrets/fabric_tls_root',
         clientCertPath: process.env.FABRIC_CLIENT_CERT ?? '/run/secrets/fabric_client_cert',
-        clientPrivateKeyPath:
-          process.env.FABRIC_CLIENT_KEY ?? '/run/secrets/fabric_client_key',
+        clientPrivateKeyPath: process.env.FABRIC_CLIENT_KEY ?? '/run/secrets/fabric_client_key',
       },
       logger,
     );
@@ -90,6 +90,11 @@ async function main(): Promise<void> {
     registerShutdown('fabric-bridge', () => bridge!.close());
   }
 
+  // Mode 1.6 — adaptive sleep on consecutive failures. The verifier's
+  // outer try-catch covers chain.verify(); the inner try-catches handle
+  // sub-step (CT-02 / CT-03) failures separately and do not back off
+  // the whole loop. Only an outer throw counts as "the whole loop failed".
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: intervalMs });
   while (!stopping) {
     try {
       // CT-01: full chain walk (cheap; serial scan)
@@ -110,10 +115,7 @@ async function main(): Promise<void> {
               logger,
             );
             if (report.divergentSeqs.length > 0) {
-              logger.error(
-                { divergent: report.divergentSeqs },
-                'ct-03-cross-witness-divergence',
-              );
+              logger.error({ divergent: report.divergentSeqs }, 'ct-03-cross-witness-divergence');
             } else {
               logger.info(
                 { checked: report.checked, missing: report.missingFromFabric.length },
@@ -132,10 +134,15 @@ async function main(): Promise<void> {
       } catch (e) {
         logger.error({ err: e }, 'ct-02-mismatch');
       }
+      backoff.onSuccess();
     } catch (e) {
-      logger.error({ err: e }, 'verifier-loop-error');
+      backoff.onError();
+      logger.error(
+        { err: e, consecutiveFailures: backoff.consecutiveFailureCount },
+        'verifier-loop-error',
+      );
     }
-    await sleep(intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
 }
 

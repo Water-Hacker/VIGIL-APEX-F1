@@ -3,6 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import {
+  LoopBackoff,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -267,6 +268,8 @@ async function main(): Promise<void> {
     stopping = true;
   });
 
+  // Mode 1.6 — adaptive sleep on consecutive failures.
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: cfg.intervalMs });
   while (!stopping) {
     try {
       const result = await tick(pool, queue, chain, cfg);
@@ -276,11 +279,20 @@ async function main(): Promise<void> {
         // pings via the next tick so silence cannot be confused with
         // "all clear". The next chain.append on the divergence path
         // already surfaced the issue.
+        // Treat fatal-but-non-throwing as a "we shouldn't pound the
+        // dependency" signal — back off the next tick.
+        backoff.onError();
+      } else {
+        backoff.onSuccess();
       }
     } catch (err) {
-      logger.error({ err }, 'reconcil-tick-failed');
+      backoff.onError();
+      logger.error(
+        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        'reconcil-tick-failed',
+      );
     }
-    await sleep(cfg.intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
 
   logger.info('worker-reconcil-audit-stopping');

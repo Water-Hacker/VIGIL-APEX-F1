@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { HashChain, PolygonAnchor, UnixSocketSignerAdapter } from '@vigil/audit-chain';
 import { PublicAnchorRepo, UserActionEventRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  LoopBackoff,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -87,12 +88,17 @@ async function main(): Promise<void> {
 
   logger.info({ intervalMs, highSigIntervalMs, contract: polygonContract }, 'worker-anchor-ready');
 
+  // Mode 1.6 — adaptive sleep on consecutive failures. Steady-state
+  // cadence is intervalMs; consecutive errors back off exponentially
+  // from 1s up to intervalMs. Resets on the first success.
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: intervalMs });
   while (!stopping) {
     try {
       const tail = await chain.tail();
       if (!tail) {
         logger.info('no-events-yet');
-        await sleep(intervalMs);
+        backoff.onSuccess();
+        await sleep(backoff.nextDelayMs());
         continue;
       }
       // Find the highest seq already anchored
@@ -102,7 +108,8 @@ async function main(): Promise<void> {
       const lastAnchoredTo = r.rows[0]?.max ? Number(r.rows[0].max) : 0;
 
       if (tail.seq <= lastAnchoredTo) {
-        await sleep(intervalMs);
+        backoff.onSuccess();
+        await sleep(backoff.nextDelayMs());
         continue;
       }
 
@@ -124,10 +131,15 @@ async function main(): Promise<void> {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, NULL)`,
         [String(fromSeq), String(toSeq), Buffer.from(rootHash, 'hex'), txHash],
       );
+      backoff.onSuccess();
     } catch (e) {
-      logger.error({ err: e }, 'anchor-loop-error');
+      backoff.onError();
+      logger.error(
+        { err: e, consecutiveFailures: backoff.consecutiveFailureCount },
+        'anchor-loop-error',
+      );
     }
-    await sleep(intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
 
   logger.info('worker-anchor-stopping');

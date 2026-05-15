@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { LoopBackoff } from '@vigil/observability';
+
 import type { PolygonAnchor } from '@vigil/audit-chain';
 import type { PublicAnchorRepo, UserActionEventRepo } from '@vigil/db-postgres';
 
@@ -63,12 +65,20 @@ export async function runHighSigAnchorLoop(
   deps: HighSigAnchorDeps,
   isStopping: () => boolean,
 ): Promise<void> {
+  // Mode 1.6 — adaptive sleep on consecutive failures. Same contract
+  // as the main anchor loop in index.ts.
+  const backoff = new LoopBackoff({ initialMs: 1_000, capMs: deps.intervalMs });
   while (!isStopping()) {
     try {
       await processHighSigBatch(deps);
+      backoff.onSuccess();
     } catch (err) {
-      deps.logger.error({ err }, 'high-sig-anchor-loop-error');
+      backoff.onError();
+      deps.logger.error(
+        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        'high-sig-anchor-loop-error',
+      );
     }
-    await sleep(deps.intervalMs);
+    await sleep(backoff.nextDelayMs());
   }
 }
