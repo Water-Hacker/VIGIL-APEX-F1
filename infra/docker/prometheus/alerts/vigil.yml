@@ -186,3 +186,32 @@ groups:
         annotations:
           summary: 'salt-collision-check has not run in > 100 days'
           description: 'The vigil_audit_salt_collisions_total gauge has not been refreshed in over 100 days, but the check is scheduled quarterly. Either AUDIT_SALT_COLLISION_CHECK_ENABLED is false, the cron expression is invalid, or the adapter-runner did not boot. Check adapter-runner logs for `salt-collision-check-scheduled` at boot.'
+
+      # Hardening mode 2.1 — Postgres pool saturation. The
+      # `vigil_db_pool_waiting` gauge is populated by
+      # `startPoolMetricsScraper()` in packages/db-postgres/src/client.ts.
+      # Sustained > 10 waiters for 30 s means foreground requests are
+      # queueing behind background work. Background callers using
+      # `acquireWithPriority(pool, 'background')` will already be
+      # rejecting with PoolSaturatedError at this point — this alert
+      # surfaces the underlying pressure so the operator can either
+      # scale `POSTGRES_POOL_MAX` or investigate the slow-query source.
+      - alert: DbPoolSaturated
+        expr: vigil_db_pool_waiting > 10
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: 'Postgres pool saturated (waiting = {{ $value }})'
+          description: 'vigil_db_pool_waiting has stayed > 10 for 30 s. Background workers are rejecting with PoolSaturatedError (mode 2.1). Investigate slow queries; consider increasing POSTGRES_POOL_MAX if the demand is legitimate.'
+
+      # Mode 2.1 companion — the pool-metrics scraper itself has stalled.
+      # The scraper writes to `vigil_db_pool_total` every 5 s; if the
+      # gauge isn't refreshed for > 60 s, either the worker that owns
+      # the pool has died or `startPoolMetricsScraper()` was never called.
+      - alert: DbPoolScraperStale
+        expr: time() - timestamp(vigil_db_pool_total) > 60
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: 'Postgres pool metrics scraper stalled'
+          description: 'vigil_db_pool_total has not been refreshed in > 60 s. Either startPoolMetricsScraper was not invoked at worker init, or the owning process has died without firing the alert.'
