@@ -1,11 +1,13 @@
 import { notFound } from 'next/navigation';
 
 import { getLatestAssessment } from '../../../lib/certainty.server';
+import { listOutcomesForFinding } from '../../../lib/dossier-outcome.server';
 import { getFindingDetail } from '../../../lib/findings.server';
 import { getLocale, loadMessages, t } from '../../../lib/i18n';
 
 import { CertaintyPanel } from './certainty-panel';
 import { DossierPanel } from './dossier-panel';
+import { OutcomePanel } from './outcome-panel';
 import { SatelliteRecheckButton } from './satellite-recheck-button';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +22,13 @@ function PosteriorBar({ value }: { value: number | null }): JSX.Element {
   }
   const pct = Math.round(value * 100);
   const tone =
-    value >= 0.85 ? 'bg-red-600' : value >= 0.55 ? 'bg-orange-500' : value >= 0.3 ? 'bg-amber-400' : 'bg-emerald-500';
+    value >= 0.85
+      ? 'bg-red-600'
+      : value >= 0.55
+        ? 'bg-orange-500'
+        : value >= 0.3
+          ? 'bg-amber-400'
+          : 'bg-emerald-500';
   return (
     <div className="w-full max-w-xs">
       <div
@@ -45,6 +53,8 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
   ]);
   if (!detail) notFound();
 
+  const outcomes = await listOutcomesForFinding(detail.dossiers.map((d) => d.id));
+
   const locale = getLocale();
   const messages = await loadMessages(locale);
   const f = detail.finding;
@@ -60,7 +70,10 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
         </span>
       </header>
 
-      <section aria-labelledby="finding-meta" className="grid grid-cols-2 md:grid-cols-4 gap-4 border rounded p-4">
+      <section
+        aria-labelledby="finding-meta"
+        className="grid grid-cols-2 md:grid-cols-4 gap-4 border rounded p-4"
+      >
         <h2 id="finding-meta" className="sr-only">
           {t(messages, 'findings.title')}
         </h2>
@@ -75,7 +88,9 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
           <dd className="font-medium">{f.severity}</dd>
         </dl>
         <dl>
-          <dt className="text-xs uppercase text-gray-500">{t(messages, 'findings.signal_count')}</dt>
+          <dt className="text-xs uppercase text-gray-500">
+            {t(messages, 'findings.signal_count')}
+          </dt>
           <dd className="font-medium tabular-nums">{f.signal_count}</dd>
         </dl>
         <dl>
@@ -103,12 +118,18 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
               <li key={e.id} className="px-4 py-2 flex items-baseline gap-3">
                 <span className="font-medium">{e.display_name}</span>
                 <span className="text-xs uppercase text-gray-500">{e.kind}</span>
-                {e.rccm_number && <span className="text-sm tabular-nums text-gray-600">RCCM {e.rccm_number}</span>}
+                {e.rccm_number && (
+                  <span className="text-sm tabular-nums text-gray-600">RCCM {e.rccm_number}</span>
+                )}
                 {e.is_pep && (
-                  <span className="ml-auto text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-900">PEP</span>
+                  <span className="ml-auto text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-900">
+                    PEP
+                  </span>
                 )}
                 {e.is_sanctioned && (
-                  <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-900">SANCTIONED</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-900">
+                    SANCTIONED
+                  </span>
                 )}
               </li>
             ))}
@@ -125,7 +146,9 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
             <li key={s.id} className="px-4 py-3 space-y-1">
               <div className="flex items-baseline justify-between">
                 <span className="font-mono text-sm">{s.pattern_id ?? s.source}</span>
-                <span className="text-sm tabular-nums">strength {(s.strength * 100).toFixed(0)}%</span>
+                <span className="text-sm tabular-nums">
+                  strength {(s.strength * 100).toFixed(0)}%
+                </span>
               </div>
               {s.rationale && <p className="text-sm text-gray-700">{s.rationale}</p>}
               {s.evidence_document_cids.length > 0 && (
@@ -143,7 +166,9 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
           <h2 id="finding-counter" className="text-xl font-semibold mb-2">
             {t(messages, 'findings.detail.counter_evidence')}
           </h2>
-          <pre className="whitespace-pre-wrap border rounded p-4 bg-gray-50 text-sm">{f.counter_evidence}</pre>
+          <pre className="whitespace-pre-wrap border rounded p-4 bg-gray-50 text-sm">
+            {f.counter_evidence}
+          </pre>
         </section>
       )}
 
@@ -156,6 +181,8 @@ export default async function FindingDetailPage({ params }: PageProps): Promise<
         routingDecisions={detail.routingDecisions}
         locale={locale}
       />
+
+      <OutcomePanel outcomes={outcomes} locale={locale === 'fr' ? 'fr' : 'en'} />
 
       <SatelliteRecheckButton findingId={f.id} locale={locale} />
     </main>

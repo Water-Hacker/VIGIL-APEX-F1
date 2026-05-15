@@ -1,11 +1,6 @@
 import 'server-only';
 
-import {
-  DossierRepo,
-  EntityRepo,
-  FindingRepo,
-  getDb,
-} from '@vigil/db-postgres';
+import { DossierRepo, EntityRepo, FindingRepo, getDb } from '@vigil/db-postgres';
 import { sql } from 'drizzle-orm';
 
 let cachedRepo: FindingRepo | null = null;
@@ -27,15 +22,30 @@ export interface FindingListRow {
   readonly detected_at: string;
   /** DECISION-011 — latest certainty-engine dispatch tier when available. */
   readonly tier: string | null;
+  /** Signal count + primary pattern category drive the triage co-pilot
+   *  (FRONTIER-AUDIT E1.6). Cheap to include — both come from existing
+   *  finding columns. */
+  readonly signal_count: number;
+  readonly primary_pattern_category: string | null;
+  readonly counter_evidence_present: boolean;
+  readonly entity_is_pep_or_sanctioned: boolean;
 }
 
-export async function listFindings(opts: { limit?: number; threshold?: number }): Promise<FindingListRow[]> {
+export async function listFindings(opts: {
+  limit?: number;
+  threshold?: number;
+}): Promise<FindingListRow[]> {
   const r = await repo();
   const db = await getDb();
   const result = await db.execute(sql`
     SELECT f.id, f.title_fr, f.title_en, f.severity, f.posterior, f.state,
            f.detected_at::text AS detected_at,
-           latest.tier AS tier
+           f.signal_count,
+           f.primary_pattern_id,
+           f.counter_evidence,
+           latest.tier AS tier,
+           COALESCE(c.is_pep, false) AS is_pep,
+           COALESCE(c.is_sanctioned, false) AS is_sanctioned
       FROM finding.finding f
       LEFT JOIN LATERAL (
         SELECT tier
@@ -44,22 +54,34 @@ export async function listFindings(opts: { limit?: number; threshold?: number })
          ORDER BY a.computed_at DESC
          LIMIT 1
       ) latest ON true
+      LEFT JOIN entity.canonical c ON c.id = f.primary_entity_id
      WHERE f.posterior >= ${opts.threshold ?? 0.5}
        AND f.state IN ('detected','review','council_review','escalated')
      ORDER BY f.detected_at DESC
      LIMIT ${opts.limit ?? 50}
   `);
   void r;
-  return result.rows.map((row) => ({
-    id: String(row['id']),
-    title_fr: String(row['title_fr']),
-    title_en: String(row['title_en']),
-    severity: String(row['severity']),
-    posterior: row['posterior'] !== null ? Number(row['posterior']) : null,
-    state: String(row['state']),
-    detected_at: String(row['detected_at']),
-    tier: row['tier'] !== null && row['tier'] !== undefined ? String(row['tier']) : null,
-  }));
+  return result.rows.map((row) => {
+    const patternId = row['primary_pattern_id'] as string | null | undefined;
+    const cat = typeof patternId === 'string' ? (/^P-([A-P])-/.exec(patternId)?.[1] ?? null) : null;
+    return {
+      id: String(row['id']),
+      title_fr: String(row['title_fr']),
+      title_en: String(row['title_en']),
+      severity: String(row['severity']),
+      posterior: row['posterior'] !== null ? Number(row['posterior']) : null,
+      state: String(row['state']),
+      detected_at: String(row['detected_at']),
+      tier: row['tier'] !== null && row['tier'] !== undefined ? String(row['tier']) : null,
+      signal_count:
+        row['signal_count'] !== null && row['signal_count'] !== undefined
+          ? Number(row['signal_count'])
+          : 0,
+      primary_pattern_category: cat,
+      counter_evidence_present: row['counter_evidence'] !== null && row['counter_evidence'] !== '',
+      entity_is_pep_or_sanctioned: Boolean(row['is_pep']) || Boolean(row['is_sanctioned']),
+    };
+  });
 }
 
 export interface FindingDetail {
