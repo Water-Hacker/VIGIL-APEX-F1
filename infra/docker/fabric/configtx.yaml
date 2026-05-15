@@ -1,9 +1,10 @@
 # Fabric channel configuration for VIGIL APEX (Phase G).
 #
-# Single-org / single-peer Phase-2-prep topology — when CONAC and Cour
-# des Comptes peers are added at Phase 2 entry, this file gains two
-# Organizations stanzas and an OrdererEndpoints update; chaincode and
-# channel structure stay untouched.
+# 3-orderer Raft Phase-2-prep topology (DL380 Gen11 cluster migration plan,
+# §"Replication / quorum rules"). One orderer per cluster node — tolerates
+# loss of any 1 orderer. When CONAC and Cour des Comptes peers join at
+# Phase 2 entry, this file gains two Organizations stanzas + their own
+# AnchorPeers; chaincode and channel structure stay untouched.
 #
 # Channel name: `vigil-audit`. The chaincode `audit-witness` lives on
 # this channel and only this channel. No other channels are defined.
@@ -24,7 +25,9 @@ Organizations:
         Type: Signature
         Rule: "OR('OrdererMSP.admin')"
     OrdererEndpoints:
-      - vigil-fabric-orderer:7050
+      - vigil-fabric-orderer-a:7050
+      - vigil-fabric-orderer-b:7050
+      - vigil-fabric-orderer-c:7050
 
   - &Org1
     Name: Org1MSP
@@ -60,19 +63,19 @@ Application: &ApplicationDefaults
   Policies:
     Readers:
       Type: ImplicitMeta
-      Rule: "ANY Readers"
+      Rule: 'ANY Readers'
     Writers:
       Type: ImplicitMeta
-      Rule: "ANY Writers"
+      Rule: 'ANY Writers'
     Admins:
       Type: ImplicitMeta
-      Rule: "MAJORITY Admins"
+      Rule: 'MAJORITY Admins'
     LifecycleEndorsement:
       Type: ImplicitMeta
-      Rule: "MAJORITY Endorsement"
+      Rule: 'MAJORITY Endorsement'
     Endorsement:
       Type: ImplicitMeta
-      Rule: "MAJORITY Endorsement"
+      Rule: 'MAJORITY Endorsement'
   Capabilities:
     <<: *ApplicationCapabilities
 
@@ -80,10 +83,31 @@ Orderer: &OrdererDefaults
   OrdererType: etcdraft
   EtcdRaft:
     Consenters:
-      - Host: vigil-fabric-orderer
+      # 3-orderer Raft consenters — DL380 Gen11 cluster migration. Quorum 2,
+      # tolerates loss of any 1 orderer. Each orderer's TLS cert lives under
+      # its own MSP directory (separate keypair per consenter — required by
+      # Raft so leader election can identify the peer).
+      - Host: vigil-fabric-orderer-a
         Port: 7050
-        ClientTLSCert: /var/hyperledger/fabric/tls/orderer/server.crt
-        ServerTLSCert: /var/hyperledger/fabric/tls/orderer/server.crt
+        ClientTLSCert: /var/hyperledger/fabric/tls/orderer-a/server.crt
+        ServerTLSCert: /var/hyperledger/fabric/tls/orderer-a/server.crt
+      - Host: vigil-fabric-orderer-b
+        Port: 7050
+        ClientTLSCert: /var/hyperledger/fabric/tls/orderer-b/server.crt
+        ServerTLSCert: /var/hyperledger/fabric/tls/orderer-b/server.crt
+      - Host: vigil-fabric-orderer-c
+        Port: 7050
+        ClientTLSCert: /var/hyperledger/fabric/tls/orderer-c/server.crt
+        ServerTLSCert: /var/hyperledger/fabric/tls/orderer-c/server.crt
+    Options:
+      # Raft heartbeat / election: 500ms tick, 10-tick heartbeat, 100-tick
+      # election timeout. Default values; tightening them risks false-positive
+      # elections under sub-second network blips on a busy 25 GbE bond.
+      TickInterval: 500ms
+      ElectionTick: 10
+      HeartbeatTick: 1
+      MaxInflightBlocks: 5
+      SnapshotIntervalSize: 16 MB
   BatchTimeout: 2s
   BatchSize:
     MaxMessageCount: 10
@@ -93,28 +117,28 @@ Orderer: &OrdererDefaults
   Policies:
     Readers:
       Type: ImplicitMeta
-      Rule: "ANY Readers"
+      Rule: 'ANY Readers'
     Writers:
       Type: ImplicitMeta
-      Rule: "ANY Writers"
+      Rule: 'ANY Writers'
     Admins:
       Type: ImplicitMeta
-      Rule: "MAJORITY Admins"
+      Rule: 'MAJORITY Admins'
     BlockValidation:
       Type: ImplicitMeta
-      Rule: "ANY Writers"
+      Rule: 'ANY Writers'
 
 Channel: &ChannelDefaults
   Policies:
     Readers:
       Type: ImplicitMeta
-      Rule: "ANY Readers"
+      Rule: 'ANY Readers'
     Writers:
       Type: ImplicitMeta
-      Rule: "ANY Writers"
+      Rule: 'ANY Writers'
     Admins:
       Type: ImplicitMeta
-      Rule: "MAJORITY Admins"
+      Rule: 'MAJORITY Admins'
   Capabilities:
     <<: *ChannelCapabilities
 
