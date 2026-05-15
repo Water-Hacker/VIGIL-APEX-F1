@@ -88,7 +88,12 @@ contract VIGILGovernanceV1 is Initializable, AccessControl, ReentrancyGuard {
     uint256 public constant REVEAL_DELAY = 2 minutes;
     mapping(address => mapping(bytes32 => uint64)) public commitments;
 
-    /// @custom:storage-gap reserved for future upgrades (federation, delegated votes)
+    /// @custom:storage-gap reserved for future upgrades (federation, delegated votes).
+    /// The double-underscore prefix is the documented OpenZeppelin convention for
+    /// upgrade-safe storage gaps; the naming-convention warning is intentional and
+    /// matches every upgradeable OZ contract in production.
+    // slither-disable-next-line naming-convention
+    // solhint-disable-next-line var-name-mixedcase
     uint256[40] private __gap;
 
     event ProposalOpened(

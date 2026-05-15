@@ -82,11 +82,15 @@ abstract contract Initializable {
         }
     }
 
-    function _getInitializedVersion() internal view returns (uint64) {
-        return _getInitializableStorage()._initialized;
-    }
-
+    /// @dev Returns the storage struct at the ERC-7201 canonical slot.
+    /// Inline assembly is required because Solidity does not provide a
+    /// way to assign an arbitrary storage slot to a typed reference at
+    /// the language level. This is the exact pattern OpenZeppelin's
+    /// upstream Initializable uses and is the documented ERC-7201
+    /// idiom; the solhint exception is therefore safe.
     function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
+        // slither-disable-next-line assembly
+        // solhint-disable-next-line no-inline-assembly
         assembly {
             $.slot := INITIALIZABLE_STORAGE
         }

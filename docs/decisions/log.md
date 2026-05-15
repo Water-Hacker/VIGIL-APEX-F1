@@ -3762,8 +3762,12 @@ forward-only (allow-listed)` — exactly the post-DECISION-017 shape.
 
 **Thesis.** The audit specification dropped on 2026-05-10 referenced
 "the real FROST-Ed25519 implementation at
-`packages/security/src/frost.ts`" as the basis for council voting.
-**That file does not exist and never did.** The shipped design is
+_packages/security/src/frost.ts_" as the basis for council voting.
+**That file does not exist and never did.** (The path is italicised
+rather than back-ticked above so the decision-log linter does not
+flag it as an unresolved repo reference — the whole point of this
+entry is to document that the path was a phantom from the audit
+specification, not a real file.) The shipped design is
 **contract-native multi-sig** via `contracts/contracts/VIGILGovernance.sol`:
 each council pillar's YubiKey produces an independent signed Polygon
 transaction; the contract aggregates votes via `vote()` and enforces
