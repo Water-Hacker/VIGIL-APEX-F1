@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VIGIL APEX TLS cert-expiry scan every hour (hardening mode 6.6)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+Unit=vigil-cert-expiry-check.service
+
+[Install]
+WantedBy=timers.target

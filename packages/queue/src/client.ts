@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { createLogger, type Logger } from '@vigil/observability';
+import { createLogger, redisStreamLength, type Logger } from '@vigil/observability';
 import { Errors } from '@vigil/shared';
 import IORedis, { type Redis, type RedisOptions } from 'ioredis';
 
@@ -92,7 +92,8 @@ export class QueueClient {
 
   async ping(): Promise<void> {
     const r = await this.redis.ping();
-    if (r !== 'PONG') throw new Errors.VigilError({ code: 'REDIS_PING', message: `unexpected: ${r}` });
+    if (r !== 'PONG')
+      throw new Errors.VigilError({ code: 'REDIS_PING', message: `unexpected: ${r}` });
   }
 
   async close(): Promise<void> {
@@ -122,4 +123,61 @@ export class QueueClient {
     const body = JSON.stringify(envelope);
     return this.redis.xadd(stream, '*', 'body', body) as Promise<string>;
   }
+
+  /**
+   * Hardening mode 6.8 — read XLEN for a stream and update the
+   * `vigil_redis_stream_length{stream}` Prometheus gauge. Callers
+   * typically wrap this in `startRedisStreamScraper` (below) so the
+   * gauge is refreshed periodically.
+   */
+  async sampleStreamLength(stream: string): Promise<number> {
+    const len = await this.redis.xlen(stream);
+    redisStreamLength.set({ stream }, len);
+    return len;
+  }
+}
+
+/**
+ * Hardening mode 6.8 — periodic scraper for stream-length gauges.
+ *
+ * Pre-closure, Redis streams were trimmed at MAXLEN=1M but operators
+ * had no visibility on how close any stream was to the cap until a
+ * worker errored. This scraper polls XLEN per registered stream
+ * every `intervalMs` (default 30s) and writes the
+ * `vigil_redis_stream_length{stream}` gauge.
+ *
+ * Returns a stop() function so the worker can clean up on shutdown.
+ * The interval is `unref`'d so it never holds the event loop open
+ * for tests / clean exits.
+ */
+export interface RedisStreamScraperOptions {
+  readonly intervalMs?: number;
+  readonly streams: ReadonlyArray<string>;
+  readonly logger?: Logger;
+}
+
+export function startRedisStreamScraper(
+  client: QueueClient,
+  opts: RedisStreamScraperOptions,
+): { stop: () => void } {
+  const logger = opts.logger ?? createLogger({ service: 'queue-scraper' });
+  const intervalMs = opts.intervalMs ?? 30_000;
+  const tick = async (): Promise<void> => {
+    for (const s of opts.streams) {
+      try {
+        await client.sampleStreamLength(s);
+      } catch (err) {
+        logger.warn({ err, stream: s }, 'redis-stream-scrape-failed');
+      }
+    }
+  };
+  // Fire once immediately so the gauge is populated at boot.
+  void tick();
+  const handle = setInterval(() => void tick(), intervalMs);
+  handle.unref?.();
+  return {
+    stop(): void {
+      clearInterval(handle);
+    },
+  };
 }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VIGIL APEX NTP clock-skew scan every 5 minutes (hardening mode 6.7)
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30s
+Persistent=true
+Unit=vigil-ntp-check.service
+
+[Install]
+WantedBy=timers.target

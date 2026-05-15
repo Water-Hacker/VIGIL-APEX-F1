@@ -29,6 +29,65 @@ DATE_TAG="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 DEST="${ARCHIVE_ROOT}/${DATE_TAG}"
 GPG_FP="${GPG_FINGERPRINT:?GPG_FINGERPRINT not set}"
 
+# Hardening mode 6.2 — per-component backup outcome metrics.
+# Each component sets a variable in BACKUP_RESULTS to one of:
+#   ok       — completed successfully
+#   skip     — explicitly skipped (e.g. VAULT_BACKUP_TOKEN unset)
+#   fail     — attempted but errored
+# At the end of the run we write a Prometheus textfile-exporter file
+# at $TEXTFILE_PATH so node_exporter exposes per-component status.
+# Alertmanager fires `BackupComponentFailed` when any component is
+# `fail` or `skip` and `BackupNotRunRecently` if the textfile mtime
+# is older than 26h (catches the cron-didn't-fire case).
+declare -A BACKUP_RESULTS=(
+  [pg_basebackup]=fail
+  [btrfs_snapshot]=fail
+  [neo4j_dump]=fail
+  [ipfs_export]=fail
+  [vault_snapshot]=skip
+  [audit_csv_actions]=fail
+  [audit_csv_user_action_event]=fail
+  [encryption]=fail
+  [manifest]=fail
+)
+TEXTFILE_PATH="${VIGIL_BACKUP_TEXTFILE_PATH:-/var/lib/node_exporter/textfile/vigil-backup.prom}"
+BACKUP_START_TS="$(date +%s)"
+
+emit_metrics() {
+  local outdir
+  outdir="$(dirname "${TEXTFILE_PATH}")"
+  mkdir -p "${outdir}" 2>/dev/null || true
+  local tmp="${TEXTFILE_PATH}.tmp"
+  {
+    echo "# HELP vigil_backup_component_status Per-component status of the last backup run (mode 6.2)"
+    echo "# TYPE vigil_backup_component_status gauge"
+    echo "# Values: 1=ok, 0=fail, -1=skip"
+    for component in "${!BACKUP_RESULTS[@]}"; do
+      local v
+      case "${BACKUP_RESULTS[${component}]}" in
+        ok)   v=1 ;;
+        skip) v=-1 ;;
+        *)    v=0 ;;
+      esac
+      echo "vigil_backup_component_status{component=\"${component}\"} ${v}"
+    done
+    echo "# HELP vigil_backup_last_run_timestamp_seconds Unix timestamp of the last backup attempt"
+    echo "# TYPE vigil_backup_last_run_timestamp_seconds gauge"
+    echo "vigil_backup_last_run_timestamp_seconds $(date +%s)"
+    echo "# HELP vigil_backup_duration_seconds Wall-clock seconds the backup run took"
+    echo "# TYPE vigil_backup_duration_seconds gauge"
+    echo "vigil_backup_duration_seconds $(( $(date +%s) - BACKUP_START_TS ))"
+  } > "${tmp}"
+  mv "${tmp}" "${TEXTFILE_PATH}"
+}
+
+# Best-effort: emit metrics even if the script errors out partway.
+# `trap` runs emit_metrics on EXIT (covers normal exit + error +
+# signal). The pre-initialised `fail` values for every component
+# guarantee a partial-completion is observable as fail for the
+# unrun components.
+trap emit_metrics EXIT
+
 # Block-E E.14 / C9 backup gap 4 — encrypted-at-rest archive.
 # Architect-confirmed encrypt-subkey fingerprint: 0F8B9DEA4366A7880CFE76D4232E1B0F846B6151
 # (HSK-v1 estate; long-form fingerprint required so gpg picks the
@@ -78,12 +137,14 @@ docker exec vigil-postgres pg_basebackup \
   -D /tmp/basebackup -F tar -z -P -U vigil
 docker cp vigil-postgres:/tmp/basebackup "${DEST}/postgres"
 docker exec vigil-postgres rm -rf /tmp/basebackup
+BACKUP_RESULTS[pg_basebackup]=ok
 
 # 2. Btrfs snapshot of /srv/vigil — read-only, hard-linked into archive.
 log "btrfs snapshot → ${DEST}/srv-vigil"
 btrfs subvolume snapshot -r /srv/vigil "${DEST}/srv-vigil.snapshot"
 btrfs send "${DEST}/srv-vigil.snapshot" | zstd -9 > "${DEST}/srv-vigil.btrfs.zst"
 btrfs subvolume delete "${DEST}/srv-vigil.snapshot"
+BACKUP_RESULTS[btrfs_snapshot]=ok
 
 # 3. Neo4j dump
 log "neo4j-admin database dump"
@@ -91,11 +152,13 @@ docker exec vigil-neo4j neo4j-admin database dump \
   --to-path=/tmp/neo4j-dump vigil
 docker cp vigil-neo4j:/tmp/neo4j-dump "${DEST}/neo4j"
 docker exec vigil-neo4j rm -rf /tmp/neo4j-dump
+BACKUP_RESULTS[neo4j_dump]=ok
 
 # 4. IPFS export — pinset only; CIDs themselves resolve from any cluster peer.
 log "ipfs cluster pin export"
 docker exec vigil-ipfs-cluster ipfs-cluster-ctl pin ls --enc=json \
   > "${DEST}/ipfs-pinset.json"
+BACKUP_RESULTS[ipfs_export]=ok
 
 # 4b. Vault raft snapshot (Block-E E.12 / C9 backup gap 1).
 #     Btrfs-of-/srv/vigil/vault captures the on-disk raft data, but a
@@ -115,12 +178,15 @@ if [ -n "${VAULT_BACKUP_TOKEN:-}" ]; then
      docker exec -e VAULT_TOKEN="${VAULT_BACKUP_TOKEN}" vigil-vault \
        vault operator raft snapshot save - > "${DEST}/vault-raft.snap"; then
     log "vault snapshot OK ($(stat -c%s "${DEST}/vault-raft.snap") bytes)"
+    BACKUP_RESULTS[vault_snapshot]=ok
   else
     log "[warn] vault snapshot failed — token may be expired or revoked; archive continues"
     rm -f "${DEST}/vault-raft.snap"
+    BACKUP_RESULTS[vault_snapshot]=fail
   fi
 else
   log "[warn] VAULT_BACKUP_TOKEN unset — skipping canonical raft snapshot (btrfs covers the on-disk data); see docs/runbooks/backup.md"
+  BACKUP_RESULTS[vault_snapshot]=skip
 fi
 
 # 4c. Audit-chain explicit export (Block-E E.13 / C9 backup gap 3).
@@ -158,6 +224,7 @@ docker exec vigil-postgres psql -U vigil -d vigil -At -X -c "\\copy (
   FROM audit.actions
   ORDER BY seq
 ) TO STDOUT WITH CSV HEADER" > "${DEST}/audit-chain.csv"
+BACKUP_RESULTS[audit_csv_actions]=ok
 
 log "audit-chain CSV export (audit.user_action_event)"
 docker exec vigil-postgres psql -U vigil -d vigil -At -X -c "\\copy (
@@ -185,6 +252,7 @@ docker exec vigil-postgres psql -U vigil -d vigil -At -X -c "\\copy (
   FROM audit.user_action_event
   ORDER BY timestamp_utc, event_id
 ) TO STDOUT WITH CSV HEADER" > "${DEST}/audit-user-actions.csv"
+BACKUP_RESULTS[audit_csv_user_action_event]=ok
 
 # Sign each audit-chain CSV separately so a court reviewer can verify
 # either file in isolation without trusting the manifest. The detached
@@ -215,6 +283,7 @@ encrypt_at_rest "${DEST}/audit-user-actions.csv"
 if [ -f "${DEST}/vault-raft.snap" ]; then
   encrypt_at_rest "${DEST}/vault-raft.snap"
 fi
+BACKUP_RESULTS[encryption]=ok
 
 # 5. Signed manifest — sha256 of every file, then architect-GPG signature.
 log "manifest + signature"
@@ -223,6 +292,8 @@ log "manifest + signature"
 gpg --batch --yes --local-user "${GPG_FP}" \
     --output "${DEST}/MANIFEST.sha256.sig" \
     --detach-sign "${DEST}/MANIFEST.sha256"
+
+BACKUP_RESULTS[manifest]=ok
 
 # 6. Atomic completion marker — `vigil-backup --verify` checks this.
 echo "${DATE_TAG}" > "${DEST}/.complete"

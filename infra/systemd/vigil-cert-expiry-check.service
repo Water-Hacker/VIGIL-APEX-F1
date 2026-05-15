@@ -1,0 +1,23 @@
+[Unit]
+Description=VIGIL APEX TLS cert-expiry scan (hardening mode 6.6)
+# Run after node_exporter is up so the textfile output directory
+# exists. The textfile collector picks the file up on its next scrape
+# interval regardless of write order.
+After=node_exporter.service
+
+[Service]
+Type=oneshot
+# tsx is invoked via npx so the script can stay TypeScript-source and
+# share imports with the rest of the codebase. The repo path is
+# operator-configured via the env file.
+EnvironmentFile=/etc/vigil/cert-expiry-check.env
+ExecStart=/usr/bin/env npx tsx /opt/vigil-apex/scripts/cert-expiry-check.ts
+User=vigil
+Group=vigil
+NoNewPrivileges=true
+ProtectSystem=strict
+# Read the cert directory; write the textfile output dir.
+ReadOnlyPaths=/srv/vigil/certs
+ReadWritePaths=/var/lib/node_exporter/textfile
+PrivateTmp=true
+TimeoutStartSec=2m

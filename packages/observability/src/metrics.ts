@@ -293,6 +293,108 @@ export const startupGuardFailuresTotal = new Counter({
 });
 
 /**
+ * Hardening mode 6.8 — Redis stream length gauge.
+ *
+ * Redis streams are MAXLEN-trimmed at 1M entries by the queue client.
+ * Pre-closure, operators couldn't see how close any stream was to
+ * the cap. This gauge is set periodically by `startRedisStreamScraper`
+ * (in `packages/queue/src/client.ts`) — XLEN per stream every 30 s.
+ * Alertmanager fires `RedisStreamBackpressure` when any stream is
+ * sustained > 500 000 entries (50% of the cap).
+ */
+export const redisStreamLength = new Gauge({
+  name: 'vigil_redis_stream_length',
+  help: 'Length of a Redis stream — backpressure indicator (mode 6.8)',
+  labelNames: ['stream'] as const,
+  registers: [registry],
+});
+
+/**
+ * Hardening mode 6.9 — feature-flag boot audit.
+ *
+ * Set on worker boot for every env-var-driven feature toggle. Value
+ * is 1 if the flag is "truthy" (1, true, yes, on — case-insensitive)
+ * and 0 otherwise. Operators graph this to confirm the flag rollout
+ * across the fleet without grep'ing pod env vars.
+ */
+export const featureFlagState = new Gauge({
+  name: 'vigil_feature_flag_state',
+  help: 'Boot-time state of env-var-driven feature flags (1 = on, 0 = off) (mode 6.9)',
+  labelNames: ['name', 'service'] as const,
+  registers: [registry],
+});
+
+/**
+ * Hardening mode 6.7 — NTP clock-skew detection.
+ *
+ * `scripts/ntp-check.ts` (invoked every 5 min by a systemd timer)
+ * runs `timedatectl show` to read the kernel's NTP-sync state and
+ * writes two gauges via node_exporter's textfile collector:
+ *   - vigil_ntp_synced{host}: 1 when the local clock is sync'd to a
+ *     reachable NTP source, 0 otherwise.
+ *   - vigil_ntp_offset_seconds{host}: the kernel-reported offset (s)
+ *     between the local clock and the NTP server. Positive = ahead.
+ *
+ * Alertmanager fires `NtpClockSkew` when the offset exceeds 1 s or
+ * the sync flag is 0 for 5 min.
+ *
+ * Operators who graph these gauges spot drift BEFORE it produces
+ * downstream symptoms (Vault token TTL math wrong, audit timestamps
+ * non-monotonic, dedup-window violations).
+ */
+export const ntpSynced = new Gauge({
+  name: 'vigil_ntp_synced',
+  help: "NTP sync flag (1 = sync'd, 0 = not sync'd) (mode 6.7)",
+  labelNames: ['host'] as const,
+  registers: [registry],
+});
+
+export const ntpOffsetSeconds = new Gauge({
+  name: 'vigil_ntp_offset_seconds',
+  help: 'Kernel-reported NTP offset in seconds (positive = local clock ahead) (mode 6.7)',
+  labelNames: ['host'] as const,
+  registers: [registry],
+});
+
+/**
+ * Hardening mode 6.6 — TLS certificate expiry monitoring.
+ *
+ * The scripts/cert-expiry-check.ts script writes this gauge for each
+ * certificate in /srv/vigil/certs/. node_exporter scrapes via its
+ * textfile collector. Alertmanager fires `CertificateExpiringSoon`
+ * when any cert has < 7 days remaining.
+ *
+ * Why a gauge (not a counter): the value is days-remaining at the
+ * time of the last scan. Counters don't fit this shape; gauges
+ * naturally express "current state."
+ */
+export const certificateExpiryDaysRemaining = new Gauge({
+  name: 'vigil_certificate_expiry_days_remaining',
+  help: 'Days remaining until each TLS certificate expires (mode 6.6)',
+  labelNames: ['cert_name'] as const,
+  registers: [registry],
+});
+
+/**
+ * Hardening mode 6.4 — LLM provider rate-limit detection. The
+ * Anthropic / Bedrock / Local providers' SDKs retry 429 internally,
+ * but exhaustion of those retries was previously caught by a generic
+ * provider.call() catch block — operators couldn't tell apart "model
+ * outage" from "we're being rate-limited."
+ *
+ * Incremented from the provider's catch block when a RateLimitError
+ * (or message-parsed equivalent for SDKs that don't expose a typed
+ * error class) is detected. Alertmanager fires
+ * `LlmRateLimitExhausted` on `rate_increase(... [5m]) > 5`.
+ */
+export const llmRateLimitExhaustedTotal = new Counter({
+  name: 'vigil_llm_rate_limit_exhausted_total',
+  help: 'LLM provider 429 / rate-limit-exhausted events (mode 6.4)',
+  labelNames: ['provider', 'model'] as const,
+  registers: [registry],
+});
+
+/**
  * Hardening mode 1.5 — global retry budget counters. Every call to
  * `RetryBudget.tryReserve()` increments `vigil_retry_budget_reserved_total`
  * regardless of outcome; when the ceiling is crossed the call also

@@ -1,0 +1,16 @@
+[Unit]
+Description=VIGIL APEX NTP clock-skew scan (hardening mode 6.7)
+After=node_exporter.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env npx tsx /opt/vigil-apex/scripts/ntp-check.ts
+User=vigil
+Group=vigil
+NoNewPrivileges=true
+ProtectSystem=strict
+# Read timedatectl / chronyc state.
+ReadOnlyPaths=/proc /sys /var/lib/systemd/timesync
+ReadWritePaths=/var/lib/node_exporter/textfile
+PrivateTmp=true
+TimeoutStartSec=1m
