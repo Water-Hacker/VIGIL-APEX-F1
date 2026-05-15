@@ -11,7 +11,7 @@ import {
   startMetricsServer,
   registerShutdown,
 } from '@vigil/observability';
-import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
+import { QueueClient } from '@vigil/queue';
 
 import {
   computeReconciliationPlan,
@@ -20,6 +20,7 @@ import {
   type AnchorCommitmentRow,
   type FabricWitnessRow,
 } from './reconcile.js';
+import { republishToFabricBridge } from './republish.js';
 
 import type { Pool } from 'pg';
 
@@ -129,32 +130,8 @@ async function maxActionSeq(pool: Pool): Promise<bigint> {
   return BigInt(v);
 }
 
-async function republishToFabricBridge(
-  queue: QueueClient,
-  gaps: ReadonlyArray<{ seq: string; body_hash: string }>,
-  maxPerTick: number,
-): Promise<number> {
-  // The fabric-bridge consumes STREAMS.AUDIT_PUBLISH envelopes carrying
-  // { seq, body_hash }. Republish (with a `reconcil:` dedup prefix so the
-  // bridge's idempotent insert keeps the original record, not a fake
-  // duplicate audit row).
-  const slice = gaps.slice(0, maxPerTick);
-  let published = 0;
-  for (const gap of slice) {
-    const env = newEnvelope(
-      'worker-reconcil-audit',
-      { seq: gap.seq, body_hash: gap.body_hash },
-      `reconcil:${gap.seq}`,
-    );
-    try {
-      await queue.publish(STREAMS.AUDIT_PUBLISH, env);
-      published += 1;
-    } catch (err) {
-      logger.error({ err, seq: gap.seq }, 'reconcil-republish-failed');
-    }
-  }
-  return published;
-}
+// republishToFabricBridge moved to ./republish.ts so it can be tested
+// directly (mode 3.2 closure). Re-exports the same contract.
 
 async function tick(
   pool: Pool,
@@ -214,11 +191,13 @@ async function tick(
   // Republish missing-from-Fabric envelopes (bounded per tick).
   let republished = 0;
   if (plan.missingFromFabric.length > 0) {
-    republished = await republishToFabricBridge(
+    const r = await republishToFabricBridge(
       queue,
       plan.missingFromFabric,
       cfg.maxRepublishPerTick,
+      logger,
     );
+    republished = r.published;
   }
 
   // Missing-from-Polygon: the anchor worker reads the tail and includes
