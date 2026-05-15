@@ -81,9 +81,13 @@ done
 log "  all 14 HA components present"
 
 # 5. PodDisruptionBudgets — every multi-replica stateful service must have one.
+# helm renders `kind: PodDisruptionBudget` first, then `metadata:`, then
+# `  name: vigil-apex-<component>` — so look 2 lines AFTER the kind line.
 REQUIRED_PDBS=("etcd" "vault-raft" "redis" "ipfs" "fabric-orderer" "keycloak" "alertmanager")
 for pdb in "${REQUIRED_PDBS[@]}"; do
-  if ! grep -B1 "kind: PodDisruptionBudget" "${HA_FILE}" | grep -q "vigil-apex-${pdb}"; then
+  if ! grep -A2 "kind: PodDisruptionBudget" "${HA_FILE}" | grep -Eq "^[[:space:]]+name: vigil-apex-${pdb}\$"; then
+    log "  miss for PDB ${pdb}; first 30 PDB-context lines:"
+    grep -A2 "kind: PodDisruptionBudget" "${HA_FILE}" | head -30 >&2 || true
     fail "HA render missing PodDisruptionBudget for: ${pdb}"
   fi
 done
