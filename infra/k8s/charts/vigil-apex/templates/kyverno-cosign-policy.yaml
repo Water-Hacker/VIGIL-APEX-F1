@@ -1,0 +1,88 @@
+{{/*
+  Phase 12a / Mode 9.9 — Kyverno ClusterPolicy: cosign verification for
+  every image pulled into the cluster's `vigil` namespace.
+
+  Activation:
+    cosignVerify:
+      enabled: true                            # OFF by default in 12a
+      publicKey: |
+        -----BEGIN PUBLIC KEY-----
+        ...architect-supplied (see docs/runbooks/cosign-key-rotation.md)...
+        -----END PUBLIC KEY-----
+
+  When enabled, this policy:
+    - Audits every Pod creation in the chart's namespace
+    - Verifies each container/initContainer/ephemeralContainer image
+      against the configured cosign public key
+    - Rejects pods whose images lack a valid signature (enforce mode)
+
+  Prerequisites (per docs/runbooks/cosign-rollout.md):
+    1. Kyverno operator installed in the cluster (kyverno.io/v1 CRDs
+       reachable). Phase-2 cluster decision; not part of the chart.
+    2. cosignVerify.publicKey populated with the architect's cosign
+       public key (the same key whose private half lives in the
+       `COSIGN_PRIVATE_KEY` GitHub Actions secret).
+    3. Every image referenced by chart-deployed pods has been signed
+       via the security.yml `cosign-sign-images` release-tag job.
+
+  Default mode: `Audit`. Switch to `Enforce` after a 14-day audit
+  window with zero unsigned-image findings — flip via
+  `cosignVerify.failureAction: Enforce`.
+
+  Reference: https://kyverno.io/docs/writing-policies/verify-images/
+*/}}
+{{- if .Values.cosignVerify.enabled }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: vigil-apex-cosign-verify-images
+  annotations:
+    policies.kyverno.io/title: VIGIL APEX — cosign image-signature verification
+    policies.kyverno.io/category: Supply chain hardening (mode 9.9 + 10.8)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Enforces that every container image pulled into the chart's
+      namespace carries a valid cosign signature verifiable against
+      the architect's public key. Implements modes 9.9 (cosign
+      verification missing) and 10.8 (cosign sig not verified on
+      every pull) of the 90-mode hardening pass.
+spec:
+  validationFailureAction: {{ .Values.cosignVerify.failureAction | default "Audit" | quote }}
+  webhookTimeoutSeconds: 30
+  failurePolicy: Fail
+  background: false
+  rules:
+    - name: verify-vigil-apex-images
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - {{ .Release.Namespace | quote }}
+      # Skip pods that explicitly opt out (e.g. third-party operators
+      # whose images we don't control yet). The opt-out is via the
+      # `vigil.apex/cosign-verify` annotation set to "skip" — its use
+      # must be reviewed at every Helm upgrade.
+      exclude:
+        any:
+          - resources:
+              annotations:
+                vigil.apex/cosign-verify: skip
+      verifyImages:
+        - imageReferences:
+            # Match every image; the verify step does the actual gate.
+            - "*"
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+{{ .Values.cosignVerify.publicKey | indent 22 }}
+                    rekor:
+                      url: {{ .Values.cosignVerify.rekorURL | default "https://rekor.sigstore.dev" | quote }}
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+{{- end }}

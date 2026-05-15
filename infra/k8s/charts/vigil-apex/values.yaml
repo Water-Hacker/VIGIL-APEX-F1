@@ -14,11 +14,11 @@ global:
   clusterRegion: cm-yaounde
   # Architect-pinned image tag root. Per-component overrides allowed
   # below; default keeps every image at appVersion.
-  imageTag: "0.1.0"
+  imageTag: '0.1.0'
 
 # StorageClass — operations override per cluster. `""` means cluster
 # default; named SCs (e.g. "fast-ssd") are honoured if present.
-storageClass: ""
+storageClass: ''
 
 # Pod-security standards — `restricted` per the SRD §17. Anything
 # weaker requires architect sign-off in decisions/log.md.
@@ -34,10 +34,10 @@ postgres:
   enabled: true
   image:
     repository: postgres
-    tag: "16.4-alpine"
+    tag: '16.4-alpine'
   resources:
-    requests: { memory: "1Gi", cpu: "500m" }
-    limits:   { memory: "8Gi", cpu: "4" }
+    requests: { memory: '1Gi', cpu: '500m' }
+    limits: { memory: '8Gi', cpu: '4' }
   persistence:
     size: 200Gi
   # Tuning passed into postgresql.conf via the ConfigMap
@@ -52,34 +52,34 @@ redis:
   enabled: true
   image:
     repository: redis
-    tag: "7.4-alpine"
+    tag: '7.4-alpine'
   resources:
-    requests: { memory: "512Mi", cpu: "250m" }
-    limits:   { memory: "8Gi", cpu: "2" }
+    requests: { memory: '512Mi', cpu: '250m' }
+    limits: { memory: '8Gi', cpu: '2' }
   persistence:
     size: 50Gi
   # ACL config is rendered from a ConfigMap template using the password
   # synced in by ExternalSecrets at /etc/redis/secrets.
   config:
-    maxmemory: "6gb"
-    maxmemoryPolicy: "noeviction"
+    maxmemory: '6gb'
+    maxmemoryPolicy: 'noeviction'
 
 vault:
   enabled: true
   image:
     repository: hashicorp/vault
-    tag: "1.17.5"
+    tag: '1.17.5'
   resources:
-    requests: { memory: "512Mi", cpu: "250m" }
-    limits:   { memory: "2Gi", cpu: "1" }
+    requests: { memory: '512Mi', cpu: '250m' }
+    limits: { memory: '2Gi', cpu: '1' }
   persistence:
     size: 20Gi
   # The unseal Shamir shares are NOT chart-managed — they're a
   # per-cluster Secret created by the operator after install.
   config:
-    address: "0.0.0.0:8200"
-    api_addr: "http://vigil-vault:8200"
-    cluster_addr: "http://vigil-vault:8201"
+    address: '0.0.0.0:8200'
+    api_addr: 'http://vigil-vault:8200'
+    cluster_addr: 'http://vigil-vault:8201'
 
 # ----------------------------------------------------------------------
 # Worker plane (parametric fan-out)
@@ -88,15 +88,15 @@ workers:
   - name: worker-pattern
     image:
       repository: vigil-apex/worker-pattern
-      tag: "0.1.0"
+      tag: '0.1.0'
     replicas: 3
     env:
       OTEL_SERVICE_NAME: worker-pattern
       WORKER_NAME: worker-pattern
-      PROMETHEUS_PORT: "9100"
+      PROMETHEUS_PORT: '9100'
     resources:
-      requests: { memory: "512Mi", cpu: "250m" }
-      limits:   { memory: "2Gi", cpu: "1" }
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
     autoscaling:
       enabled: false
       minReplicas: 3
@@ -114,20 +114,20 @@ dashboard:
   enabled: true
   image:
     repository: vigil-apex/dashboard
-    tag: "0.1.0"
+    tag: '0.1.0'
   replicas: 3
   env:
     NODE_ENV: production
     SESSION_STORE: redis
   resources:
-    requests: { memory: "256Mi", cpu: "100m" }
-    limits:   { memory: "1Gi", cpu: "500m" }
+    requests: { memory: '256Mi', cpu: '100m' }
+    limits: { memory: '1Gi', cpu: '500m' }
 
 caddy:
   enabled: true
   image:
     repository: vigil-caddy
-    tag: "rl-2.8" # B2 — caddy-ratelimit plugin baked in
+    tag: 'rl-2.8' # B2 — caddy-ratelimit plugin baked in
   replicas: 2
   service:
     # `LoadBalancer` for external traffic. cert-manager handles ACME.
@@ -139,8 +139,8 @@ caddy:
     - tip.vigilapex.cm
     - kc.vigilapex.cm
   resources:
-    requests: { memory: "128Mi", cpu: "100m" }
-    limits:   { memory: "512Mi", cpu: "500m" }
+    requests: { memory: '128Mi', cpu: '100m' }
+    limits: { memory: '512Mi', cpu: '500m' }
 
 # ----------------------------------------------------------------------
 # Cert-manager — issues the Caddy LoadBalancer's TLS cert
@@ -155,9 +155,9 @@ certManager:
 # ----------------------------------------------------------------------
 externalSecrets:
   enabled: true
-  refreshInterval: "1h"
-  vaultPath: "secret/vigil"
-  authMethod: kubernetes  # SA token → Vault role
+  refreshInterval: '1h'
+  vaultPath: 'secret/vigil'
+  authMethod: kubernetes # SA token → Vault role
   vaultRole: vigil-eso
 
 # ----------------------------------------------------------------------
@@ -177,3 +177,31 @@ networkPolicy:
 observability:
   prometheusScrape: true
   prometheusPort: 9100
+
+# ----------------------------------------------------------------------
+# Phase 12a — cosign image-signature verification (modes 9.9 + 10.8)
+# ----------------------------------------------------------------------
+#
+# `enabled: false` by default — Phase 12a ships the framework only.
+# Activation prerequisites:
+#   1. Kyverno operator installed in the cluster (kyverno.io CRDs).
+#   2. cosignVerify.publicKey populated with the architect's cosign
+#      public key (same key whose private half lives in the
+#      `COSIGN_PRIVATE_KEY` GitHub Actions secret).
+#   3. Every chart-deployed image signed by the security.yml
+#      `cosign-sign-images` release-tag job.
+#
+# See docs/runbooks/cosign-rollout.md for end-to-end activation.
+cosignVerify:
+  enabled: false
+  # Default to Audit when first activated; flip to Enforce after a
+  # 14-day window with zero unsigned-image findings.
+  failureAction: Audit
+  # The architect's cosign public key (PEM-encoded). Empty in the
+  # checked-in chart; populated via `helm upgrade --set-file
+  # cosignVerify.publicKey=./cosign.pub ...` at activation time.
+  publicKey: ''
+  # Rekor transparency log endpoint. The default is the public Sigstore
+  # Rekor instance; private deployments may override with a private
+  # Rekor URL for sovereign-only verification.
+  rekorURL: https://rekor.sigstore.dev

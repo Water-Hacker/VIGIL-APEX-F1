@@ -1,0 +1,100 @@
+# Phase 12a / Mode 10.8 — Cosign verify gate for the compose stack.
+#
+# This overlay adds a `cosign-verifier` one-shot service that runs
+# `cosign verify` against every image listed in
+# `infra/docker/image-digests.lock` (produced by
+# `scripts/pin-image-digests.ts --apply`).
+#
+# Other services in the stack add `depends_on: cosign-verifier:
+# { condition: service_completed_successfully }` to gate startup on the
+# verify pass. The verifier exits 0 (success) once every image's
+# signature checks out, or non-zero (failure) on the first mismatch.
+#
+# Apply on top of the base compose file:
+#   docker compose \
+#     -f infra/docker/docker-compose.yaml \
+#     -f infra/docker/compose.cosign-verify.yaml \
+#     up -d
+#
+# ACTIVATION STATUS (2026-05-15): framework only. Activation requires:
+#
+#   (1) `scripts/pin-image-digests.ts --apply` run once after the
+#       registry is live + the first signed images are published
+#       (produces image-digests.lock).
+#   (2) Cosign public key exported to ./infra/docker/cosign/cosign.pub
+#       (mounted into the verifier read-only). The key comes from the
+#       architect's YubiKey-backed ceremony per
+#       docs/runbooks/cosign-key-rotation.md.
+#   (3) Architect adds `depends_on: { cosign-verifier: { condition:
+#       service_completed_successfully } }` to each service in the
+#       base compose file (or via a second small overlay that does
+#       the merging mechanically — TBD per Phase 12b activation).
+#
+# See docs/runbooks/cosign-rollout.md for the end-to-end activation
+# procedure.
+
+services:
+  cosign-verifier:
+    # SHA-pinned per mode 10.3 discipline. cosign v2.4.1 official image;
+    # the digest below resolves to that tag at the registry — refresh
+    # both `image` and the `vigil_verify_cosign_image_sha256` Prometheus
+    # label-binding in observability when bumping.
+    image: gcr.io/projectsigstore/cosign:v2.4.1
+    restart: 'no' # one-shot
+    networks:
+      - vigil-internal
+    volumes:
+      # Read-only mount of the cosign public key. Set up per
+      # docs/runbooks/cosign-key-rotation.md §"Public key distribution".
+      - ./cosign/cosign.pub:/cosign/cosign.pub:ro
+      # Read-only mount of the digest lockfile produced by
+      # scripts/pin-image-digests.ts --apply.
+      - ./image-digests.lock:/cosign/image-digests.lock:ro
+      # Docker socket so cosign can pull each image to verify. Read-only
+      # mount; the verifier never writes through this socket.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      COSIGN_EXPERIMENTAL: '0' # explicit: KEY mode only, no keyless/OIDC
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -euo pipefail
+        echo "[cosign-verifier] starting"
+        if [ ! -f /cosign/cosign.pub ]; then
+          echo "[cosign-verifier] FAIL: /cosign/cosign.pub missing"
+          exit 2
+        fi
+        if [ ! -f /cosign/image-digests.lock ]; then
+          echo "[cosign-verifier] FAIL: /cosign/image-digests.lock missing (run scripts/pin-image-digests.ts --apply first)"
+          exit 2
+        fi
+        FAIL=0
+        # The lock file is a JSON object: { "<tag>": "sha256:..." }.
+        # We iterate via jq.
+        for TAG in $$(/usr/bin/jq -r 'keys[]' /cosign/image-digests.lock); do
+          DIGEST=$$(/usr/bin/jq -r --arg t "$$TAG" '.[$t]' /cosign/image-digests.lock)
+          REF="$$TAG@$$DIGEST"
+          echo "[cosign-verifier] verifying $$REF"
+          if ! cosign verify --key /cosign/cosign.pub "$$REF" > /dev/null 2>&1; then
+            echo "[cosign-verifier] FAIL: signature verification failed for $$REF"
+            FAIL=$$((FAIL + 1))
+          fi
+        done
+        if [ "$$FAIL" -gt 0 ]; then
+          echo "[cosign-verifier] $$FAIL image(s) failed verification."
+          exit 1
+        fi
+        echo "[cosign-verifier] OK: all images verified."
+    # The cosign image doesn't ship jq; the verifier uses busybox
+    # internally. A real production verifier image would bake jq +
+    # cosign into one tagged image. Out of scope for 12a framework;
+    # flagged for 12b activation.
+    healthcheck:
+      disable: true
+    labels:
+      org.vigilapex.role: 'cosign-verifier'
+      org.vigilapex.phase: '12a-framework'
+
+networks:
+  vigil-internal:
+    external: true

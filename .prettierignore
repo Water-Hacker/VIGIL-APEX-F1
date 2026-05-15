@@ -23,3 +23,10 @@ infra/docker/grafana/dashboards/*.json
 docs/patterns/catalogue.md
 docs/patterns/index.md
 docs/patterns/P-*.md
+
+# Helm chart templates contain Go-template syntax ({{ }} + {{/* */}})
+# that prettier does not understand. Existing chart templates predate
+# this hook; the kyverno-cosign-policy.yaml landed in Phase 12a hit it
+# first. Helm has its own canonical formatter (helm template + manual
+# review); prettier would corrupt the syntax.
+infra/k8s/charts/*/templates/**
