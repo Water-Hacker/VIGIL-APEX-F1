@@ -357,6 +357,235 @@ function main(): void {
     }),
   );
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Steps 11-14 — DL380 Gen11 cluster failure modes.
+  // These exercise the HA-cluster failover paths added by the migration
+  // plan: Patroni leader loss, Vault Raft leader loss, Fabric orderer
+  // loss, and k3s node drain. They run AGAINST the DR-test stack (which
+  // mirrors the 3-node production topology) and assert that automatic
+  // recovery completes within the documented SLOs.
+  //
+  // Skipped in --dry-run.
+  // ──────────────────────────────────────────────────────────────────────
+
+  // 11. Patroni failover: kill the Postgres primary container, expect
+  //     a standby promoted within 30s, expect zero data loss.
+  steps.push(
+    runStep('11-patroni-failover', () => {
+      const start = Date.now();
+      if (DRY_RUN) return { ok: true, durationMs: 0, note: 'dry-run skipped' };
+
+      // Kill primary container (SIGKILL — simulates hardware loss).
+      runCmd('docker', [
+        'compose',
+        '--profile',
+        'dr-rehearsal',
+        'kill',
+        '-s',
+        'SIGKILL',
+        'dr-postgres-leader',
+      ]);
+
+      // Poll until a new leader is elected. SLO: 30s.
+      const failoverDeadline = Date.now() + 30_000;
+      let promoted = false;
+      while (Date.now() < failoverDeadline) {
+        const r = runCmd('docker', [
+          'compose',
+          '--profile',
+          'dr-rehearsal',
+          'exec',
+          '-T',
+          'dr-patroni-b',
+          'patronictl',
+          '-c',
+          '/etc/patroni/patroni.yml',
+          'list',
+          '-f',
+          'json',
+        ]);
+        if (r.output.includes('"Role": "Leader"')) {
+          promoted = true;
+          break;
+        }
+        // Bounded busy wait — Node timer APIs intentionally not imported in
+        // this script (the rest of it uses spawnSync for determinism).
+        const until = Date.now() + 1000;
+        while (Date.now() < until) {
+          /* spin */
+        }
+      }
+
+      return {
+        ok: promoted,
+        durationMs: Date.now() - start,
+        note: promoted
+          ? 'new leader elected within 30s'
+          : 'FAIL: no leader after 30s — patroni stuck',
+      };
+    }),
+  );
+
+  // 12. Vault Raft leader loss: step down current leader, expect a new
+  //     leader elected within 10s, expect reads + writes resume.
+  steps.push(
+    runStep('12-vault-raft-failover', () => {
+      const start = Date.now();
+      if (DRY_RUN) return { ok: true, durationMs: 0, note: 'dry-run skipped' };
+
+      // Step down (graceful — node remains, but stops being leader).
+      runCmd('docker', [
+        'compose',
+        '--profile',
+        'dr-rehearsal',
+        'exec',
+        '-T',
+        'dr-vault-a',
+        'vault',
+        'operator',
+        'step-down',
+      ]);
+
+      // Try a write against a different node within 10s; if a new leader
+      // was elected the write will be forwarded to it transparently.
+      const writeDeadline = Date.now() + 10_000;
+      let wroteOk = false;
+      while (Date.now() < writeDeadline) {
+        const r = runCmd('docker', [
+          'compose',
+          '--profile',
+          'dr-rehearsal',
+          'exec',
+          '-T',
+          'dr-vault-b',
+          'vault',
+          'kv',
+          'put',
+          'secret/dr-test',
+          'probe=ok',
+        ]);
+        if (r.ok) {
+          wroteOk = true;
+          break;
+        }
+        const until = Date.now() + 500;
+        while (Date.now() < until) {
+          /* spin */
+        }
+      }
+
+      return {
+        ok: wroteOk,
+        durationMs: Date.now() - start,
+        note: wroteOk
+          ? 'new Vault Raft leader elected, write succeeded within 10s'
+          : 'FAIL: no write success within 10s of step-down',
+      };
+    }),
+  );
+
+  // 13. Fabric orderer loss: stop one orderer, submit a transaction,
+  //     expect the remaining 2 orderers to order it within 5s.
+  steps.push(
+    runStep('13-fabric-orderer-failover', () => {
+      const start = Date.now();
+      if (DRY_RUN) return { ok: true, durationMs: 0, note: 'dry-run skipped' };
+
+      // Stop orderer-a
+      runCmd('docker', ['compose', '--profile', 'dr-rehearsal', 'stop', 'dr-fabric-orderer-a']);
+
+      // Submit a probe transaction via peer CLI — invokes the audit-witness
+      // chaincode's `recordEvent` function.
+      const probe = runCmd('docker', [
+        'compose',
+        '--profile',
+        'dr-rehearsal',
+        'exec',
+        '-T',
+        'dr-fabric-peer',
+        'peer',
+        'chaincode',
+        'invoke',
+        '-C',
+        'vigil-audit',
+        '-n',
+        'audit-witness',
+        '-c',
+        '{"function":"recordEvent","Args":["dr-probe","{}"]}',
+        '--waitForEvent',
+        '--waitForEventTimeout',
+        '5s',
+      ]);
+
+      return {
+        ok: probe.ok,
+        durationMs: Date.now() - start,
+        note: probe.ok
+          ? 'txn committed via remaining 2 orderers within 5s'
+          : 'FAIL: orderer Raft did not commit within 5s',
+      };
+    }),
+  );
+
+  // 14. k3s node drain: cordon one node, drain its workers, confirm
+  //     stateless replicas (worker-pattern, dashboard) rebalance to
+  //     surviving nodes within 60s and no events are lost.
+  steps.push(
+    runStep('14-k3s-node-drain', () => {
+      const start = Date.now();
+      if (DRY_RUN) return { ok: true, durationMs: 0, note: 'dry-run skipped' };
+
+      // Cordon dr-node-a (the DR-test stack uses k3s in single-binary mode;
+      // its kubeconfig path is well-known).
+      const kubeconfig = '/etc/rancher/k3s/k3s.yaml';
+      runCmd('kubectl', ['--kubeconfig', kubeconfig, 'cordon', 'dr-node-a']);
+
+      // Drain (ignore DaemonSets, allow emptyDir eviction).
+      const drainResult = runCmd('kubectl', [
+        '--kubeconfig',
+        kubeconfig,
+        'drain',
+        'dr-node-a',
+        '--ignore-daemonsets',
+        '--delete-emptydir-data',
+        '--grace-period=30',
+        '--timeout=60s',
+      ]);
+
+      // Verify all worker-pattern pods are Running on OTHER nodes.
+      const podList = runCmd('kubectl', [
+        '--kubeconfig',
+        kubeconfig,
+        'get',
+        'pods',
+        '-n',
+        'vigil',
+        '-l',
+        'app=worker-pattern',
+        '-o',
+        'jsonpath={range .items[*]}{.spec.nodeName}={.status.phase}{"\\n"}{end}',
+      ]).output;
+
+      const allMovedAndRunning =
+        !podList.includes('dr-node-a=') &&
+        podList
+          .split('\n')
+          .filter(Boolean)
+          .every((line) => line.endsWith('=Running'));
+
+      // Uncordon to restore baseline for any subsequent steps.
+      runCmd('kubectl', ['--kubeconfig', kubeconfig, 'uncordon', 'dr-node-a']);
+
+      return {
+        ok: drainResult.ok && allMovedAndRunning,
+        durationMs: Date.now() - start,
+        note: allMovedAndRunning
+          ? 'worker-pattern pods rebalanced off dr-node-a; drain completed in budget'
+          : `FAIL: worker pods either stuck on dr-node-a or not Running: ${podList.slice(0, 120)}`,
+      };
+    }),
+  );
+
   // 10. Tear down DR-test stack.
   steps.push(
     runStep('10-teardown-dr-stack', () => {

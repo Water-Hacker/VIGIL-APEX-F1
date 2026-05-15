@@ -1,0 +1,129 @@
+{
+  "_comment": "VIGIL APEX IPFS Cluster — 3-peer topology for DL380 Gen11 cluster migration. Phase-2 plan §'Replication / quorum rules'. One ipfs-cluster peer + one Kubo peer per cluster node. Replication factor 2 means every CID is pinned on at least 2 of 3 nodes; the third copy may exist or may not, depending on which node added the CID. Cluster secret is templated from /run/secrets/ipfs_cluster_secret at container start (Vault-projected).",
+  "cluster": {
+    "peername": "CLUSTER_PEERNAME",
+    "secret": "CLUSTER_SECRET",
+    "leave_on_shutdown": false,
+    "listen_multiaddress": ["/ip4/0.0.0.0/tcp/9096"],
+    "enable_relay_hop": false,
+    "connection_manager": {
+      "high_water": 400,
+      "low_water": 100,
+      "grace_period": "2m0s"
+    },
+    "dial_peer_timeout": "3s",
+    "state_sync_interval": "10m0s",
+    "pin_recover_interval": "12m0s",
+    "replication_factor_min": 2,
+    "replication_factor_max": 3,
+    "monitor_ping_interval": "15s",
+    "peer_watch_interval": "5s",
+    "mdns_interval": "10s",
+    "disable_repinning": false,
+    "follower_mode": false,
+    "peer_addresses": [
+      "/dns4/vigil-ipfs-cluster-a/tcp/9096/p2p/PEER_ID_A",
+      "/dns4/vigil-ipfs-cluster-b/tcp/9096/p2p/PEER_ID_B",
+      "/dns4/vigil-ipfs-cluster-c/tcp/9096/p2p/PEER_ID_C"
+    ]
+  },
+  "consensus": {
+    "crdt": {
+      "cluster_name": "vigil-apex",
+      "trusted_peers": ["PEER_ID_A", "PEER_ID_B", "PEER_ID_C"],
+      "rebroadcast_interval": "1m0s",
+      "peerset_metric": "ping",
+      "batching": {
+        "max_batch_size": 0,
+        "max_batch_age": "0s"
+      }
+    }
+  },
+  "api": {
+    "ipfsproxy": {
+      "listen_multiaddress": "/ip4/0.0.0.0/tcp/9095",
+      "node_multiaddress": "/dns4/vigil-ipfs/tcp/5001",
+      "log_file": "",
+      "read_timeout": "0s",
+      "read_header_timeout": "5s",
+      "write_timeout": "0s",
+      "idle_timeout": "1m0s",
+      "max_header_bytes": 4096
+    },
+    "restapi": {
+      "http_listen_multiaddress": "/ip4/0.0.0.0/tcp/9094",
+      "ssl_cert_file": "",
+      "ssl_key_file": "",
+      "read_timeout": "0s",
+      "read_header_timeout": "5s",
+      "write_timeout": "0s",
+      "idle_timeout": "2m0s",
+      "max_header_bytes": 4096,
+      "basic_auth_credentials": null,
+      "http_log_file": "",
+      "headers": {},
+      "cors_allowed_origins": ["https://vigilapex.cm"],
+      "cors_allowed_methods": ["GET"],
+      "cors_allowed_headers": [],
+      "cors_exposed_headers": [
+        "Content-Type",
+        "X-Stream-Output",
+        "X-Chunked-Output",
+        "X-Content-Length"
+      ],
+      "cors_allow_credentials": true,
+      "cors_max_age": "0s"
+    }
+  },
+  "ipfs_connector": {
+    "ipfshttp": {
+      "node_multiaddress": "/dns4/vigil-ipfs/tcp/5001",
+      "connect_swarms_delay": "30s",
+      "ipfs_request_timeout": "5m0s",
+      "pin_timeout": "2m0s",
+      "unpin_timeout": "3h0m0s",
+      "repogc_timeout": "24h0m0s",
+      "informer_trigger_interval": 0
+    }
+  },
+  "pin_tracker": {
+    "stateless": {
+      "concurrent_pins": 10,
+      "priority_pin_max_age": "24h0m0s",
+      "priority_pin_max_retries": 5
+    }
+  },
+  "monitor": {
+    "pubsubmon": {
+      "check_interval": "15s",
+      "failure_threshold": 3
+    }
+  },
+  "allocator": {
+    "balanced": {
+      "allocate_by": ["tag:region", "freespace"]
+    }
+  },
+  "informer": {
+    "disk": {
+      "metric_ttl": "30s",
+      "metric_type": "freespace"
+    },
+    "tags": {
+      "metric_ttl": "30s",
+      "tags": {
+        "region": "yaounde-core"
+      }
+    }
+  },
+  "datastore": {
+    "leveldb": {
+      "leveldb_options": {
+        "block_cache_capacity": 8388608,
+        "write_buffer": 4194304,
+        "compaction_table_size": 2097152,
+        "compaction_total_size": 10485760
+      }
+    }
+  }
+}
