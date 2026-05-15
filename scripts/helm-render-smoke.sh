@@ -20,6 +20,14 @@ fail() { printf '[helm-smoke][FATAL] %s\n' "$*" >&2; exit 1; }
 command -v helm >/dev/null 2>&1 || fail "helm not on PATH"
 [[ -d "${CHART_DIR}" ]] || fail "chart dir ${CHART_DIR} not found"
 
+# Renders go to real files so the assertion greps work against indexable
+# bytes (large $(...) captures + `echo $VAR` round-trips silently truncated
+# in one earlier run — switching to file-backed assertions made the
+# breakage reproducible).
+DEV_FILE="$(mktemp -t helm-smoke-dev.XXXXXX)"
+HA_FILE="$(mktemp -t helm-smoke-ha.XXXXXX)"
+trap 'rm -f "${DEV_FILE}" "${HA_FILE}"' EXIT
+
 # 1. Lint
 log "lint (base values)"
 helm lint "${CHART_DIR}" -f "${CHART_DIR}/values.yaml"
@@ -28,20 +36,25 @@ helm lint "${CHART_DIR}" -f "${CHART_DIR}/values.yaml" -f "${CHART_DIR}/values-c
 
 # 2. Dev-mode render — must produce valid YAML with sane resource counts.
 log "render (dev mode)"
-DEV_OUT="$(helm template "${RELEASE_NAME}" "${CHART_DIR}" -f "${CHART_DIR}/values.yaml")"
-DEV_KINDS="$(echo "${DEV_OUT}" | grep -c '^kind:' || true)"
+helm template "${RELEASE_NAME}" "${CHART_DIR}" -f "${CHART_DIR}/values.yaml" > "${DEV_FILE}"
+DEV_KINDS="$(grep -c '^kind:' "${DEV_FILE}" || true)"
 log "  dev resources: ${DEV_KINDS}"
 [[ "${DEV_KINDS}" -ge 30 ]] || fail "dev mode produced ${DEV_KINDS} resources (expected ≥ 30)"
 
 # 3. Cluster-mode render — must produce significantly more resources because
 #    every HA toggle turns on additional StatefulSets / PDBs / Services.
 log "render (cluster mode)"
-HA_OUT="$(helm template "${RELEASE_NAME}" "${CHART_DIR}" -f "${CHART_DIR}/values.yaml" -f "${CHART_DIR}/values-cluster.yaml")"
-HA_KINDS="$(echo "${HA_OUT}" | grep -c '^kind:' || true)"
+helm template "${RELEASE_NAME}" "${CHART_DIR}" \
+  -f "${CHART_DIR}/values.yaml" \
+  -f "${CHART_DIR}/values-cluster.yaml" > "${HA_FILE}"
+HA_KINDS="$(grep -c '^kind:' "${HA_FILE}" || true)"
 log "  cluster resources: ${HA_KINDS}"
 [[ "${HA_KINDS}" -ge 80 ]] || fail "cluster mode produced ${HA_KINDS} resources (expected ≥ 80)"
 
-# 4. HA mode MUST include each critical HA component.
+# 4. HA mode MUST include each critical HA component. Match metadata.name
+#    exactly (^[[:space:]]+name: X$) so component selectors that share a
+#    prefix don't false-positive each other (e.g. vigil-apex-etcd vs.
+#    vigil-apex-etcd-headless).
 REQUIRED_HA_NAMES=(
   "vigil-apex-etcd"
   "vigil-apex-postgres"          # Patroni statefulset
@@ -59,7 +72,9 @@ REQUIRED_HA_NAMES=(
   "vigil-apex-falco"
 )
 for name in "${REQUIRED_HA_NAMES[@]}"; do
-  if ! echo "${HA_OUT}" | grep -q "name: ${name}"; then
+  if ! grep -Eq "^[[:space:]]+name: ${name}\$" "${HA_FILE}"; then
+    log "  miss for ${name}; lines containing it:"
+    grep -n "${name}" "${HA_FILE}" | head -5 >&2 || true
     fail "HA render missing required component: ${name}"
   fi
 done
@@ -68,7 +83,7 @@ log "  all 14 HA components present"
 # 5. PodDisruptionBudgets — every multi-replica stateful service must have one.
 REQUIRED_PDBS=("etcd" "vault-raft" "redis" "ipfs" "fabric-orderer" "keycloak" "alertmanager")
 for pdb in "${REQUIRED_PDBS[@]}"; do
-  if ! echo "${HA_OUT}" | grep -B1 "kind: PodDisruptionBudget" | grep -q "vigil-apex-${pdb}"; then
+  if ! grep -B1 "kind: PodDisruptionBudget" "${HA_FILE}" | grep -q "vigil-apex-${pdb}"; then
     fail "HA render missing PodDisruptionBudget for: ${pdb}"
   fi
 done
@@ -77,7 +92,7 @@ log "  all 7 required PDBs present"
 # 6. Confirm the dev mode does NOT include HA-only services.
 DEV_ONLY_FORBIDDEN=("vigil-apex-etcd-0" "vigil-apex-fabric-orderer-0" "vigil-apex-falco")
 for forb in "${DEV_ONLY_FORBIDDEN[@]}"; do
-  if echo "${DEV_OUT}" | grep -q "${forb}"; then
+  if grep -q "${forb}" "${DEV_FILE}"; then
     fail "dev mode unexpectedly contains HA-only component: ${forb}"
   fi
 done
