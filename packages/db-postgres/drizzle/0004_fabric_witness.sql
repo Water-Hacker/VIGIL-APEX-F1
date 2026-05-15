@@ -1,3 +1,4 @@
+-- @migration-locks-acknowledged: schema-init for audit.fabric_witness. CREATE TABLE + CREATE INDEX in same DDL batch against an empty table; lock is instantaneous. Future indexes on this table MUST use CONCURRENTLY.
 -- 0004_fabric_witness.sql — Phase G6.
 --
 -- Records when each `audit.actions` row landed in the Hyperledger

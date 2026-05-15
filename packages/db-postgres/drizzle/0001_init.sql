@@ -4,6 +4,8 @@
 -- Every CREATE is `IF NOT EXISTS` so the migration is rerunnable. Forward-only;
 -- to revert, write a new migration that undoes (per SRD §07.1).
 --
+-- @migration-locks-acknowledged: schema-init migration; all CREATE INDEX statements run against empty tables immediately after CREATE TABLE in the same DDL batch. The exclusive lock the index build acquires is instantaneous because there are zero rows. New indexes added AFTER initial schema bootstrap (and against tables that have grown) MUST use CONCURRENTLY — see scripts/check-migration-locks.ts.
+--
 -- Order:
 --   1. Tables (per schema)
 --   2. Indexes (per table)

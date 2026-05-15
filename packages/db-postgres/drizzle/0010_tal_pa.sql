@@ -1,3 +1,4 @@
+-- @migration-locks-acknowledged: schema-init for audit.user_action_event + audit.user_action_chain. CREATE TABLE + CREATE INDEX in the same DDL batch against empty tables; locks are instantaneous. Future indexes on these tables MUST use CONCURRENTLY.
 -- DECISION-012 — TAL-PA: Total Action Logging with Public Anchoring.
 --
 -- Adds the rich per-event TAL-PA tables alongside the existing

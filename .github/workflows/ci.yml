@@ -61,6 +61,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint -- --max-warnings=0
 
+  migration-locks:
+    # Hardening mode 2.5 — reject CREATE INDEX against country-scale large
+    # tables unless CONCURRENTLY is used OR the migration file carries an
+    # acknowledged-locks marker. Without this gate, a future migration that
+    # adds an index to finding.signal (10^7 rows) would block all writes
+    # for the duration of the index build when applied in production.
+    # See scripts/check-migration-locks.ts.
+    name: migration-locks
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: enforce migration-lock discipline
+        run: pnpm exec tsx scripts/check-migration-locks.ts
+
   typecheck:
     name: typecheck
     needs: install

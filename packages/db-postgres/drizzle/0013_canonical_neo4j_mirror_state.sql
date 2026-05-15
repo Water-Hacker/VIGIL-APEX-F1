@@ -1,3 +1,4 @@
+-- @migration-locks-acknowledged: ALTER TABLE adds a column with a default; index on the new column runs against rows that don't yet have a non-default value, so the build is fast. This migration pre-dates mode 2.5 closure; future indexes on entity.canonical MUST use CONCURRENTLY.
 -- Block-A reconciliation §5.b — Neo4j-mirror-state visibility on
 -- entity.canonical (architect-approved 2026-05-01).
 --

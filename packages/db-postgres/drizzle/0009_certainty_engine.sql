@@ -1,3 +1,4 @@
+-- @migration-locks-acknowledged: schema-init for certainty.* tables (assessment, call_record, fact_provenance, etc.). CREATE TABLE + CREATE INDEX in the same DDL batch against empty tables; locks are instantaneous. Future indexes MUST use CONCURRENTLY.
 -- DECISION-011 — Bayesian certainty engine + AI Safety Doctrine v1.0
 --
 -- Adds:
