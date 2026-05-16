@@ -114,8 +114,33 @@ export async function handleVoteCast(
   recuseReason: string,
 ): Promise<void> {
   deps.logger.info({ idx, voter, choice, pillar }, 'vote-cast');
-  const choiceName = CHOICE_MAP[choice] ?? 'ABSTAIN';
-  const pillarName = PILLAR_MAP[pillar] ?? 'governance';
+  // Tier-12 council audit closure: refuse silent fallback on
+  // out-of-range enum indices. Pre-fix `CHOICE_MAP[99] ?? 'ABSTAIN'`
+  // meant a malformed VoteCast event (read-client bug, contract
+  // substitution, future enum extension) would silently mis-record
+  // a vote as ABSTAIN. The 3-of-5 quorum could miss a legitimate
+  // YES that way. Fail loud — refuse to project the vote and surface
+  // a structured audit row so operators see the unexpected enum.
+  if (choice < 0 || choice >= CHOICE_MAP.length || !Number.isInteger(choice)) {
+    // Pure structured log — the on-chain VoteCast event IS the
+    // canonical record; our projection refuses to record a value it
+    // can't classify rather than silently coercing to ABSTAIN.
+    // Operators can reconcile against the contract's event log.
+    deps.logger.error(
+      { idx, voter, choice, valid_range: `0..${CHOICE_MAP.length - 1}` },
+      'vote-cast-choice-out-of-range; refusing to project',
+    );
+    return;
+  }
+  if (pillar < 0 || pillar >= PILLAR_MAP.length || !Number.isInteger(pillar)) {
+    deps.logger.error(
+      { idx, voter, pillar, valid_range: `0..${PILLAR_MAP.length - 1}` },
+      'vote-cast-pillar-out-of-range; refusing to project',
+    );
+    return;
+  }
+  const choiceName = CHOICE_MAP[choice]!;
+  const pillarName = PILLAR_MAP[pillar]!;
   await deps.repo.insertVote({
     id: Ids.newEventId() as string,
     proposal_id: String(idx), // placeholder; real lookup uses on_chain_index
@@ -271,8 +296,9 @@ export async function handleProposalEscalated(deps: VoteCeremonyDeps, idx: numbe
 
     deps.logger.info({ finding_id: finding.id, recipientBody, idx }, 'dossier-render-enqueued');
   } catch (err) {
+    const e = err instanceof Error ? err : new Error(String(err));
     deps.logger.error(
-      { err, idx },
+      { err_name: e.name, err_message: e.message, idx },
       'dossier-render-publish-failed; will retry on next escalation event',
     );
   }
@@ -321,30 +347,37 @@ export function bindWatch(deps: VoteCeremonyDeps): {
   onProposalDismissed: (idx: number) => void;
   onProposalExpired: (idx: number) => void;
 } {
+  // Tier-12 audit closure: normalise non-Error throwables in the 5
+  // watch-handler catches so structured logs always carry err_name +
+  // err_message rather than an opaque "[object Object]".
+  const norm = (err: unknown): { err_name: string; err_message: string } => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    return { err_name: e.name, err_message: e.message };
+  };
   return {
     onProposalOpened: (idx, findingHash, proposer, uri) => {
       void handleProposalOpened(deps, idx, findingHash, proposer, uri).catch((err: unknown) =>
-        deps.logger.error({ err, idx }, 'proposal-opened-handler-failed'),
+        deps.logger.error({ ...norm(err), idx }, 'proposal-opened-handler-failed'),
       );
     },
     onVoteCast: (idx, voter, choice, pillar, recuseReason) => {
       void handleVoteCast(deps, idx, voter, choice, pillar, recuseReason).catch((err: unknown) =>
-        deps.logger.error({ err, idx, voter }, 'vote-cast-handler-failed'),
+        deps.logger.error({ ...norm(err), idx, voter }, 'vote-cast-handler-failed'),
       );
     },
     onProposalEscalated: (idx) => {
       void handleProposalEscalated(deps, idx).catch((err: unknown) =>
-        deps.logger.error({ err, idx }, 'proposal-escalated-handler-failed'),
+        deps.logger.error({ ...norm(err), idx }, 'proposal-escalated-handler-failed'),
       );
     },
     onProposalDismissed: (idx) => {
       void handleProposalDismissed(deps, idx).catch((err: unknown) =>
-        deps.logger.error({ err, idx }, 'proposal-dismissed-handler-failed'),
+        deps.logger.error({ ...norm(err), idx }, 'proposal-dismissed-handler-failed'),
       );
     },
     onProposalExpired: (idx) => {
       void handleProposalExpired(deps, idx).catch((err: unknown) =>
-        deps.logger.error({ err, idx }, 'proposal-expired-handler-failed'),
+        deps.logger.error({ ...norm(err), idx }, 'proposal-expired-handler-failed'),
       );
     },
   };

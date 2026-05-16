@@ -510,15 +510,45 @@ describe('Block-E E.1 / D1 — council vote ceremony E2E (3-of-5 escalation)', (
     expect(voteRow.recuse_reason).toBeNull();
   });
 
-  it('out-of-range choice/pillar enums fall back to defaults', async () => {
+  it('out-of-range choice REFUSES TO PROJECT (Tier-12 council audit closure)', async () => {
+    // Pre-Tier-12 fix: out-of-range enum silently fell back to ABSTAIN.
+    // A legitimate YES vote with a corrupted choice index would have been
+    // recorded as ABSTAIN, potentially missing the 3-of-5 quorum.
+    // Post-fix: refuse to project, log error, return — the on-chain
+    // VoteCast event remains the canonical record; operators reconcile.
     ({ deps, spies } = makeDeps());
 
-    // Contract emits choice=99 (off the enum) — handler falls back to ABSTAIN.
-    await handleVoteCast(deps, PROPOSAL_INDEX, PILLARS[0]!.address, 99, 99, ZERO_BYTES32);
+    await handleVoteCast(deps, PROPOSAL_INDEX, PILLARS[0]!.address, 99, 0, ZERO_BYTES32);
 
-    const voteRow = spies.insertVote.mock.calls[0]![0] as Record<string, unknown>;
-    expect(voteRow.choice).toBe('ABSTAIN');
-    expect(voteRow.voter_pillar).toBe('governance');
+    // No projection — insertVote NEVER called for the invalid input.
+    expect(spies.insertVote).not.toHaveBeenCalled();
+    // Structured error log surfaces the rejection.
+    const errCalls = spies.loggerError.mock.calls;
+    const choiceRejection = errCalls.find(
+      (c: unknown[]) => typeof c[1] === 'string' && c[1].includes('choice-out-of-range'),
+    );
+    expect(choiceRejection).toBeDefined();
+  });
+
+  it('out-of-range pillar REFUSES TO PROJECT', async () => {
+    ({ deps, spies } = makeDeps());
+
+    await handleVoteCast(deps, PROPOSAL_INDEX, PILLARS[0]!.address, 0, 99, ZERO_BYTES32);
+
+    expect(spies.insertVote).not.toHaveBeenCalled();
+    const errCalls = spies.loggerError.mock.calls;
+    const pillarRejection = errCalls.find(
+      (c: unknown[]) => typeof c[1] === 'string' && c[1].includes('pillar-out-of-range'),
+    );
+    expect(pillarRejection).toBeDefined();
+  });
+
+  it('non-integer choice (e.g. NaN from JSON-RPC bug) refuses to project', async () => {
+    ({ deps, spies } = makeDeps());
+
+    await handleVoteCast(deps, PROPOSAL_INDEX, PILLARS[0]!.address, NaN, 0, ZERO_BYTES32);
+
+    expect(spies.insertVote).not.toHaveBeenCalled();
   });
 });
 
