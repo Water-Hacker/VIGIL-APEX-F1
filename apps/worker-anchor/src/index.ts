@@ -5,12 +5,15 @@ import { HashChain, PolygonAnchor, UnixSocketSignerAdapter } from '@vigil/audit-
 import { PublicAnchorRepo, UserActionEventRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 
 import { runHighSigAnchorLoop } from './high-sig-loop.js';
@@ -26,6 +29,9 @@ const logger = createLogger({ service: 'worker-anchor' });
  * range was already committed (gap-free seq tracking), skip.
  */
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-anchor', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-anchor' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -34,6 +40,17 @@ async function main(): Promise<void> {
 
   const pool = await getPool();
   const chain = new HashChain(pool, logger);
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-anchor',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-anchor', emit });
 
   const signer = new UnixSocketSignerAdapter();
   const polygonContract = process.env.POLYGON_ANCHOR_CONTRACT;
@@ -86,6 +103,7 @@ async function main(): Promise<void> {
     () => stopping,
   ).catch((e: unknown) => logger.error({ err: e }, 'high-sig-loop-fatal'));
 
+  await guard.markBootSuccess();
   logger.info({ intervalMs, highSigIntervalMs, contract: polygonContract }, 'worker-anchor-ready');
 
   // Mode 1.6 — adaptive sleep on consecutive failures. Steady-state

@@ -1,12 +1,15 @@
 import { HashChain } from '@vigil/audit-chain';
 import { TipRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import { VaultClient, expose } from '@vigil/security';
@@ -75,6 +78,9 @@ class TipChannelsWorker extends WorkerBase<TipChannelsPayload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-tip-channels', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-tip-channels' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -89,6 +95,17 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-tip-channels',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-tip-channels', emit });
 
   // Council pubkey is the same one the browser tip portal serves at
   // /api/tip/public-key — published by the operator-team Vault entry so
@@ -108,6 +125,8 @@ async function main(): Promise<void> {
   const worker = new TipChannelsWorker(tipRepo, chain, councilPublicKeyB64, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info({ stream: STREAMS.TIP_CHANNELS_INCOMING }, 'worker-tip-channels-ready');
 }
 

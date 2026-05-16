@@ -1,6 +1,9 @@
+import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import { FabricBridge } from '@vigil/fabric-bridge';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   errorsTotal,
   eventsConsumed,
@@ -10,6 +13,7 @@ import {
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 
@@ -102,6 +106,9 @@ class FabricBridgeWorker extends WorkerBase<Payload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-fabric-bridge', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-fabric-bridge' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -115,6 +122,18 @@ async function main(): Promise<void> {
   const db = await getDb();
   void db; // ensures migrations have run via the pool warmup
   const pool = await getPool();
+
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-fabric-bridge',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-fabric-bridge', emit });
 
   const bridge = new FabricBridge(
     {
@@ -137,6 +156,8 @@ async function main(): Promise<void> {
   const worker = new FabricBridgeWorker(bridge, pool, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-fabric-bridge-ready');
 }
 

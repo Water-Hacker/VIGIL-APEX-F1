@@ -30,21 +30,26 @@
  * uses a deterministic dedup_key so duplicates fold.
  */
 
-import { BenchmarkPriceRepo, CallRecordRepo, SourceRepo, getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { BenchmarkPriceRepo, CallRecordRepo, SourceRepo, getDb, getPool } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter } from '@vigil/llm';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import {
   QueueClient,
   STREAMS,
   WorkerBase,
   newEnvelope,
+  startRedisStreamScraper,
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
@@ -232,6 +237,9 @@ function collectAliasesForEntityResolve(
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-extractor', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-extractor' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -242,7 +250,26 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
 
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.ENTITY_RESOLVE],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-extractor',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-extractor', emit });
+
   const sourceRepo = new SourceRepo(db);
   const callRecordRepo = new CallRecordRepo(db);
   const benchmarkRepo = new BenchmarkPriceRepo(db);
@@ -307,6 +334,8 @@ async function main(): Promise<void> {
   const worker = new ExtractorWorker(sourceRepo, extractor, benchmarkRepo, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-extractor-ready');
 }
 

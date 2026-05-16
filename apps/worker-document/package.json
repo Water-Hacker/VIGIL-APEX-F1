@@ -2,7 +2,7 @@
   "name": "worker-document",
   "version": "0.1.0",
   "private": true,
-  "description": "Document fetch \u2192 SHA-256 \u2192 MIME \u2192 OCR \u2192 IPFS pin pipeline.",
+  "description": "Document fetch → SHA-256 → MIME → OCR → IPFS pin pipeline.",
   "license": "UNLICENSED",
   "type": "module",
   "main": "dist/index.js",
@@ -16,6 +16,7 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
     "@vigil/observability": "workspace:*",
     "@vigil/queue": "workspace:*",

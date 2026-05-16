@@ -1,12 +1,16 @@
-import { CallRecordRepo, TipRepo, getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { CallRecordRepo, TipRepo, getDb, getPool } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import { VaultClient } from '@vigil/security';
@@ -61,6 +65,9 @@ class TipTriageWorker extends WorkerBase<TipTriagePayload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-tip-triage', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-tip-triage' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -71,6 +78,19 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-tip-triage',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-tip-triage', emit });
+
   const tipRepo = new TipRepo(db);
   const callRecordRepo = new CallRecordRepo(db);
 
@@ -100,6 +120,8 @@ async function main(): Promise<void> {
   const worker = new TipTriageWorker(tipRepo, vault, safe, modelId, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info({ modelId }, 'worker-tip-triage-ready');
 }
 

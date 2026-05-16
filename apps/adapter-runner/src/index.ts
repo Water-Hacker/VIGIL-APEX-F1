@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ProxyManager, AdapterRegistry, DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
+import { HashChain } from '@vigil/audit-chain';
 import { Neo4jClient } from '@vigil/db-neo4j';
 import {
   BenchmarkPriceRepo,
@@ -26,6 +27,8 @@ import {
   getPool,
 } from '@vigil/db-postgres';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -33,8 +36,9 @@ import {
   startMetricsServer,
   registerShutdown,
   newCorrelationId,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
-import { QueueClient, STREAMS, newEnvelope } from '@vigil/queue';
+import { QueueClient, STREAMS, newEnvelope, startRedisStreamScraper } from '@vigil/queue';
 import { SatelliteClient } from '@vigil/satellite-client';
 import { VaultClient, expose } from '@vigil/security';
 import { Constants, Schemas } from '@vigil/shared';
@@ -53,6 +57,9 @@ import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 const logger = createLogger({ service: 'adapter-runner' });
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'adapter-runner', logger });
+  await guard.check();
+
   // Tracing first (instrument fetch/pg/redis)
   await initTracing({ service: 'adapter-runner', version: '0.1.0' });
 
@@ -110,7 +117,27 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.ADAPTER_OUT, STREAMS.DOCUMENT_FETCH],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'adapter-runner',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'adapter-runner', emit });
+
   const sourceRepo = new SourceRepo(db);
 
   // Tier 3 hardening — rate-limit + robots.txt enforcement (Tier 3, W-13).
@@ -396,6 +423,8 @@ async function main(): Promise<void> {
   registerShutdown('cron-tasks', () => {
     for (const t of tasks) t.stop();
   });
+
+  await guard.markBootSuccess();
 
   // Surface health endpoint for the watchdog
   logger.info(

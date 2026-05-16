@@ -5,12 +5,15 @@ import { Neo4jClient } from '@vigil/db-neo4j';
 import { PatternDiscoveryRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 
 import { runDiscoveryCycle } from './discovery-loop.js';
@@ -44,6 +47,9 @@ const logger = createLogger({ service: 'worker-pattern-discovery' });
  * caught up and the architect wants a fresh sweep.
  */
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-pattern-discovery', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-pattern-discovery' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -58,6 +64,17 @@ async function main(): Promise<void> {
   const repo = new PatternDiscoveryRepo(db);
   const chain = new HashChain(pool, logger);
 
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-pattern-discovery',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-pattern-discovery', emit });
+
   const neo4j = await Neo4jClient.connect({ logger });
   registerShutdown('neo4j', () => neo4j.close());
 
@@ -66,6 +83,7 @@ async function main(): Promise<void> {
     stopping = true;
   });
 
+  await guard.markBootSuccess();
   logger.info({ intervalMs, windowDays }, 'worker-pattern-discovery-ready');
 
   // Mode 1.6 — adaptive sleep on consecutive failures.

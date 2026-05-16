@@ -6,12 +6,15 @@ import {
   listRecentDeliveredDossiersForMatching,
 } from '@vigil/db-postgres';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 
@@ -80,6 +83,9 @@ class OutcomeFeedbackWorker extends WorkerBase<OutcomeSignalPayload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-outcome-feedback', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-outcome-feedback' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -97,9 +103,22 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
 
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-outcome-feedback',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-outcome-feedback', emit });
+
   const worker = new OutcomeFeedbackWorker(chain, outcomeRepo, listDelivered, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info({ stream: STREAMS.OUTCOME_SIGNAL }, 'worker-outcome-feedback-ready');
 }
 

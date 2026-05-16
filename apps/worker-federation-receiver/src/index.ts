@@ -1,13 +1,16 @@
 import { FederationStreamServer } from '@vigil/federation-stream';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
-import { QueueClient } from '@vigil/queue';
+import { QueueClient, STREAMS, startRedisStreamScraper } from '@vigil/queue';
 import IORedis from 'ioredis';
 
 import { FederationReceiverHandlers } from './handlers.js';
@@ -34,6 +37,9 @@ const logger = createLogger({ service: 'worker-federation-receiver' });
  */
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-federation-receiver', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-federation-receiver' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -54,6 +60,20 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.ADAPTER_OUT],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    logger.info(
+      { flag: event.subject_id, payload: event.payload },
+      'feature-flag-snapshot (no audit chain available)',
+    );
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-federation-receiver', emit });
 
   const redis = new IORedis(process.env.REDIS_URL ?? 'redis://vigil-redis:6379');
   registerShutdown('redis', async () => {
@@ -127,6 +147,8 @@ async function main(): Promise<void> {
   const server = new FederationStreamServer(serverOpts);
   await server.start();
   registerShutdown('federation-server', () => server.stop());
+
+  await guard.markBootSuccess();
   logger.info({ listenAddress, keysLoaded: loaded }, 'worker-federation-receiver-ready');
 }
 

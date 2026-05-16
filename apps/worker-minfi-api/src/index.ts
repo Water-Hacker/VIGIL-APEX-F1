@@ -3,14 +3,18 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { VaultClient, expose } from '@vigil/security';
 import { Schemas } from '@vigil/shared';
@@ -61,6 +65,9 @@ function loadMinfiMtls(): {
  */
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-minfi-api', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-minfi-api' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -68,6 +75,19 @@ async function main(): Promise<void> {
   registerShutdown('tracing', shutdownTracing);
 
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-minfi-api',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-minfi-api', emit });
+
   const vault = await VaultClient.connect();
   registerShutdown('vault', () => vault.close());
 
@@ -234,8 +254,10 @@ async function main(): Promise<void> {
 
   const port = Number(process.env.MINFI_API_PORT ?? 4001);
   await fastify.listen({ port, host: '0.0.0.0' });
-  logger.info({ port }, 'worker-minfi-api-ready');
   registerShutdown('fastify', () => fastify.close());
+
+  await guard.markBootSuccess();
+  logger.info({ port }, 'worker-minfi-api-ready');
 }
 
 function bandTitleFr(b: Schemas.MinfiScoreBand): string {

@@ -16,6 +16,16 @@ export const zAuditAction = z.enum([
   'system.bootstrap',
   'system.shutdown',
   'system.health_degraded',
+  // Feature-flag boot audit (mode 6.9 — Cat-6 closure). Emitted by
+  // `auditFeatureFlagsAtBoot` from `@vigil/observability` exactly once
+  // per worker boot per declared flag in `AUDITED_FEATURE_FLAGS`.
+  // Payload carries the canonical flag name + boolean value + worker
+  // service id. The action is intentionally distinct from
+  // `system.bootstrap` so operators querying the chain can filter to
+  // "feature-flag boot snapshots" without folding in process-start
+  // events. No DB-level CHECK; the column is `text`, so the only
+  // gate is this zod enum.
+  'feature.toggled',
   // Sentinel-quorum outage. Distinct from system.health_degraded
   // (which is the general TAL-PA category-J / calibration-audit
   // signal); sentinel.quorum_outage is the specific 2-of-3 sentinel
@@ -151,6 +161,10 @@ export const zAuditEvent = z.object({
     'calibration_entry',
     'decision',
     'phase',
+    // Mode 6.9 (Cat-6 closure). `subject_id` is the canonical flag
+    // name (e.g. `VIGIL_PHASE`, `LLM_OFFLINE`). One row per flag per
+    // worker boot, via `auditFeatureFlagsAtBoot`.
+    'feature_flag',
   ]),
   subject_id: z.string().min(1).max(200),
   occurred_at: zIsoInstant,

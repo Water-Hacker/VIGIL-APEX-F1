@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { CallRecordRepo, getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { CallRecordRepo, getDb, getPool } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   boundedBodyText,
   boundedRequest,
   createLogger,
@@ -11,6 +14,7 @@ import {
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { VaultClient } from '@vigil/security';
 import { sql } from 'drizzle-orm';
@@ -242,6 +246,9 @@ async function hourlyShadowSweep(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-adapter-repair', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-adapter-repair' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -260,6 +267,19 @@ async function main(): Promise<void> {
     throw new Error('AI-Safety canonical prompts missing from globalPromptRegistry');
   }
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-adapter-repair',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-adapter-repair', emit });
+
   const callRecordRepo = new CallRecordRepo(db);
   const safe = new SafeLlmRouter(llm, logger, {
     record: async (input) => {
@@ -283,6 +303,7 @@ async function main(): Promise<void> {
     void hourlyShadowSweep();
   });
 
+  await guard.markBootSuccess();
   logger.info({ modelId }, 'worker-adapter-repair-ready');
 }
 

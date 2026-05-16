@@ -2,14 +2,17 @@ import { HashChain } from '@vigil/audit-chain';
 import { DossierRepo, FindingRepo, GovernanceRepo, getDb, getPool } from '@vigil/db-postgres';
 import { GovernanceReadClient } from '@vigil/governance';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
-import { QueueClient } from '@vigil/queue';
+import { QueueClient, STREAMS, startRedisStreamScraper } from '@vigil/queue';
 
 import { bindWatch } from './vote-ceremony.js';
 
@@ -24,6 +27,9 @@ const logger = createLogger({ service: 'worker-governance' });
  * canonical record; this worker is a read-projection cache.
  */
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-governance', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-governance' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -46,7 +52,25 @@ async function main(): Promise<void> {
 
   // Queue client for DOSSIER_RENDER publication on escalation.
   const queue = new QueueClient({ logger });
+  await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.DOSSIER_RENDER],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-governance',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-governance', emit });
 
   const client = new GovernanceReadClient(rpcUrl, contractAddress, logger);
 
@@ -58,6 +82,7 @@ async function main(): Promise<void> {
   );
   registerShutdown('unsubscribe', () => unsubscribe());
 
+  await guard.markBootSuccess();
   logger.info({ contract: contractAddress }, 'worker-governance-ready');
 }
 

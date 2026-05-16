@@ -4,21 +4,26 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { DossierRepo, EntityRepo, FindingRepo, getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { DossierRepo, EntityRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import { renderDossierDocx, gpgDetachSign } from '@vigil/dossier';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import {
   QueueClient,
   STREAMS,
   WorkerBase,
   newEnvelope,
+  startRedisStreamScraper,
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
@@ -276,6 +281,9 @@ function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-dossier', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-dossier' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -285,7 +293,27 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.DOSSIER_DELIVER],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-dossier',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-dossier', emit });
+
   const findingRepo = new FindingRepo(db);
   const dossierRepo = new DossierRepo(db);
   const entityRepo = new EntityRepo(db);
@@ -310,6 +338,8 @@ async function main(): Promise<void> {
   );
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-dossier-ready');
 }
 

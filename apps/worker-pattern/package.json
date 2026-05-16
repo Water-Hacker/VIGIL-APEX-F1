@@ -2,7 +2,7 @@
   "name": "worker-pattern",
   "version": "0.1.0",
   "private": true,
-  "description": "Pattern worker \u2014 applies @vigil/patterns registry to incoming subjects.",
+  "description": "Pattern worker — applies @vigil/patterns registry to incoming subjects.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
     "@vigil/db-neo4j": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
     "@vigil/observability": "workspace:*",

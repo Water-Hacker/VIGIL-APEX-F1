@@ -1,6 +1,9 @@
+import { HashChain } from '@vigil/audit-chain';
 import { Neo4jClient } from '@vigil/db-neo4j';
-import { EntityRepo, FindingRepo, SourceRepo, getDb } from '@vigil/db-postgres';
+import { EntityRepo, FindingRepo, SourceRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -9,6 +12,7 @@ import {
   registerShutdown,
   getServiceTracer,
   withSpan,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import {
   PatternRegistry,
@@ -21,6 +25,7 @@ import {
   STREAMS,
   WorkerBase,
   newEnvelope,
+  startRedisStreamScraper,
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
@@ -327,6 +332,9 @@ class PatternWorker extends WorkerBase<Payload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-pattern', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-pattern' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -337,7 +345,26 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
 
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.SCORE_COMPUTE],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-pattern',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-pattern', emit });
+
   const findingRepo = new FindingRepo(db);
   const entityRepo = new EntityRepo(db);
   const sourceRepo = new SourceRepo(db);
@@ -350,6 +377,8 @@ async function main(): Promise<void> {
   const worker = new PatternWorker(neo4j, entityRepo, sourceRepo, findingRepo, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-pattern-ready');
 }
 

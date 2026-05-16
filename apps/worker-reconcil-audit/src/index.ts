@@ -4,14 +4,17 @@ import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  StartupGuard,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
-import { QueueClient } from '@vigil/queue';
+import { QueueClient, STREAMS, startRedisStreamScraper } from '@vigil/queue';
 
 import {
   computeReconciliationPlan,
@@ -225,6 +228,9 @@ async function tick(
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-reconcil-audit', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-reconcil-audit' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -242,10 +248,29 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
 
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.AUDIT_PUBLISH],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-reconcil-audit',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-reconcil-audit', emit });
+
   let stopping = false;
   registerShutdown('reconcil-loop', () => {
     stopping = true;
   });
+
+  await guard.markBootSuccess();
 
   // Mode 1.6 — adaptive sleep on consecutive failures.
   const backoff = new LoopBackoff({ initialMs: 1_000, capMs: cfg.intervalMs });
