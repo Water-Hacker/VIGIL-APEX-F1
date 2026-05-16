@@ -154,3 +154,81 @@ export async function verifyCrossWitness(
 
   return report;
 }
+
+/**
+ * Tier-48 audit closure — windowed cross-witness sweep.
+ *
+ * Pre-fix, the audit-verifier loop (apps/audit-verifier/src/index.ts)
+ * invoked `verifyCrossWitness({from: 1n, to: BigInt(tail.seq)})`
+ * without honouring CROSS_WITNESS_MAX_RANGE. At ~50 events/sec the
+ * chain crosses 500k seqs in ~3 hours; from that moment on, every
+ * hourly CT-03 check threw `cross-witness range N exceeds cap 500000`
+ * and logged the error — but the check never ran. The system would
+ * APPEAR healthy in CI/dev (small chains pass) and silently lose its
+ * second cryptographic witness in production exactly when it became
+ * load-bearing.
+ *
+ * Fix: walk the [from, to] range in CROSS_WITNESS_MAX_RANGE-sized
+ * windows, aggregate the per-window reports, return one combined
+ * report so the caller's downstream logic (divergence-alert routing,
+ * counts logging) keeps working unchanged.
+ *
+ * If ANY window throws, propagate (the cross-witness check is all-
+ * or-nothing per cycle; a partial-success report would mask a real
+ * Fabric outage). The caller's outer try-catch in index.ts already
+ * routes the throw to a structured ct-03-cross-witness-error log.
+ */
+export async function verifyCrossWitnessWindowed(
+  pool: Pool,
+  bridge: FabricBridge,
+  range: { from: bigint; to: bigint },
+  logger?: Logger,
+): Promise<CrossWitnessReport> {
+  if (range.to < range.from) {
+    throw new Error(`cross-witness range invalid: to (${range.to}) < from (${range.from})`);
+  }
+
+  const log = logger ?? createLogger({ service: 'audit-verifier' });
+  const missingFromFabric: string[] = [];
+  const missingFromPostgres: string[] = [];
+  const divergentSeqs: CrossWitnessReport['divergentSeqs'] extends ReadonlyArray<infer T>
+    ? T[]
+    : never = [];
+  let checked = 0;
+
+  let cursor = range.from;
+  let windows = 0;
+  while (cursor <= range.to) {
+    const windowTo =
+      cursor + CROSS_WITNESS_MAX_RANGE - 1n < range.to
+        ? cursor + CROSS_WITNESS_MAX_RANGE - 1n
+        : range.to;
+    const partial = await verifyCrossWitness(pool, bridge, { from: cursor, to: windowTo }, log);
+    checked += partial.checked;
+    missingFromFabric.push(...partial.missingFromFabric);
+    missingFromPostgres.push(...partial.missingFromPostgres);
+    divergentSeqs.push(...partial.divergentSeqs);
+    cursor = windowTo + 1n;
+    windows += 1;
+  }
+
+  log.info(
+    {
+      from: range.from.toString(),
+      to: range.to.toString(),
+      windows,
+      checked,
+      missing_fabric: missingFromFabric.length,
+      missing_postgres: missingFromPostgres.length,
+      divergent: divergentSeqs.length,
+    },
+    'cross-witness-windowed-report',
+  );
+
+  return {
+    checked,
+    missingFromFabric,
+    missingFromPostgres,
+    divergentSeqs,
+  };
+}
