@@ -39,6 +39,7 @@ const logger = createLogger({ service: 'worker-fabric-bridge' });
  *   - the local audit.fabric_witness row is INSERT…ON CONFLICT DO NOTHING.
  */
 
+import { resolveFabricEnv } from './env-gate.js';
 import {
   zFabricBridgePayload as zPayload,
   type FabricBridgePayload as Payload,
@@ -135,18 +136,24 @@ async function main(): Promise<void> {
   };
   await auditFeatureFlagsAtBoot({ service: 'worker-fabric-bridge', emit });
 
+  // Tier-13 audit closure: refuse to start with dev defaults in
+  // production/staging, and fail fast if any of the TLS/cert paths
+  // are missing on disk. See env-gate.ts for the rationale.
+  const fabricEnv = resolveFabricEnv(process.env);
+  const { mspId, peerEndpoint, tlsRootCertPath, clientCertPath, clientPrivateKeyPath } = fabricEnv;
+
   const bridge = new FabricBridge(
     {
-      mspId: process.env.FABRIC_MSP_ID ?? 'Org1MSP',
-      peerEndpoint: process.env.FABRIC_PEER_ENDPOINT ?? 'vigil-fabric-peer0-org1:7051',
+      mspId,
+      peerEndpoint,
       ...(process.env.FABRIC_PEER_HOST_ALIAS && {
         peerHostAlias: process.env.FABRIC_PEER_HOST_ALIAS,
       }),
       channelName: process.env.FABRIC_CHANNEL ?? 'vigil-audit',
       chaincodeName: process.env.FABRIC_CHAINCODE ?? 'audit-witness',
-      tlsRootCertPath: process.env.FABRIC_TLS_ROOT ?? '/run/secrets/fabric_tls_root',
-      clientCertPath: process.env.FABRIC_CLIENT_CERT ?? '/run/secrets/fabric_client_cert',
-      clientPrivateKeyPath: process.env.FABRIC_CLIENT_KEY ?? '/run/secrets/fabric_client_key',
+      tlsRootCertPath,
+      clientCertPath,
+      clientPrivateKeyPath,
     },
     logger,
   );
@@ -162,6 +169,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });
