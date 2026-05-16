@@ -103,11 +103,33 @@ function escapeAttribute(s: string): string {
  * the captured prompt but the literal byte sequence that would close
  * the data wrapper is no longer present.
  *
+ * Tier-31 audit closure: pre-T31 the defang covered only the inner
+ * `source_document` boundary. The outer `<sources>` / `<task>` /
+ * `<extra_instructions>` wrappers were unprotected — a source containing
+ * `</sources>` inside its text could close the sources block from
+ * inside, allowing prompt content to escape the data zone. Now defangs
+ * every wrapper tag that renderClosedContext emits.
+ *
  * Exported for the test suite to assert exact behaviour at boundary
  * conditions.
  */
+const CLOSED_CONTEXT_WRAPPER_TAGS = [
+  'source_document',
+  'sources',
+  'task',
+  'extra_instructions',
+] as const;
+
 export function defangSourceTagBoundary(s: string): string {
-  return s
-    .replace(/<\/source_document\s*>/gi, '＜/source_document＞')
-    .replace(/<source_document\b[^>]*>/gi, (m) => m.replace(/^</, '＜').replace(/>$/, '＞'));
+  let out = s;
+  for (const tag of CLOSED_CONTEXT_WRAPPER_TAGS) {
+    // Closing form: </tag> (optional whitespace allowed before >).
+    const closing = new RegExp(`</${tag}\\s*>`, 'gi');
+    out = out.replace(closing, `＜/${tag}＞`);
+    // Opening form: <tag ...attrs>. We replace the literal `<` and
+    // `>` while preserving any attributes inside.
+    const opening = new RegExp(`<${tag}\\b[^>]*>`, 'gi');
+    out = out.replace(opening, (m) => m.replace(/^</, '＜').replace(/>$/, '＞'));
+  }
+  return out;
 }

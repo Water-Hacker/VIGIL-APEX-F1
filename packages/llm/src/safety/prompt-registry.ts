@@ -51,6 +51,24 @@ export class PromptRegistry {
       render: opts.render,
     };
     const list = this.entries.get(opts.name) ?? [];
+    // Tier-31 audit closure: refuse duplicate (name, version) pairs.
+    // Pre-fix, a double-registration of foo@v1.0.0 just pushed a
+    // second entry; `byVersion` returned the FIRST match and the
+    // second was silently shadowed. If the two registrations had
+    // different `render` functions producing different hashes, the
+    // registry would carry two distinct hashes for the same
+    // (name, version) — undetectable drift. Re-registration with
+    // an IDENTICAL hash is a no-op (idempotent module-load); a
+    // different hash throws so the operator sees the conflict.
+    const existing = list.find((e) => e.version === opts.version);
+    if (existing) {
+      if (existing.hash === hash) {
+        return existing;
+      }
+      throw new Error(
+        `prompt-registry: duplicate (name=${opts.name}, version=${opts.version}) registration with different hash (existing=${existing.hash}, new=${hash})`,
+      );
+    }
     list.push(entry);
     this.entries.set(opts.name, list);
     return entry;
