@@ -1,13 +1,6 @@
 import { z } from 'zod';
 
-import {
-  zIsoInstant,
-  zPatternId,
-  zSeverity,
-  zSha256Hex,
-  zSourceId,
-  zUuid,
-} from './common.js';
+import { zIsoInstant, zPatternId, zSeverity, zSha256Hex, zSourceId, zUuid } from './common.js';
 
 /* =============================================================================
  * AI Safety Doctrine v1.0 — Bayesian Certainty Engine schemas (DECISION-011).
@@ -47,6 +40,14 @@ export const zHoldReason = z.enum([
   'canary_triggered',
   'cluster_dependency',
   'lost_in_middle_regression',
+  // Tier-36 audit closure: worker-counter-evidence sets this when the
+  // adversarial pipeline itself fails to execute (LLM outage, evaluator
+  // exception). Pre-fix the finding kept its worker-score tier
+  // (potentially action_queue) with DEFAULT_ADVERSARIAL = passed-
+  // everything — silent false-positive promotion. This reason now
+  // surfaces on the downgraded assessment row so the council sees
+  // why a finding was held even though the math math'd.
+  'adversarial_pipeline_failed',
 ]);
 export type HoldReason = z.infer<typeof zHoldReason>;
 
