@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # VIGIL APEX dashboard — Next.js 14 standalone build.
 
-FROM node:20.20.2-alpine AS deps
+FROM node:20.20.2-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
@@ -14,7 +14,7 @@ FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm run build --filter "@vigil/*..." --filter "...^./apps/dashboard"
 
-FROM node:20.20.2-alpine AS runtime
+FROM node:20.20.2-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runtime
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV TZ=Africa/Douala

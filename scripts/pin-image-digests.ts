@@ -217,7 +217,20 @@ function main(): number {
   // mode === 'apply'
   const lock: Record<string, string> = {};
   reportPlan(allRefs);
+  // Phase 12b activation: our own `vigil-apex/*` and `vigil-caddy` refs
+  // don't exist in any reachable registry until the docker-bake CI job
+  // builds + pushes them. For those refs, `resolveDigest` fails with
+  // `insufficient_scope` / "pull access denied". We skip such refs in
+  // --apply mode (they'll be filled in by the bake-and-push CI job
+  // when it runs). Upstream public refs (caddy, node, python,
+  // playwright, postgres, etc.) resolve cleanly and are recorded.
+  const VIGIL_OWNED_RE = /^(vigil-apex\/|vigil-caddy|registry\.vigilapex\.local\/)/;
+  const skipped: string[] = [];
   for (const r of allRefs) {
+    if (VIGIL_OWNED_RE.test(r.tag)) {
+      skipped.push(r.tag);
+      continue;
+    }
     process.stdout.write(`[pin-image-digests] resolving ${r.tag} ... `);
     try {
       const digest = resolveDigest(r.tag, resolver);
@@ -227,6 +240,12 @@ function main(): number {
       process.stderr.write(`FAIL: ${String(e)}\n`);
       return 1;
     }
+  }
+  if (skipped.length > 0) {
+    process.stdout.write(
+      `[pin-image-digests] skipped ${skipped.length} vigil-owned ref(s) (filled in by docker-bake CI job): ` +
+        `${[...new Set(skipped)].join(', ')}\n`,
+    );
   }
   // Write the lock file.
   writeFileSync(DIGEST_LOCK, JSON.stringify(lock, null, 2) + '\n');

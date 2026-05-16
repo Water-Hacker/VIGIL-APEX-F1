@@ -1,0 +1,1866 @@
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-default-deny
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    # DNS to kube-system CoreDNS — every Pod needs this.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Postgres: ingress from data-plane clients only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-postgres-allow
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: postgres
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: "vigil-apex-dashboard"
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: "vigil-apex-worker-pattern"
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Redis: same idea.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-redis-allow
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: "vigil-apex-dashboard"
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: "vigil-apex-worker-pattern"
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Vault: ESO operator + workers + dashboard read it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-vault-allow
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: vault
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: vault
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: external-secrets
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: "vigil-apex-dashboard"
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: "vigil-apex-worker-pattern"
+      ports:
+        - protocol: TCP
+          port: 8200
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Dashboard ingress: from caddy only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-dashboard-allow
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: dashboard
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: caddy
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Caddy: ingress from anywhere on 80/443 (it's the LoadBalancer).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-caddy-allow
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/component: caddy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: caddy
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Allow Prometheus to scrape every workload exposing :9100 (worker metrics)
+# and the component-specific exporter ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vigil-apex-prometheus-scrape
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/component: prometheus
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: vigil
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9100   # workers (per-pod prom_client default)
+        - protocol: TCP
+          port: 9090   # Prometheus self-scrape
+        - protocol: TCP
+          port: 9093   # Alertmanager
+        - protocol: TCP
+          port: 9443   # Fabric peer/orderer ops
+        - protocol: TCP
+          port: 8200   # Vault metrics
+        - protocol: TCP
+          port: 5070   # IPFS-Cluster metrics
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vigil-apex-postgres
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+automountServiceAccountToken: true
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vigil-apex-redis
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+automountServiceAccountToken: true
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vigil-apex-vault
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: vault
+automountServiceAccountToken: true
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vigil-apex-worker
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: worker
+automountServiceAccountToken: true
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vigil-apex-dashboard
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+automountServiceAccountToken: true
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vigil-apex-caddy
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/component: caddy
+automountServiceAccountToken: true
+---
+# Source: vigil-apex/templates/caddy-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vigil-apex-caddy-config
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/component: caddy
+data:
+  Caddyfile: |
+    # K8s-native Caddyfile. Mirrors the Compose Caddyfile behaviour
+    # (Phase B2 rate-limit, D10 compression, ratelimit plugin); the
+    # full source-of-truth is infra/docker/caddy/Caddyfile and this
+    # file is regenerated when that one changes (a CI step + Argo CD
+    # auto-sync handles the propagation).
+    {
+        email ops@vigilapex.cm
+        auto_https off
+        servers {
+            protocols h1 h2 h3
+        }
+        order rate_limit before reverse_proxy
+    }
+
+    :80 {
+        @health path /healthz
+        handle @health { respond "ok" 200 }
+    }
+    localhost {
+        encode {
+            zstd
+            gzip 6
+            minimum_length 1024
+        }
+        header {
+            Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+            X-Content-Type-Options "nosniff"
+            -Server
+        }
+
+        @council_vote path /api/council/vote*
+        rate_limit @council_vote {
+            zone council_vote {
+                key {remote_host}
+                events 20
+                window 1m
+            }
+        }
+        @findings_api path /api/findings/* /api/dead-letter/* /api/calibration/*
+        rate_limit @findings_api {
+            zone findings_api {
+                key {remote_host}
+                events 60
+                window 1m
+            }
+        }
+        @tip_submit path /api/tip/submit
+        rate_limit @tip_submit {
+            zone tip_submit {
+                key {remote_host}
+                events 5
+                window 1m
+            }
+        }
+
+        reverse_proxy vigil-apex-dashboard:3000 {
+            lb_policy round_robin
+            lb_try_duration 5s
+            health_uri /api/health
+            health_interval 10s
+        }
+    }
+---
+# Source: vigil-apex/templates/postgres-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vigil-apex-postgres-config
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+data:
+  postgresql.conf: |
+    listen_addresses = '*'
+    max_connections = 50
+    shared_buffers = 128MB
+    work_mem = 16MB
+    statement_timeout = 30000
+    idle_in_transaction_session_timeout = 300000
+    # Phase E2 — surface pool / saturation metrics through pg_stat_statements
+    shared_preload_libraries = 'pg_stat_statements'
+    pg_stat_statements.track = all
+    # WAL archiving for vigil-backup (Phase F1) — on-cluster the archive
+    # path is a PVC mount; ops decides whether to also stream to Synology.
+    wal_level = replica
+    archive_mode = on
+    archive_command = 'test ! -f /wal-archive/%f && cp %p /wal-archive/%f'
+    log_destination = 'stderr'
+    log_line_prefix = '%t [%p]: user=%u,db=%d,app=%a,client=%h '
+    log_lock_waits = on
+    log_min_duration_statement = 1000
+---
+# Source: vigil-apex/templates/redis-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vigil-apex-redis-config
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    timeout 300
+    aclfile /etc/redis/users.acl
+    appendonly yes
+    appendfsync everysec
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    save 900 1
+    save 300 10
+    save 60 10000
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+    loglevel notice
+  users.acl.template: |
+    user default off nopass nocommands
+    user vigil_app on >__VIGIL_REDIS_PASSWORD__ ~* &* +@all
+  redis-entrypoint.sh: |
+    #!/bin/sh
+    # Phase B5 — render ACL with the synced password, then exec redis-server.
+    set -eu
+    PASSWORD="$(cat /run/redis-secret/password)"
+    PASSWORD="${PASSWORD}" awk '
+      { gsub(/__VIGIL_REDIS_PASSWORD__/, ENVIRON["PASSWORD"]); print }
+    ' /etc/redis/users.acl.template > /tmp/users.acl
+    cp /etc/redis/redis.conf /tmp/redis.conf
+    # ACL file path in conf points at /etc/redis/users.acl which is the
+    # ConfigMap mount; we cannot write into a ConfigMap volume so we
+    # symlink via tmpfs.
+    sed -i 's|aclfile /etc/redis/users.acl|aclfile /tmp/users.acl|' /tmp/redis.conf
+    unset PASSWORD
+    exec redis-server /tmp/redis.conf
+---
+# Source: vigil-apex/templates/vault-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vigil-apex-vault-config
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: vault
+data:
+  config.hcl: |
+    storage "file" {
+      path = "/vault/file"
+    }
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = "true"
+    }
+    api_addr     = "http://vigil-vault:8200"
+    cluster_addr = "http://vigil-vault:8201"
+    ui = false
+    disable_mlock = false
+    log_level = "info"
+    log_format = "json"
+    raw_storage_endpoint = false
+---
+# Source: vigil-apex/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vigil-apex-worker-secrets-reader
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: worker
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - vigil-apex-postgres-secret
+      - vigil-apex-redis-secret
+      - vigil-apex-worker-vault-token
+    verbs: ["get"]
+---
+# Source: vigil-apex/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vigil-apex-dashboard-secrets-reader
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - vigil-apex-postgres-secret
+      - vigil-apex-redis-secret
+      - vigil-apex-dashboard-vault-token
+      - vigil-apex-dashboard-turnstile
+      - vigil-apex-dashboard-keycloak
+    verbs: ["get"]
+---
+# Source: vigil-apex/templates/rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vigil-apex-worker-secrets-reader
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: worker
+subjects:
+  - kind: ServiceAccount
+    name: vigil-apex-worker
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vigil-apex-worker-secrets-reader
+---
+# Source: vigil-apex/templates/rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vigil-apex-dashboard-secrets-reader
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+subjects:
+  - kind: ServiceAccount
+    name: vigil-apex-dashboard
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vigil-apex-dashboard-secrets-reader
+---
+# Source: vigil-apex/templates/caddy-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-caddy
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/component: caddy
+  annotations:
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: caddy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: https
+      port: 443
+      targetPort: https
+---
+# Source: vigil-apex/templates/dashboard-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-dashboard
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: dashboard
+  # Phase D7 — round-robin across replicas. Sessions live in Redis;
+  # no sticky-session affinity needed.
+  sessionAffinity: None
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+---
+# Source: vigil-apex/templates/postgres-service.yaml
+# Headless service for StatefulSet identity. Workers use the
+# `<release>-postgres` ClusterIP service below; this one only exists
+# so each pod gets a stable DNS A record.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-postgres-headless
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+# Source: vigil-apex/templates/postgres-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-postgres
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+# Source: vigil-apex/templates/redis-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-redis-headless
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+# Source: vigil-apex/templates/redis-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-redis
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+# Source: vigil-apex/templates/vault-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-vault
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: vault
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: vault
+  ports:
+    - name: http
+      port: 8200
+      targetPort: 8200
+    - name: cluster
+      port: 8201
+      targetPort: 8201
+---
+# Source: vigil-apex/templates/worker-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: vigil-apex-worker-pattern
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: worker-pattern
+    app.kubernetes.io/component: worker-pattern
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/name: worker-pattern
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+---
+# Source: vigil-apex/templates/caddy-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vigil-apex-caddy
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/component: caddy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: caddy
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: vigil-apex-0.1.0
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/instance: vigil
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/part-of: vigil-apex
+        vigil-apex.cm/cluster-region: dev-local
+        app.kubernetes.io/name: caddy
+        app.kubernetes.io/component: caddy
+      annotations:
+        checksum/config: 5fd8d60bc62b05a8f2ada2b890fa8fdaa95a066b02e79fc49b2b89b9eaa44e0d
+    spec:
+      serviceAccountName: vigil-apex-caddy
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: caddy
+          image: ghcr.io/water-hacker/vigil-apex/vigil-caddy:rl-2.8
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            readOnlyRootFilesystem: false # caddy writes ACME state to /data
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+          volumeMounts:
+            - name: config
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: cfg
+              mountPath: /config
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: vigil-apex-caddy-config
+        - name: data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: cfg
+          emptyDir:
+            sizeLimit: 256Mi
+---
+# Source: vigil-apex/templates/dashboard-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vigil-apex-dashboard
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: dashboard
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: vigil-apex-0.1.0
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/instance: vigil
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/part-of: vigil-apex
+        vigil-apex.cm/cluster-region: dev-local
+        app.kubernetes.io/name: dashboard
+        app.kubernetes.io/component: dashboard
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      serviceAccountName: vigil-apex-dashboard
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: vigil
+                    app.kubernetes.io/name: dashboard
+      containers:
+        - name: dashboard
+          image: ghcr.io/water-hacker/vigil-apex/vigil-apex/dashboard:0.1.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: metrics
+              containerPort: 9100
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: TZ
+              value: Africa/Douala
+            - name: POSTGRES_HOST
+              value: vigil-apex-postgres
+            - name: REDIS_HOST
+              value: vigil-apex-redis
+            - name: VAULT_ADDR
+              value: http://vigil-apex-vault:8200
+            - name: NODE_ENV
+              value: "production"
+            - name: SESSION_STORE
+              value: "redis"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-apex-postgres-secret
+                  key: password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-apex-redis-secret
+                  key: password
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /.next/cache
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: cache
+          emptyDir:
+            sizeLimit: 512Mi
+---
+# Source: vigil-apex/templates/worker-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vigil-apex-worker-pattern
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: worker-pattern
+    app.kubernetes.io/component: worker-pattern
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: worker-pattern
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: vigil-apex-0.1.0
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/instance: vigil
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/part-of: vigil-apex
+        vigil-apex.cm/cluster-region: dev-local
+        app.kubernetes.io/name: worker-pattern
+        app.kubernetes.io/component: worker-pattern
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: vigil-apex-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: vigil
+                    app.kubernetes.io/name: worker-pattern
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: vigil
+              app.kubernetes.io/name: worker-pattern
+      containers:
+        - name: worker-pattern
+          image: ghcr.io/water-hacker/vigil-apex/vigil-apex/worker-pattern:dev
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: metrics
+              containerPort: 9100
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: TZ
+              value: Africa/Douala
+            - name: POSTGRES_HOST
+              value: vigil-apex-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: vigil
+            - name: POSTGRES_USER
+              value: vigil
+            - name: REDIS_HOST
+              value: vigil-apex-redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: VAULT_ADDR
+              value: http://vigil-apex-vault:8200
+            - name: OTEL_SERVICE_NAME
+              value: "worker-pattern"
+            - name: PROMETHEUS_PORT
+              value: "9100"
+            - name: WORKER_NAME
+              value: "worker-pattern"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-apex-postgres-secret
+                  key: password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-apex-redis-secret
+                  key: password
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+# Source: vigil-apex/templates/postgres-statefulset.yaml
+# Single-replica Postgres — DEV / single-node deployments only. In
+# production the HA path (postgres-patroni-statefulset.yaml) takes over
+# when .Values.postgres.ha.enabled = true (set via values-cluster.yaml).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vigil-apex-postgres
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+spec:
+  replicas: 1
+  serviceName: vigil-apex-postgres-headless
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: vigil-apex-0.1.0
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/instance: vigil
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/part-of: vigil-apex
+        vigil-apex.cm/cluster-region: dev-local
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: postgres
+      annotations:
+        # Force pod restart when ConfigMap content changes
+        checksum/config: 976676a04ed8fa734aee463814b0e8096fed927d69cb7ddac1fd2c0f6745c2da
+    spec:
+      serviceAccountName: vigil-apex-postgres
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # WAL archive volume — see configmap for the archive_command.
+      # Empty by default; ops sets `--set postgres.walArchiveSize=...`
+      # when the architect commits to off-cluster shipping.
+      containers:
+        - name: postgres
+          image: ghcr.io/water-hacker/vigil-apex/postgres:16.4-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            # Postgres image needs a writable data dir + tmpfs at /tmp;
+            # everything else is read-only.
+            readOnlyRootFilesystem: false
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: vigil
+            - name: POSTGRES_USER
+              value: vigil
+            # Password syncs in via ExternalSecret → vigil-apex-postgres-secret.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vigil-apex-postgres-secret
+                  key: password
+            - name: POSTGRES_INITDB_ARGS
+              value: "--encoding=UTF-8 --locale=en_US.UTF-8 --auth=scram-sha-256"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: wal-archive
+              mountPath: /wal-archive
+            - name: config
+              mountPath: /etc/postgresql/postgresql.conf
+              subPath: postgresql.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          command: ["postgres"]
+          args: ["-c", "config_file=/etc/postgresql/postgresql.conf"]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "vigil", "-d", "vigil"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "vigil", "-d", "vigil"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: vigil-apex-postgres-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: wal-archive
+          emptyDir:
+            sizeLimit: 10Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          helm.sh/chart: vigil-apex-0.1.0
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/instance: vigil
+          app.kubernetes.io/version: "0.1.0"
+          app.kubernetes.io/part-of: vigil-apex
+          vigil-apex.cm/cluster-region: dev-local
+          app.kubernetes.io/name: postgres
+          app.kubernetes.io/component: postgres
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "standard"
+        resources:
+          requests:
+            storage: 5Gi
+---
+# Source: vigil-apex/templates/redis-statefulset.yaml
+# Single-replica Redis — DEV / single-node only. HA path
+# (redis-sentinel-statefulset.yaml) takes over when
+# .Values.redis.ha.enabled = true.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vigil-apex-redis
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  serviceName: vigil-apex-redis-headless
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: vigil-apex-0.1.0
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/instance: vigil
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/part-of: vigil-apex
+        vigil-apex.cm/cluster-region: dev-local
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: redis
+      annotations:
+        checksum/config: 5cd82b7fa63b4f97cb64c78b46f34d00e2a789a61ec69fe37bde9f23389895f1
+    spec:
+      serviceAccountName: vigil-apex-redis
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: ghcr.io/water-hacker/vigil-apex/redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            readOnlyRootFilesystem: false  # redis writes to /data
+          ports:
+            - name: redis
+              containerPort: 6379
+          command: ["/bin/sh", "/etc/redis/redis-entrypoint.sh"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/redis
+              readOnly: true
+            - name: redis-secret
+              mountPath: /run/redis-secret
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'redis-cli -a "$(cat /run/redis-secret/password)" ping | grep -q PONG'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'redis-cli -a "$(cat /run/redis-secret/password)" ping | grep -q PONG'
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            limits:
+              cpu: 250m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: vigil-apex-redis-config
+            defaultMode: 0755
+        - name: redis-secret
+          secret:
+            secretName: vigil-apex-redis-secret
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          helm.sh/chart: vigil-apex-0.1.0
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/instance: vigil
+          app.kubernetes.io/version: "0.1.0"
+          app.kubernetes.io/part-of: vigil-apex
+          vigil-apex.cm/cluster-region: dev-local
+          app.kubernetes.io/name: redis
+          app.kubernetes.io/component: redis
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "standard"
+        resources:
+          requests:
+            storage: 1Gi
+---
+# Source: vigil-apex/templates/vault-statefulset.yaml
+# Single-replica Vault — DEV / single-node only. In production the HA
+# path (vault-raft-statefulset.yaml) takes over when
+# .Values.vault.ha.enabled = true (set via values-cluster.yaml).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vigil-apex-vault
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: vault
+spec:
+  replicas: 1
+  serviceName: vigil-apex-vault
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: vigil
+      app.kubernetes.io/name: vault
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: vigil-apex-0.1.0
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/instance: vigil
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/part-of: vigil-apex
+        vigil-apex.cm/cluster-region: dev-local
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/component: vault
+      annotations:
+        checksum/config: edaf81dfb3e28d3d151a9254344fbc43ded16f83f8b6e8c74c84357437d0da04
+    spec:
+      serviceAccountName: vigil-apex-vault
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # IPC_LOCK is required by Vault to prevent secrets from being
+      # paged to swap. PSS `restricted` forbids it; ops who need
+      # production-grade unsealing must apply `restricted` only AFTER
+      # confirming the kernel has `vm.swappiness = 0` set, OR install
+      # this Pod into a privileged namespace by overriding the labels.
+      containers:
+        - name: vault
+          image: ghcr.io/water-hacker/vigil-apex/hashicorp/vault:1.17.5
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            capabilities:
+              add: ["IPC_LOCK"]
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false # vault writes to /vault/file
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 8200
+            - name: cluster
+              containerPort: 8201
+          env:
+            - name: VAULT_ADDR
+              value: "http://0.0.0.0:8200"
+          command: ["vault"]
+          args: ["server", "-config=/vault/config/config.hcl"]
+          volumeMounts:
+            - name: data
+              mountPath: /vault/file
+            - name: logs
+              mountPath: /vault/logs
+            - name: config
+              mountPath: /vault/config
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: 8200
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            limits:
+              cpu: 250m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: vigil-apex-vault-config
+        - name: logs
+          emptyDir:
+            sizeLimit: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          helm.sh/chart: vigil-apex-0.1.0
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/instance: vigil
+          app.kubernetes.io/version: "0.1.0"
+          app.kubernetes.io/part-of: vigil-apex
+          vigil-apex.cm/cluster-region: dev-local
+          app.kubernetes.io/name: vault
+          app.kubernetes.io/component: vault
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "standard"
+        resources:
+          requests:
+            storage: 1Gi
+---
+# Source: vigil-apex/templates/networkpolicy.yaml
+# Default-deny: nothing is allowed to ingress into the namespace
+# unless an allowlist below explicitly permits it. Mirrors the
+# `vigil-internal` private bridge from the Compose stack.
+---
+# Source: vigil-apex/templates/role.yaml
+# Per-role Roles. Each can read only the secrets ExternalSecrets has
+# materialised for it; a worker SA cannot read the dashboard's secrets,
+# and vice versa. Mirrors the Vault policy split from Phase B6.
+---
+# Source: vigil-apex/templates/serviceaccount.yaml
+# One SA per role. ExternalSecrets binds its Vault Kubernetes-auth role
+# to the worker SA, so a worker pod's projected-token grants Vault read
+# on its policy paths only — no namespace-wide read.
+---
+# Source: vigil-apex/templates/externalsecret-dashboard.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-dashboard-vault-token
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-dashboard-vault-token
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: vigil/vault-tokens/dashboard
+        property: token
+---
+# Source: vigil-apex/templates/externalsecret-dashboard.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-dashboard-turnstile
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-dashboard-turnstile
+    creationPolicy: Owner
+  data:
+    - secretKey: secret_key
+      remoteRef:
+        key: vigil/turnstile
+        property: secret_key
+---
+# Source: vigil-apex/templates/externalsecret-dashboard.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-dashboard-keycloak
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-dashboard-keycloak
+    creationPolicy: Owner
+  data:
+    - secretKey: admin
+      remoteRef:
+        key: vigil/keycloak
+        property: admin
+---
+# Source: vigil-apex/templates/externalsecret-fabric.yaml
+# Fabric MSP material for worker-fabric-bridge + audit-verifier.
+# When the Phase-G Fabric scaffold lands in K8s the same secret store
+# pattern applies — three keys (tls_root, client_cert, client_key)
+# pulled from secret/vigil/fabric/org1/*.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-fabric-msp
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-fabric-msp
+    creationPolicy: Owner
+  data:
+    - secretKey: tls_root
+      remoteRef:
+        key: vigil/fabric/org1/tls_root
+        property: pem
+    - secretKey: client_cert
+      remoteRef:
+        key: vigil/fabric/org1/client_cert
+        property: pem
+    - secretKey: client_key
+      remoteRef:
+        key: vigil/fabric/org1/client_key
+        property: pem
+---
+# Source: vigil-apex/templates/externalsecret-postgres.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-postgres-secret
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: postgres
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-postgres-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: password
+      remoteRef:
+        key: vigil/postgres
+        property: password
+---
+# Source: vigil-apex/templates/externalsecret-redis.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-redis-secret
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: redis
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-redis-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: password
+      remoteRef:
+        key: vigil/redis
+        property: password
+---
+# Source: vigil-apex/templates/externalsecret-workers.yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vigil-apex-worker-vault-token
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: worker
+spec:
+  refreshInterval: 5m
+  secretStoreRef:
+    name: vigil-apex-vault-store
+    kind: SecretStore
+  target:
+    name: vigil-apex-worker-vault-token
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: vigil/vault-tokens/worker
+        property: token
+    - secretKey: anthropic_api_key
+      remoteRef:
+        key: vigil/anthropic
+        property: api_key
+---
+# Source: vigil-apex/templates/secretstore.yaml
+# ESO SecretStore — points at the in-cluster Vault. Authenticates via
+# Kubernetes ServiceAccount-token review; Vault's `kubernetes` auth
+# method maps the SA → vault role → policy chain.
+#
+# The Vault role / policy bind happens at install time per
+# docs/runbooks/R8-k8s-cutover.md §3 — we cannot template it because
+# it requires a one-shot Vault API call against an unsealed Vault.
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vigil-apex-vault-store
+  labels:
+    helm.sh/chart: vigil-apex-0.1.0
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: vigil
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/part-of: vigil-apex
+    vigil-apex.cm/cluster-region: dev-local
+spec:
+  provider:
+    vault:
+      server: http://vigil-apex-vault:8200
+      path: secret/
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: "vigil-eso-dev"
+          serviceAccountRef:
+            name: vigil-apex-worker
