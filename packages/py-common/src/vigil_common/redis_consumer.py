@@ -285,8 +285,12 @@ class RedisStreamWorker[PayloadT: BaseModel](ABC):
             await self._dead_letter(msg_id, body, str(ve))
             await self._redis.xack(self.stream, self._group, msg_id)
         except Exception as e:
-            ve = asVigilError(e)
-            errors_total.labels(service=self.name, code=ve.code, severity=ve.severity).inc()
+            wrapped = asVigilError(e)
+            errors_total.labels(
+                service=self.name,
+                code=wrapped.code,
+                severity=wrapped.severity,
+            ).inc()
             self._logger.exception("handler-threw", error=str(e), msg_id=msg_id)
             await self._dead_letter(msg_id, body, str(e))
             await self._redis.xack(self.stream, self._group, msg_id)

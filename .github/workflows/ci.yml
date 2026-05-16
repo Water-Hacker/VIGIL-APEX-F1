@@ -101,6 +101,68 @@ jobs:
       - name: enforce compose dependency-DAG acyclicity
         run: pnpm exec tsx scripts/check-compose-deps.ts
 
+  helm-golden-drift:
+    # Mode 9.1 Tier 2 — helm-template rendered diff against committed
+    # golden manifests. Catches the case where someone edits a chart
+    # template OR a values file in a way that materially changes the
+    # rendered Kubernetes resources without explicitly re-rendering
+    # the golden. Tier 1 (values-drift gate) catches the values-side
+    # cases; this Tier 2 gate catches the template-side cases.
+    #
+    # Activation: skipped until the architect runs `scripts/render-
+    # helm-golden.sh` (no --verify) once + commits the
+    # `infra/k8s/charts/vigil-apex/golden/{dev,prod,cluster}.yaml`
+    # files. The job's `if-no-golden` branch reports a notice and
+    # exits 0.
+    name: helm-golden-drift
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Check whether golden manifests exist
+        id: golden_present
+        run: |
+          if [ -f infra/k8s/charts/vigil-apex/golden/dev.yaml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No golden manifests committed yet; mode 9.1 Tier 2 in pre-activation state. Run scripts/render-helm-golden.sh + commit infra/k8s/charts/vigil-apex/golden/ to activate this gate."
+          fi
+      - name: Install Helm (SHA-pinned action)
+        if: steps.golden_present.outputs.present == 'true'
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: 'v3.16.2'
+      - name: Verify rendered chart matches committed golden
+        if: steps.golden_present.outputs.present == 'true'
+        run: bash scripts/render-helm-golden.sh --verify
+
+  scripts-tests:
+    # Surface the 6 latent test files under scripts/__tests__/ that
+    # had no test-runner picking them up. Pre-Cat-6 they existed as
+    # documentation; this gate now runs them on every push + PR.
+    # Coverage: cert-expiry-check, ntp-check, check-api-error-leaks,
+    # check-compose-deps, check-migration-locks, check-rbac-coverage.
+    name: scripts-tests
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Run scripts/__tests__/ via root vitest config
+        # Invoked through @vigil/shared because pnpm `--filter` is the
+        # required entry point for vitest from any package; the
+        # `--config` flag points at the repo-root config which pins
+        # `root: __dirname` so the include glob resolves to repo-root
+        # `scripts/__tests__/`.
+        run: pnpm --filter @vigil/shared exec vitest run --config $(pwd)/vitest.scripts.config.ts
+
   helm-values-drift:
     # Hardening mode 9.1 — Tier 1 config-drift gate for the Helm chart
     # values files. Asserts that values-prod.yaml pins images, sets
@@ -454,7 +516,15 @@ jobs:
             --set '*.cache-from=type=gha' \
             --set '*.cache-to=type=gha,mode=max' \
             --load
-        continue-on-error: true # bake file emerges with R0.D
+        # Soft-gate retained for one cycle: the bake file now exists
+        # (post-Phase-12a follow-up; 25 targets, parses + resolves
+        # via `docker buildx bake --print`) but individual workers
+        # may still fail to build until each app's TS build is
+        # exercised end-to-end. The first CI run that completes the
+        # bake successfully is the signal to flip this to a hard
+        # gate. Tracked alongside the cosign-sign-images activation
+        # in docs/runbooks/cosign-rollout.md.
+        continue-on-error: true
 
   trivy-base-images:
     # Hardening modes 10.7 + 10.2(a) — base-image CVE gate.

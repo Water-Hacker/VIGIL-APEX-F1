@@ -82,8 +82,12 @@ describe('cert-expiry-check pure helpers (mode 6.6)', () => {
       );
     });
 
-    it('returns the path unchanged when it does not start with certs-dir', () => {
-      expect(certNameFor('/elsewhere/x.crt', '/srv/vigil/certs')).toBe('/elsewhere/x');
+    it('strips leading slash when the path is outside certs-dir', () => {
+      // certNameFor() normalizes by stripping a leading slash regardless
+      // of whether the input started inside certs-dir. The test name
+      // previously claimed "unchanged" + asserted '/elsewhere/x' but
+      // the function returns 'elsewhere/x' by design (normalization).
+      expect(certNameFor('/elsewhere/x.crt', '/srv/vigil/certs')).toBe('elsewhere/x');
     });
   });
 

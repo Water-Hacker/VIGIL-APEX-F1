@@ -1,5 +1,5 @@
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
-import { createLogger, type Logger } from '@vigil/observability';
+import { createLogger, llmRateLimitExhaustedTotal, type Logger } from '@vigil/observability';
 import { Errors } from '@vigil/shared';
 
 import { CircuitBreaker } from '../circuit.js';
@@ -37,6 +37,35 @@ function stripBedrockNamespace(bedrockModelId: string): string {
   return bedrockModelId.startsWith('anthropic.')
     ? bedrockModelId.slice('anthropic.'.length)
     : bedrockModelId;
+}
+
+/**
+ * Mode 6.4 follow-up — Bedrock rate-limit detection.
+ *
+ * The Anthropic-direct SDK ships a typed `RateLimitError` (closed in
+ * the Cat-6 mode 6.4 commit). The Bedrock SDK doesn't re-export AWS
+ * error types; instead, AWS throws instances of
+ * `@aws-sdk/client-bedrock-runtime`'s `ThrottlingException` /
+ * `ServiceQuotaExceededException`. Both carry `.name` matching the
+ * exception name (AWS SDK v3 convention) and `.$metadata` shape.
+ *
+ * We duck-type via `.name` to avoid pulling `@aws-sdk/client-bedrock-runtime`
+ * as a direct dep (it's already transitive via the Bedrock SDK; importing
+ * it directly would pin the version twice).
+ *
+ * Returns true for any AWS exception that operators should see as
+ * "we're being throttled" — not "the model errored" — in the
+ * `llm_rate_limit_exhausted_total` Prometheus counter.
+ */
+function isBedrockRateLimitError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const name = (e as { name?: string }).name;
+  if (typeof name !== 'string') return false;
+  return (
+    name === 'ThrottlingException' ||
+    name === 'ServiceQuotaExceededException' ||
+    name === 'TooManyRequestsException'
+  );
 }
 
 export interface BedrockProviderOptions {
@@ -126,7 +155,20 @@ export class BedrockProvider implements ProviderClient {
       };
     } catch (e) {
       this.circuit.recordFailure();
-      this.logger.error({ err: e, model }, 'bedrock-call-failed');
+      // Mode 6.4 — surface rate-limit exhaustion as a distinct signal
+      // (mirrors the Anthropic-direct provider). AWS Bedrock throws
+      // ThrottlingException / ServiceQuotaExceededException /
+      // TooManyRequestsException via the underlying @aws-sdk/client-
+      // bedrock-runtime; we duck-type via `.name` per the helper above.
+      if (isBedrockRateLimitError(e)) {
+        llmRateLimitExhaustedTotal.inc({ provider: this.name, model });
+        this.logger.warn(
+          { model, errorName: (e as { name?: string }).name },
+          'bedrock-rate-limit-exhausted; AWS Bedrock throttle / quota signal',
+        );
+      } else {
+        this.logger.error({ err: e, model }, 'bedrock-call-failed');
+      }
       throw e;
     }
   }

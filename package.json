@@ -24,6 +24,7 @@
     "test:watch": "turbo run test -- --watch",
     "test:coverage": "turbo run test:coverage",
     "test:integration": "turbo run test:integration",
+    "test:scripts": "vitest run --config vitest.scripts.config.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yaml,yml}\" --ignore-path .gitignore",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,yaml,yml}\" --ignore-path .gitignore",
     "clean": "turbo run clean && rimraf node_modules \"packages/*/node_modules\" \"apps/*/node_modules\" \"contracts/node_modules\" \".turbo\"",

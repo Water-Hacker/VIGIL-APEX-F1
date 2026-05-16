@@ -13,7 +13,7 @@ import os
 import socket
 import sys
 from collections.abc import Callable, MutableMapping
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from structlog.types import EventDict, WrappedLogger
@@ -94,7 +94,11 @@ def _redact_secrets(_logger: WrappedLogger, _name: str, event_dict: EventDict) -
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name) if name else structlog.get_logger()
+    # structlog.get_logger() returns Any (structlog has no py.typed marker for
+    # its dynamic factory). The cast localises the Any to a single site and
+    # keeps callers strictly typed against BoundLogger.
+    logger = structlog.get_logger(name) if name else structlog.get_logger()
+    return cast("structlog.stdlib.BoundLogger", logger)
 
 
 def bind_correlation(correlation_id: str) -> contextvars.Token[str | None]:

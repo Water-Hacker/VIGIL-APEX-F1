@@ -91,16 +91,14 @@ def search_nicfi_scenes(
             # activity computation. NDVI uses Red + NIR; NDBI uses SWIR which
             # NICFI lacks, so we set NDBI to NaN downstream when provider=nicfi.
             assets = item.assets
-            red_href = (
-                (assets.get("Red") or assets.get("red")).href
-                if (assets.get("Red") or assets.get("red"))
-                else None
-            )
-            nir_href = (
-                (assets.get("NIR") or assets.get("nir")).href
-                if (assets.get("NIR") or assets.get("nir"))
-                else None
-            )
+            # Bind to a local before reading `.href` so mypy can narrow
+            # `Asset | None` to `Asset` after the truthiness check. The prior
+            # form (`(assets.get(...) or assets.get(...)).href if ...`)
+            # re-evaluates `.get()` each time and tripped union-attr.
+            red_asset = assets.get("Red") or assets.get("red")
+            nir_asset = assets.get("NIR") or assets.get("nir")
+            red_href = red_asset.href if red_asset is not None else None
+            nir_href = nir_asset.href if nir_asset is not None else None
             if not red_href or not nir_href:
                 continue
             found.append(

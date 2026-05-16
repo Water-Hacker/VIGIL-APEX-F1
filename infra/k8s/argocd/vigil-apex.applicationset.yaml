@@ -1,0 +1,86 @@
+# Argo CD ApplicationSet — mode 9.1 Tier 2 closure.
+#
+# Generates one Argo CD Application per (cluster, env) pair so the
+# right values-{env}.yaml lands in the right cluster automatically.
+# Replaces the single hand-rolled vigil-apex.application.yaml's per-env
+# override with a fan-out driven by cluster labels.
+#
+# Cluster labelling convention (set on each cluster registration in
+# Argo CD):
+#   vigil.apex/env=dev   → values-dev.yaml
+#   vigil.apex/env=prod  → values-prod.yaml + values-cluster.yaml
+#                          (the DL380 HA overlay per DECISION-020)
+#
+# Activation prerequisites (Phase 2 work):
+#   1. ArgoCD installed in a management cluster.
+#   2. Target clusters registered with the labels above.
+#   3. Architect's signoff that prune+self-heal are appropriate
+#      (current policy: prune=false, selfHeal=true per Application
+#      template below).
+#
+# Phase 12a status: this ApplicationSet is checked in; activation is
+# part of the Phase 12b / Phase-2 cluster bring-up runbook.
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: vigil-apex
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        # Matches every cluster that has BOTH the vigil-apex/env label
+        # AND a non-empty value. Disable a cluster by removing the
+        # label (the Application is deleted automatically once a sync
+        # window passes; finalizer ensures resource cleanup).
+        selector:
+          matchExpressions:
+            - key: vigil.apex/env
+              operator: In
+              values:
+                - dev
+                - staging
+                - prod
+  template:
+    metadata:
+      name: 'vigil-apex-{{name}}'
+      labels:
+        vigil.apex/env: '{{metadata.labels.vigil.apex/env}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/Water-Hacker/VIGIL-APEX
+        targetRevision: main
+        path: infra/k8s/charts/vigil-apex
+        helm:
+          releaseName: vigil
+          # Always values.yaml + the env-specific override; for prod
+          # the values-cluster.yaml (DL380 HA overlay) lands too.
+          valueFiles:
+            - values.yaml
+            - 'values-{{metadata.labels.vigil.apex/env}}.yaml'
+      destination:
+        server: '{{server}}'
+        namespace: vigil
+      syncPolicy:
+        automated:
+          prune: false # architect-approved syncs only (Phase 1 culture)
+          selfHeal: true # heal drift but don't delete
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 10m
+      revisionHistoryLimit: 10
+  # ApplicationSet-level sync policy: when a cluster is removed (label
+  # dropped or cluster deregistered), the generated Application is
+  # deleted; the finalizer above propagates the cascade.
+  syncPolicy:
+    applicationsSync: create-update # don't auto-delete on cluster removal

@@ -49,25 +49,20 @@ jobs:
           pip install -e packages/py-common[test]
           pip install -e apps/worker-satellite[test]
           pip install -e apps/worker-image-forensics[test]
-          pip install ruff mypy
+          pip install ruff mypy types-hvac
       - name: Ruff lint + format check
         run: |
           ruff check packages/py-common apps/worker-satellite apps/worker-image-forensics
           ruff format --check packages/py-common apps/worker-satellite apps/worker-image-forensics
       - name: mypy --strict
-        # SOFT GATE — non-blocking pending the Python type-cleanup follow-up
-        # PR. ~20 mypy --strict errors are pre-existing latent debt in the
-        # worker source (e.g. `VigilError.message` missing, `Asset|None.href`
-        # not null-checked, missing stubs for hvac/planetary_computer). They
-        # have been latent because python-ci was failing at install before
-        # commit c7763a0 (dropped `vigil-common @ file:///app/...` URL in
-        # the workers' pyproject.toml).
-        #
-        # Ruff is the hard gate above; mypy runs informationally so the
-        # output is visible without blocking other Cat 10 work. Flip back
-        # to a hard gate after a dedicated `chore(worker-satellite):
-        # mypy --strict cleanup` PR addresses the ~20 errors.
-        continue-on-error: true
+        # HARD GATE — the Python type-cleanup follow-up PR cleared the
+        # previous ~20 mypy --strict errors (VigilError.message →
+        # str(ve); Asset|None.href null-checks in NICFI; ActivityResult
+        # field rename; register_shutdown signature wrapper; planetary_
+        # computer / skimage opt-out via per-line type: ignore). The
+        # `types-hvac` stub package is installed above to type the Vault
+        # client without per-line ignores. Failure here blocks the
+        # workflow so type regressions cannot land.
         run: |
           mypy packages/py-common/src apps/worker-satellite/src apps/worker-image-forensics/src
 
@@ -121,16 +116,18 @@ jobs:
           pytest --cov-fail-under=0 \
             --cov=vigil_common --cov=vigil_satellite --cov=vigil_forensics \
             apps/worker-satellite/tests apps/worker-image-forensics/tests
-      - name: pytest coverage threshold (soft gate, aspirational 60%)
-        # SOFT GATE — non-blocking pending the Python test-coverage
-        # follow-up PR. Local coverage at this commit is 47.22%; the
-        # threshold is set at 60% as a target (and 45% as the current
-        # floor that should never regress). Output is informational
-        # until a dedicated test-coverage PR closes the gap.
+      - name: pytest coverage threshold (HARD GATE, 60%)
+        # HARD GATE — local coverage at this commit is 81.49%; the Python
+        # test-coverage follow-up PR added 129 tests across worker-satellite
+        # and worker-image-forensics (py-common is covered via the
+        # `--cov=vigil_common` flag from the satellite test suite). The 60%
+        # threshold gives us ~20% margin so day-to-day refactors don't
+        # bounce off the line. When raising the floor, raise it carefully
+        # (each module's coverage is shown in the previous step's
+        # term-missing report).
         env:
           REDIS_HOST: localhost
           REDIS_PORT: '6379'
-        continue-on-error: true
         run: |
           coverage report --fail-under=60
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
