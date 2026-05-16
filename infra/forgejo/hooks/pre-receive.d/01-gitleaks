@@ -13,15 +13,44 @@
 # raw-file URL.
 #
 # Configuration:
-#   GITLEAKS_BIN  — path to gitleaks (default: /usr/local/bin/gitleaks)
-#   GITLEAKS_CFG  — path to repo-side .gitleaks.toml; if absent, uses defaults
-#   GITLEAKS_DISABLE — set to 1 to bypass for emergencies (logged at WARN)
+#   GITLEAKS_BIN     — path to gitleaks (default: /usr/local/bin/gitleaks)
+#   GITLEAKS_CFG     — path to repo-side .gitleaks.toml; if absent, uses defaults
+#   GITLEAKS_DISABLE — set to 1 to bypass for emergencies (logged + persisted)
+#   GITLEAKS_TIMEOUT — per-ref scan timeout in seconds (default 300)
+#   GITLEAKS_AUDIT_LOG — bypass-audit path (default: /var/log/forgejo/gitleaks-bypass.log)
 set -eu
 
 GITLEAKS_BIN="${GITLEAKS_BIN:-/usr/local/bin/gitleaks}"
+GITLEAKS_TIMEOUT="${GITLEAKS_TIMEOUT:-300}"
+GITLEAKS_AUDIT_LOG="${GITLEAKS_AUDIT_LOG:-/var/log/forgejo/gitleaks-bypass.log}"
+REPORT_DIR="${GITLEAKS_REPORT_DIR:-/var/lib/forgejo/gitleaks-reports}"
 
+# Tier-26 audit closure: bypass-audit persistence.
+# Pre-fix, `GITLEAKS_DISABLE=1` only emitted a WARN to stderr that
+# Forgejo's process log captured, but the line had no actor / no
+# timestamp / no ref / no rev context — making after-the-fact incident
+# review essentially impossible. Persist a structured single-line
+# record to an append-only audit log so an operator can reconstruct
+# WHEN, WHERE, and on which ref the bypass was used.
 if [ "${GITLEAKS_DISABLE:-0}" = "1" ]; then
-  echo "[WARN] gitleaks pre-receive bypassed via GITLEAKS_DISABLE=1" >&2
+  # Ensure the audit log dir exists; if we can't write the audit log,
+  # REFUSE to bypass — silent bypass + no audit is worse than blocking.
+  audit_dir="$(dirname "${GITLEAKS_AUDIT_LOG}")"
+  if ! mkdir -p "${audit_dir}" 2>/dev/null; then
+    echo "[FATAL] cannot create audit-log directory ${audit_dir}; refusing GITLEAKS_DISABLE bypass" >&2
+    exit 1
+  fi
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Buffer the (ts, pusher, refs) tuple for each ref being pushed.
+  while read -r oldrev newrev refname; do
+    printf '%s pusher=%s ref=%s old=%s new=%s reason=GITLEAKS_DISABLE=1\n' \
+      "${ts}" "${GITEA_PUSHER_NAME:-${USER:-unknown}}" "${refname}" "${oldrev}" "${newrev}" \
+      >> "${GITLEAKS_AUDIT_LOG}" || {
+        echo "[FATAL] cannot write to ${GITLEAKS_AUDIT_LOG}; refusing GITLEAKS_DISABLE bypass" >&2
+        exit 1
+      }
+  done
+  echo "[WARN] gitleaks pre-receive bypassed via GITLEAKS_DISABLE=1 (audit-logged to ${GITLEAKS_AUDIT_LOG})" >&2
   exit 0
 fi
 
@@ -30,6 +59,14 @@ if [ ! -x "${GITLEAKS_BIN}" ]; then
   echo "        install with: curl -sSL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz | tar -xzC /usr/local/bin gitleaks" >&2
   exit 1
 fi
+
+# Tier-26 audit closure: report directory with restricted permissions.
+# Pre-fix the per-ref JSON report landed at /tmp/gitleaks-<rev>.json.
+# Reports include filenames + line numbers + REDACTED secret contexts —
+# useful for an admin diagnosing a rejected push, but not for any user
+# with /tmp read access. Route to a dedicated 0700-perm directory.
+mkdir -p "${REPORT_DIR}"
+chmod 0700 "${REPORT_DIR}" 2>/dev/null || true
 
 # stdin is: <oldrev> <newrev> <refname> repeated per ref.
 fail=0
@@ -44,15 +81,26 @@ while read -r oldrev newrev refname; do
     range="${oldrev}..${newrev}"
   fi
 
-  if ! "${GITLEAKS_BIN}" detect \
+  # Tier-26 audit closure: cap per-ref scan time. A push of a repo with
+  # millions of commits in the diff range would otherwise scan forever
+  # and hold Forgejo's pre-receive worker hostage. `timeout 124` is
+  # SIGKILL after the soft-kill window; gitleaks treats SIGTERM as
+  # failure-to-complete which we then surface as rejection.
+  if ! timeout --kill-after=30s "${GITLEAKS_TIMEOUT}" \
+        "${GITLEAKS_BIN}" detect \
         --no-banner \
         --redact \
         --log-opts="${range}" \
         --source="${PWD}" \
         --report-format=json \
-        --report-path=/tmp/gitleaks-${newrev}.json; then
-    echo "[REJECT] gitleaks found secrets in ${refname} (${range})" >&2
-    echo "         report: /tmp/gitleaks-${newrev}.json" >&2
+        --report-path="${REPORT_DIR}/gitleaks-${newrev}.json"; then
+    rc=$?
+    if [ "${rc}" = "124" ]; then
+      echo "[REJECT] gitleaks timed out scanning ${refname} (${range}) after ${GITLEAKS_TIMEOUT}s" >&2
+    else
+      echo "[REJECT] gitleaks found secrets in ${refname} (${range})" >&2
+      echo "         report: ${REPORT_DIR}/gitleaks-${newrev}.json (server-side, admin only)" >&2
+    fi
     fail=1
   fi
 done
