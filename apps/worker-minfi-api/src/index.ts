@@ -22,6 +22,8 @@ import { sql } from 'drizzle-orm';
 import Fastify from 'fastify';
 import IORedis from 'ioredis';
 
+import { canonicalJson } from './canonical-json.js';
+
 const logger = createLogger({ service: 'worker-minfi-api' });
 
 function loadMinfiMtls(): {
@@ -157,14 +159,27 @@ async function main(): Promise<void> {
     if (minfiPublicKeyPem) {
       const sigB64 = req.headers['x-minfi-signature'];
       if (typeof sigB64 !== 'string' || sigB64.length === 0) {
+        logger.warn(
+          { remote: req.ip, path: req.url, reason: 'missing-signature' },
+          'minfi-api-auth-rejected',
+        );
         reply.code(401);
         return { error: 'missing-signature' };
       }
-      const rawBody = JSON.stringify(req.body);
+      // Tier-8 audit closure: verify over canonical JSON (sorted-keys).
+      // JSON.stringify(req.body) would produce a key-order-dependent
+      // byte sequence; MINFI's signer cannot match it without coincident
+      // key ordering. canonicalJson normalises both sides to the same
+      // RFC-8785-aligned form.
+      const canonicalBody = canonicalJson(req.body);
       const verified = createVerify('SHA256')
-        .update(rawBody)
+        .update(canonicalBody)
         .verify(expose(minfiPublicKeyPem), sigB64, 'base64');
       if (!verified) {
+        logger.warn(
+          { remote: req.ip, path: req.url, reason: 'invalid-signature' },
+          'minfi-api-auth-rejected',
+        );
         reply.code(401);
         return { error: 'invalid-signature' };
       }
@@ -243,8 +258,13 @@ async function main(): Promise<void> {
       valid_until: validUntil.toISOString(),
     };
 
-    // ECDSA-sign the canonical JSON
-    const canonical = JSON.stringify(responseUnsigned);
+    // ECDSA-sign the canonical JSON. Tier-8 audit closure: use
+    // canonicalJson (sorted-keys recursive) so MINFI's verifier sees
+    // a key-order-stable byte sequence. Pre-fix `JSON.stringify`
+    // depended on Node's iteration order; MINFI's canonical-JSON
+    // verifier would have rejected our signature for any non-trivially-
+    // shaped body.
+    const canonical = canonicalJson(responseUnsigned);
     const sig = createSign('SHA256').update(canonical).sign(expose(responsePrivKey), 'base64');
 
     const response: Schemas.MinfiScoreResponse = { ...responseUnsigned, signature: sig };

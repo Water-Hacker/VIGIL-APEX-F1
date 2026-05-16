@@ -248,6 +248,7 @@ class ConacSftpWorker extends WorkerBase<Payload> {
       // Poll for ACK (5-min interval, up to 7 days per SRD §25.4)
       const ackPath = `${ackDir}/${ref}.ack`;
       const start = Date.now();
+      let consecutiveErrors = 0;
       while (Date.now() - start < 7 * 86_400_000) {
         try {
           const exists = await sftp.exists(ackPath);
@@ -264,14 +265,50 @@ class ConacSftpWorker extends WorkerBase<Payload> {
               return { kind: 'ack' };
             }
           }
-        } catch {
-          // ignore transient errors, retry
+          // Reset error streak on a successful probe (file absent is success).
+          consecutiveErrors = 0;
+        } catch (e) {
+          // Tier-8 outbound-delivery audit: pre-fix this catch was empty,
+          // silently swallowing transient SFTP errors for up to 7 days.
+          // A broken connection (server-side idle disconnect, auth
+          // expiry, host down) would produce zero operator signal until
+          // the outer retry fired. Now we warn-log each error, count
+          // consecutive failures, and bail to retry early if the
+          // connection looks structurally broken (>= 12 consecutive
+          // errors = 1 hour of failed probes).
+          const err = e instanceof Error ? e : new Error(String(e));
+          consecutiveErrors++;
+          logger.warn(
+            {
+              ref,
+              ack_path: ackPath,
+              err_name: err.name,
+              err_message: err.message,
+              consecutive_errors: consecutiveErrors,
+            },
+            'conac-ack-probe-failed',
+          );
+          if (consecutiveErrors >= 12) {
+            logger.error(
+              { ref, ack_path: ackPath, consecutive_errors: consecutiveErrors },
+              'conac-ack-probe-persistently-failing; aborting poll, retrying via outer loop',
+            );
+            return {
+              kind: 'retry',
+              reason: 'ack-probe-persistently-failing',
+              delay_ms: 30 * 60_000,
+            };
+          }
         }
         await sleep(5 * 60_000);
       }
       return { kind: 'retry', reason: 'no-ack-7d', delay_ms: 24 * 3_600_000 };
     } catch (e) {
-      logger.error({ err: e }, 'sftp-failed');
+      // Tier-8 outbound-delivery audit: normalise non-Error throwables
+      // so the logger emits a meaningful err_name/err_message rather
+      // than `[object Object]` (matches the closure from Tier 1+3).
+      const err = e instanceof Error ? e : new Error(String(e));
+      logger.error({ err_name: err.name, err_message: err.message }, 'sftp-failed');
       return { kind: 'retry', reason: 'sftp-error', delay_ms: 60_000 };
     } finally {
       await sftp.end().catch(() => null);
