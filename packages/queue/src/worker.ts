@@ -348,7 +348,16 @@ export abstract class WorkerBase<TPayload> {
           { err_name: err.name, err_message: err.message, redisId },
           'envelope-parse-failed',
         );
-        await this.deadLetter(redisId, body, 'envelope-parse-failed');
+        // Tier-49 audit closure: use the ACK variant. Pre-fix this
+        // called `deadLetter` (publish-only, no XACK). The parse-failed
+        // message would stay in the consumer-group's pending list,
+        // get reclaimed via XAUTOCLAIM every idleReclaimMs (5 min
+        // default), fail to parse again, write ANOTHER DLQ row, and
+        // repeat indefinitely. The DLQ accumulated duplicate rows
+        // for every malformed envelope at one row per 5 minutes
+        // forever. Acking on the parse-fail path makes the DLQ row
+        // canonical and the pending-list cleanup terminal.
+        await this.deadLetterAndAck(redisId, body, 'envelope-parse-failed');
         return;
       }
 
@@ -450,26 +459,6 @@ export abstract class WorkerBase<TPayload> {
     } finally {
       this.inFlight--;
     }
-  }
-
-  private async deadLetter(redisId: string, body: string, reason: string): Promise<void> {
-    const { client, name, stream } = this.config;
-    const dlEnvelope = {
-      id: Ids.newEventId() as string,
-      dedup_key: `dlq:${name}:${redisId}`,
-      correlation_id: Ids.newCorrelationId() as string,
-      producer: name,
-      produced_at: this.clock.isoNow(),
-      schema_version: 1,
-      payload: {
-        original_stream: stream,
-        original_redis_id: redisId,
-        original_body: body,
-        reason,
-        worker: name,
-      },
-    };
-    await client.publish(STREAMS.DEAD_LETTER, dlEnvelope);
   }
 
   /**
