@@ -51,6 +51,12 @@ describe('check-migration-locks script (mode 2.5)', () => {
       tmpScript = join(tmpMigrationsDir, 'check.ts');
 
       // Inline a minimal version of the script that scans tmpMigrationsDir.
+      // The top-level await + for-loop must be wrapped in an async IIFE
+      // because tsx default-emits CJS where top-level await isn't legal;
+      // an earlier revision left them at top level and tsx's esbuild
+      // transform failed with "Top-level await is currently not supported
+      // with the cjs output format" → spawnSync exited with the transform
+      // error rather than the script's intended exit code.
       const inlineScript = `
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -60,21 +66,24 @@ const LARGE_TABLES = ['finding.signal', 'finding.finding'];
 const ACK = /^\\s*--\\s*@migration-locks-acknowledged:/m;
 const RE = /CREATE\\s+INDEX\\s+(?<conc>CONCURRENTLY\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?[\\w"]+\\s+ON\\s+(?<table>[\\w"]+(?:\\.[\\w"]+)?)/gi;
 
-const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
-let viols = 0;
-for (const f of files) {
-  const c = await readFile(join(MIGRATIONS_DIR, f), 'utf8');
-  const ack = c.match(ACK);
-  for (const m of c.matchAll(RE)) {
-    const t = (m.groups?.table ?? '').replace(/"/g, '');
-    if (!LARGE_TABLES.includes(t)) continue;
-    if (m.groups?.conc) continue;
-    if (ack) continue;
-    console.error(f + ': violation on ' + t);
-    viols++;
+async function main() {
+  const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+  let viols = 0;
+  for (const f of files) {
+    const c = await readFile(join(MIGRATIONS_DIR, f), 'utf8');
+    const ack = c.match(ACK);
+    for (const m of c.matchAll(RE)) {
+      const t = (m.groups?.table ?? '').replace(/"/g, '');
+      if (!LARGE_TABLES.includes(t)) continue;
+      if (m.groups?.conc) continue;
+      if (ack) continue;
+      console.error(f + ': violation on ' + t);
+      viols++;
+    }
   }
+  process.exit(viols === 0 ? 0 : 1);
 }
-process.exit(viols === 0 ? 0 : 1);
+main().catch((e) => { console.error(e); process.exit(2); });
 `;
       await writeFile(tmpScript, inlineScript);
     });

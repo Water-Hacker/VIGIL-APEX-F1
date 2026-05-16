@@ -59,6 +59,23 @@ groups:
         for: 5m
         labels: { severity: warning }
 
+      # Cat-6 follow-up — worker-inflight saturation alert.
+      # The `vigil_worker_inflight{worker}` gauge has existed since
+      # the worker-base introduction but no alert wired off it. A
+      # worker saturating its concurrency budget means the consumer
+      # group's backpressure is real and the queue is growing. The
+      # threshold of 8 maps to the default per-worker concurrency
+      # of 10 with 2-slot headroom; if a worker has its own
+      # explicit concurrency setting, the alert still fires when
+      # that worker's gauge sustains > 8 for 10 min.
+      - alert: WorkerInflightSaturated
+        expr: vigil_worker_inflight > 8
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: 'worker {{ $labels.worker }} sustained inflight saturation'
+          description: 'In-flight handler count > 8 for 10 min. Queue backpressure is real; either scale the worker or investigate per-message latency.'
+
       - alert: SatelliteWorkerStarved
         expr: rate(vigil_satellite_scenes_total[1h]) == 0 and vigil_worker_inflight{worker="worker-satellite"} == 0
         for: 6h

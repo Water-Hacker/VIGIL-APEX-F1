@@ -101,6 +101,31 @@ jobs:
       - name: enforce compose dependency-DAG acyclicity
         run: pnpm exec tsx scripts/check-compose-deps.ts
 
+  scripts-tests:
+    # Surface the 6 latent test files under scripts/__tests__/ that
+    # had no test-runner picking them up. Pre-Cat-6 they existed as
+    # documentation; this gate now runs them on every push + PR.
+    # Coverage: cert-expiry-check, ntp-check, check-api-error-leaks,
+    # check-compose-deps, check-migration-locks, check-rbac-coverage.
+    name: scripts-tests
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with: { version: 9.7.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version-file: '.nvmrc', cache: 'pnpm' }
+      - run: pnpm install --frozen-lockfile
+      - name: Run scripts/__tests__/ via root vitest config
+        # Invoked through @vigil/shared because pnpm `--filter` is the
+        # required entry point for vitest from any package; the
+        # `--config` flag points at the repo-root config which pins
+        # `root: __dirname` so the include glob resolves to repo-root
+        # `scripts/__tests__/`.
+        run: pnpm --filter @vigil/shared exec vitest run --config $(pwd)/vitest.scripts.config.ts
+
   helm-values-drift:
     # Hardening mode 9.1 — Tier 1 config-drift gate for the Helm chart
     # values files. Asserts that values-prod.yaml pins images, sets
