@@ -17,14 +17,29 @@ import { Context, Contract, Info, Returns, Transaction } from 'fabric-contract-a
  * read access to the application database.
  */
 export interface Commitment {
-  readonly seq: string;        // bigint serialised as string
-  readonly bodyHash: string;   // 64-char lowercase hex
+  readonly seq: string; // bigint serialised as string
+  readonly bodyHash: string; // 64-char lowercase hex
   readonly recordedAt: string; // RFC3339 from the chaincode txTimestamp
 }
 
 const KEY = (seq: string): string => `commit:${seq.padStart(20, '0')}`;
 const HEX64 = /^[0-9a-f]{64}$/;
-const SEQ_RE = /^[0-9]{1,20}$/;
+// Tier-18 audit closure: tighten seq regex to 1..19 digits. Postgres
+// `bigserial` is a signed 64-bit integer (max 9_223_372_036_854_775_807,
+// 19 digits). The previous `{1,20}` permitted callers to submit
+// 20-digit values (max 99_999_999_999_999_999_999) that the off-chain
+// `audit.actions` row could not represent without overflow — creating
+// a witness-without-source-of-truth class of divergence. Reject at the
+// chaincode boundary so the worker-fabric-bridge can never persist a
+// row whose seq is unrepresentable downstream.
+const SEQ_RE = /^[0-9]{1,19}$/;
+// Tier-18 audit closure: hard cap on ListCommitments range. The
+// off-chain audit-verifier already enforces CROSS_WITNESS_MAX_RANGE =
+// 500_000n at the call site (apps/audit-verifier/src/cross-witness.ts);
+// we mirror that cap here so a direct chaincode invocation that bypasses
+// the verifier (slipstream / interactive `peer chaincode query`) cannot
+// build a 50M-element JSON array in the chaincode container heap.
+const LIST_COMMITMENTS_MAX_RANGE = 500_000;
 
 @Info({ title: 'AuditWitnessContract', description: 'VIGIL APEX audit-chain witness' })
 export class AuditWitnessContract extends Contract {
@@ -50,9 +65,7 @@ export class AuditWitnessContract extends Contract {
       const prior = JSON.parse(existing.toString('utf8')) as Commitment;
       if (prior.bodyHash !== lower) {
         // Hard fail — divergence detected at chaincode level.
-        throw new Error(
-          `divergence at seq=${seq}: existing=${prior.bodyHash} new=${lower}`,
-        );
+        throw new Error(`divergence at seq=${seq}: existing=${prior.bodyHash} new=${lower}`);
       }
       return; // idempotent
     }
@@ -83,6 +96,12 @@ export class AuditWitnessContract extends Contract {
    * verifier. Fabric returns results in lexicographic key order; the
    * KEY() helper zero-pads seq to 20 chars so that order matches
    * numerical seq order.
+   *
+   * Tier-18 audit closure:
+   *   - Range capped at LIST_COMMITMENTS_MAX_RANGE (500k) so a direct
+   *     caller can't OOM the chaincode container.
+   *   - Iterator closed in a `finally` so a corrupt state row (JSON.parse
+   *     throw) does not leak the iterator handle on the way out.
    */
   @Transaction(false)
   @Returns('string')
@@ -90,14 +109,30 @@ export class AuditWitnessContract extends Contract {
     if (!SEQ_RE.test(from) || !SEQ_RE.test(to)) {
       throw new Error('from/to must be numeric');
     }
-    const iter = await ctx.stub.getStateByRange(KEY(from), KEY(to));
-    const out: Commitment[] = [];
-    let res = await iter.next();
-    while (!res.done) {
-      out.push(JSON.parse(res.value.value.toString('utf8')) as Commitment);
-      res = await iter.next();
+    const fromN = BigInt(from);
+    const toN = BigInt(to);
+    if (toN < fromN) {
+      throw new Error(`from/to range invalid: to (${to}) < from (${from})`);
     }
-    await iter.close();
-    return JSON.stringify(out);
+    const span = toN - fromN + 1n;
+    if (span > BigInt(LIST_COMMITMENTS_MAX_RANGE)) {
+      throw new Error(
+        `range ${span} exceeds cap ${LIST_COMMITMENTS_MAX_RANGE}; ` +
+          `iterate windows of <=${LIST_COMMITMENTS_MAX_RANGE} seqs`,
+      );
+    }
+
+    const iter = await ctx.stub.getStateByRange(KEY(from), KEY(to));
+    try {
+      const out: Commitment[] = [];
+      let res = await iter.next();
+      while (!res.done) {
+        out.push(JSON.parse(res.value.value.toString('utf8')) as Commitment);
+        res = await iter.next();
+      }
+      return JSON.stringify(out);
+    } finally {
+      await iter.close();
+    }
   }
 }
