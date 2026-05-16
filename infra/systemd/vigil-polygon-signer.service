@@ -31,5 +31,26 @@ RestrictSUIDSGID=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 
+# Tier-38 audit closure: additional defence-in-depth. The signer
+# only needs:
+#   - AF_UNIX  (its own socket + PKCS#11 helper IPC)
+#   - AF_INET / AF_INET6  (Polygon RPC + fallback nodes)
+#   - AF_NETLINK  (process / connection introspection libraries)
+# Everything else is blocked. MemoryDenyWriteExecute hardens against
+# JIT-based exploits in the V8 runtime that the signer wraps. The
+# kernel-protection directives match the vault-unseal unit so a
+# compromised signer cannot read kernel state to find the
+# vault-unseal process holding share material in memory.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=~@privileged @resources
+MemoryDenyWriteExecute=true
+
 [Install]
 WantedBy=multi-user.target
