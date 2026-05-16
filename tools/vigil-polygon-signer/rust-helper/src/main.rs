@@ -35,7 +35,13 @@ use cryptoki::{
     slot::Slot,
     types::AuthPin,
 };
-use std::{env, fs, io::Read, path::PathBuf, process::ExitCode};
+use std::{
+    env, fs,
+    io::Read,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 use crate::sign::{
     decode_der_or_compact, ec_point_to_eth_address, low_s_normalise, recover_v, Scalar32,
@@ -67,9 +73,39 @@ fn pin_path() -> PathBuf {
     ))
 }
 
+/// Pre-flight mode + ownership check on the PIN file. The PIN unlocks
+/// YubiKey-PIV signing for Polygon mainnet anchoring — a world-readable
+/// or group-readable PIN file means anyone on the host can extract the
+/// PIN and sign on the wallet. Refuse to read if the file mode permits
+/// group or world access.
+///
+/// Allowed modes: 0o400 (owner-read), 0o600 (owner-read+write). Anything
+/// else is a misconfiguration that an attacker — or a careless
+/// administrator — could have introduced; surface it loudly rather than
+/// proceed.
+fn check_pin_file_mode(p: &Path) -> Result<()> {
+    let meta = fs::metadata(p)
+        .with_context(|| format!("stat PIN file {}", p.display()))?;
+    if !meta.is_file() {
+        bail!("PIN file {} is not a regular file", p.display());
+    }
+    let mode = meta.mode() & 0o777;
+    if mode & 0o077 != 0 {
+        bail!(
+            "PIN file {} has unsafe mode {:o} (group/world bits set); \
+             require 0o400 or 0o600",
+            p.display(),
+            mode,
+        );
+    }
+    Ok(())
+}
+
 fn load_pin() -> Result<AuthPin> {
-    let s = fs::read_to_string(pin_path())
-        .with_context(|| format!("read PIN file {}", pin_path().display()))?;
+    let p = pin_path();
+    check_pin_file_mode(&p)?;
+    let s = fs::read_to_string(&p)
+        .with_context(|| format!("read PIN file {}", p.display()))?;
     Ok(AuthPin::new(s.trim().to_string()))
 }
 

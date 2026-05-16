@@ -24,11 +24,23 @@ THRESHOLD="${SHAMIR_THRESHOLD:-3}"
 
 mode="${1:---interactive}"
 
-if ! "${VAULT_BIN}" status -address="${VAULT_ADDR}" >/dev/null 2>&1; then
-  if [[ "$?" -ne 2 ]]; then
-    echo "[fatal] Vault is unreachable at ${VAULT_ADDR}" >&2
-    exit 3
-  fi
+# Probe Vault. vault status exits with documented codes:
+#   0 — unsealed and healthy
+#   1 — error (CLI / RPC / network failure)
+#   2 — sealed (still healthy at the API level)
+#
+# The PRIOR check used `if ! cmd; then [[ "$?" -ne 2 ]] ...` — but
+# inside the then-branch of `if ! cmd`, $? is ALWAYS 0 (the exit code
+# of the negation), not the command's. The check therefore always
+# triggered "Vault unreachable; exit 3" on a sealed Vault, so this
+# script never actually performed an unseal at boot.
+#
+# Capture the real rc explicitly with `|| rc=$?` and switch on it.
+rc=0
+"${VAULT_BIN}" status -address="${VAULT_ADDR}" >/dev/null 2>&1 || rc=$?
+if [[ ${rc} -ne 0 && ${rc} -ne 2 ]]; then
+  echo "[fatal] Vault is unreachable at ${VAULT_ADDR} (vault status rc=${rc})" >&2
+  exit 3
 fi
 
 # Already unsealed?
@@ -52,17 +64,26 @@ case "${mode}" in
       exit 4
     fi
     applied=0
+    skipped=0
     for f in "${SHARES_DIR}"/share-*.age; do
       [[ -f "${f}" ]] || continue
       # age-plugin-yubikey decrypts only if the matching YubiKey is
-      # plugged in. Other shares fail silently and we move on.
+      # plugged in. Other shares fail "expected"-ly and we move on —
+      # but log the filename so an operator debugging a boot-time
+      # auto-unseal failure can see exactly which YubiKeys were
+      # detected vs which were absent. Pre-fix, the silent move-on
+      # left "only N/M shares applied" with no signal as to which.
       if share="$(age --decrypt "${f}" 2>/dev/null)"; then
         unseal_with_share "${share}"
         applied=$((applied + 1))
         unset share
         if [[ ${applied} -ge ${THRESHOLD} ]]; then break; fi
+      else
+        skipped=$((skipped + 1))
+        echo "[skip] $(basename "${f}") — YubiKey for this share not present (or decrypt failed)" >&2
       fi
     done
+    echo "[info] auto-unseal: ${applied} share(s) applied, ${skipped} share(s) skipped" >&2
     if [[ ${applied} -lt ${THRESHOLD} ]]; then
       echo "[fatal] only ${applied}/${THRESHOLD} shares applied — Vault still sealed" >&2
       exit 5
