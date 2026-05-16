@@ -107,6 +107,48 @@ const SUDDEN_MASS_MIN_COUNT = 5;
 const BURST_DAYS = 90;
 const QUIET_DAYS = 365;
 
+/**
+ * Tier-43 audit closure — bounded work caps on the cycle DFS.
+ *
+ * `detectCycles` runs a DFS from every source node, with no upstream
+ * pruning beyond `path.includes(e.to)`. On a dense graph (the snapshot
+ * loader caps edges at 200_000), a high-fan-out subgraph trivially
+ * produces an exponential number of candidate paths to explore before
+ * the dedup-by-sorted-path-key kicks in (dedup happens at cycle-found
+ * time, not during expansion). A pathological state-payment hub —
+ * exactly the shape we WANT to flag — can pin the worker indefinitely.
+ *
+ * Caps:
+ *   - MAX_CYCLE_DFS_STEPS: a hard ceiling on the total recursive
+ *     calls per `detectCycles` invocation. 500k is generous for a
+ *     real-world Cameroon-scale payment graph (~50k nodes) but
+ *     deterministically refuses unbounded growth.
+ *   - MAX_CYCLE_CANDIDATES: a hard ceiling on the result count.
+ *     Once hit, DFS short-circuits and the operator sees a capped
+ *     result. Partial findings are preferable to a hung loop.
+ *
+ * On cap-hit we set `_dfs_capped` evidence on the LAST emitted
+ * candidate so curation can flag the snapshot for partitioned
+ * discovery. The cycle loop itself continues with whatever fits.
+ */
+const MAX_CYCLE_DFS_STEPS = 500_000;
+const MAX_CYCLE_CANDIDATES = 5_000;
+
+/**
+ * Tier-43 audit closure — global per-cycle candidate cap.
+ *
+ * `runDiscoveryCycle` upserts every returned candidate AND emits one
+ * HashChain row per candidate. A pathological detect pass (e.g., a
+ * graph where every node is stellar-degree, or thousands of small
+ * communities all matching the outflow rule) would flood both the
+ * `pattern_discovery.candidate` table and the audit chain in a
+ * single cycle — the audit chain is hash-chained so it is on the
+ * critical path of every emit. Cap at 10k per cycle; surplus is
+ * dropped with a structured log. The detectors themselves enforce
+ * smaller caps where the DFS is the bottleneck.
+ */
+export const MAX_CANDIDATES_PER_CYCLE = 10_000;
+
 export function detectStellarDegree(snap: GraphSnapshot): DiscoveryCandidate[] {
   const out: DiscoveryCandidate[] = [];
   for (const n of snap.nodes) {
@@ -247,10 +289,24 @@ export function detectBurstThenQuiet(
   return out;
 }
 
+/**
+ * Mutable budget tracked across all DFS calls in one `detectCycles`
+ * invocation. Both fields are decremented as work happens; either
+ * hitting zero short-circuits the recursion and the rest of the
+ * source-node iteration.
+ */
+interface DfsBudget {
+  stepsRemaining: number;
+  candidatesRemaining: number;
+  /** Set true the first time either cap fired during this run. */
+  capped: boolean;
+}
+
 export function detectCycles(snap: GraphSnapshot, maxLength = 6): DiscoveryCandidate[] {
-  // Simple cycle detection via DFS — bounded by maxLength.
-  // Production version would offload to Neo4j Cypher with a length
-  // bound; this is the pure-TS reference used in tests.
+  // Simple cycle detection via DFS — bounded by maxLength AND by the
+  // tier-43 global step/result budget (see `DfsBudget`). Production
+  // version would offload to Neo4j Cypher with a length bound; this
+  // is the pure-TS reference used in tests.
   const out: DiscoveryCandidate[] = [];
   const adj = new Map<string, { to: string; amount: number; state: boolean }[]>();
   for (const e of snap.edges) {
@@ -258,8 +314,29 @@ export function detectCycles(snap: GraphSnapshot, maxLength = 6): DiscoveryCandi
     adj.get(e.from_id)!.push({ to: e.to_id, amount: e.amount_xaf, state: e.is_state_origin });
   }
   const seenCycleKeys = new Set<string>();
+  const budget: DfsBudget = {
+    stepsRemaining: MAX_CYCLE_DFS_STEPS,
+    candidatesRemaining: MAX_CYCLE_CANDIDATES,
+    capped: false,
+  };
   for (const startId of adj.keys()) {
-    dfsCycles(startId, startId, [startId], 0, maxLength, adj, seenCycleKeys, out);
+    if (budget.stepsRemaining <= 0 || budget.candidatesRemaining <= 0) break;
+    dfsCycles(startId, startId, [startId], 0, maxLength, adj, seenCycleKeys, out, budget);
+  }
+  if (budget.capped && out.length > 0) {
+    // Mark the last-emitted candidate with the cap-hit flag so the
+    // curator dashboard can route the snapshot to partitioned
+    // discovery. Subsequent fields are immutable per the readonly
+    // DiscoveryCandidate type, so we replace the last entry.
+    const last = out[out.length - 1]!;
+    out[out.length - 1] = {
+      ...last,
+      evidence: {
+        ...last.evidence,
+        _dfs_capped: true,
+        _dfs_cap_reason: budget.stepsRemaining <= 0 ? 'steps' : 'candidates',
+      },
+    };
   }
   return out;
 }
@@ -273,10 +350,26 @@ function dfsCycles(
   adj: Map<string, { to: string; amount: number; state: boolean }[]>,
   seen: Set<string>,
   out: DiscoveryCandidate[],
+  budget: DfsBudget,
 ): void {
+  // Budget gates — fail-soft. Hitting either cap stops THIS branch
+  // and lets the outer source-iter loop bail on its next check.
+  budget.stepsRemaining -= 1;
+  if (budget.stepsRemaining <= 0) {
+    budget.capped = true;
+    return;
+  }
+  if (budget.candidatesRemaining <= 0) {
+    budget.capped = true;
+    return;
+  }
   if (depth >= maxLength) return;
   const neighbors = adj.get(current) ?? [];
   for (const e of neighbors) {
+    if (budget.stepsRemaining <= 0 || budget.candidatesRemaining <= 0) {
+      budget.capped = true;
+      return;
+    }
     if (e.to === start && path.length >= 3) {
       // Cycle found.
       const cyclePath = [...path, start];
@@ -296,8 +389,9 @@ function dfsCycles(
         entity_ids_involved: cyclePath.slice(0, -1),
         rationale: `Cycle of length ${cyclePath.length - 1}: ${cyclePath.join(' → ')}.`,
       });
+      budget.candidatesRemaining -= 1;
     } else if (!path.includes(e.to)) {
-      dfsCycles(start, e.to, [...path, e.to], depth + 1, maxLength, adj, seen, out);
+      dfsCycles(start, e.to, [...path, e.to], depth + 1, maxLength, adj, seen, out, budget);
     }
   }
 }

@@ -26,9 +26,12 @@ const logger = createLogger({ service: 'worker-pattern-discovery' });
  *
  * Daily loop:
  *   1. Load a GraphSnapshot from Neo4j covering the last `windowDays`.
- *   2. Run all 6 deterministic anomaly detectors over the snapshot
+ *   2. Run the deterministic anomaly detectors over the snapshot
  *      (stellar_degree, tight_community_outflow, cycle_3_to_6,
- *      sudden_mass_creation, burst_then_quiet, triangle_bridge).
+ *      sudden_mass_creation, burst_then_quiet). `triangle_bridge`
+ *      is reserved in the AnomalyKind enum for a future detector
+ *      that requires the graph-metrics worker's centrality output;
+ *      see `graph-anomalies.ts` for the active detector set.
  *   3. Upsert every candidate into `pattern_discovery.candidate`
  *      (idempotent on a content-derived dedup_key).
  *   4. Emit one `audit.pattern_anomaly_detected` chain row per detected
