@@ -23,7 +23,10 @@ interface Rule {
 
 export interface ParsedRobots {
   readonly fetchedAt: number; // epoch ms
-  readonly groups: ReadonlyArray<{ readonly agents: readonly string[]; readonly rules: readonly Rule[] }>;
+  readonly groups: ReadonlyArray<{
+    readonly agents: readonly string[];
+    readonly rules: readonly Rule[];
+  }>;
 }
 
 export function parseRobots(text: string): ParsedRobots {
@@ -63,7 +66,7 @@ export function robotsAllows(parsed: ParsedRobots, path: string, ua: string): bo
   // pattern wins; if equal length, allow > disallow.
   const candidates = parsed.groups.filter((g) => matchesAgent(g, ua));
   if (candidates.length === 0) return true;
-  const group = candidates.reduce<typeof candidates[number]>((best, g) => {
+  const group = candidates.reduce<(typeof candidates)[number]>((best, g) => {
     const bestSpec = Math.max(...best.agents.map((a) => (a === '*' ? 0 : a.length)));
     const gSpec = Math.max(...g.agents.map((a) => (a === '*' ? 0 : a.length)));
     return gSpec > bestSpec ? g : best;
@@ -75,7 +78,10 @@ export function robotsAllows(parsed: ParsedRobots, path: string, ua: string): bo
     if (r.path === '') continue;
     if (path.startsWith(r.path)) {
       const len = r.path.length;
-      if (len > bestLen || (len === bestLen && bestRule?.type === 'disallow' && r.type === 'allow')) {
+      if (
+        len > bestLen ||
+        (len === bestLen && bestRule?.type === 'disallow' && r.type === 'allow')
+      ) {
         bestRule = r;
         bestLen = len;
       }
@@ -88,7 +94,9 @@ export function robotsAllows(parsed: ParsedRobots, path: string, ua: string): bo
 export class RobotsChecker {
   constructor(
     private readonly redis: Redis,
-    private readonly fetchFn: (url: string) => Promise<{ status: number; body: string }> = defaultFetch,
+    private readonly fetchFn: (
+      url: string,
+    ) => Promise<{ status: number; body: string }> = defaultFetch,
     private readonly cacheTtlSec = 24 * 3600,
   ) {}
 
@@ -130,10 +138,51 @@ export class RobotsChecker {
   }
 }
 
+// Tier-37 audit closure: cap robots.txt body at 256 KiB. A malicious or
+// misbehaving source could serve a multi-GB robots.txt and OOM the
+// runner; 256 KiB is comfortably above every real robots.txt we've
+// observed (google.com's is ~9 KiB).
+const ROBOTS_MAX_BODY_BYTES = 256 * 1024;
+
 async function defaultFetch(url: string): Promise<{ status: number; body: string }> {
+  // Tier-37 audit closure: the robots URL is derived from a source URL
+  // declared in the registry. Most sources are reachable public hosts,
+  // but a malicious registry edit could point at an internal IP /
+  // metadata endpoint. Refuse non-public hosts the same way
+  // worker-document does (T14).
+  //
+  // We import lazily to keep packages/adapters' static import graph
+  // light; the SSRF guard is in @vigil/observability.
+  const { isPublicHttpUrl } = await import('@vigil/observability');
+  const verdict = isPublicHttpUrl(url);
+  if (!verdict.ok) {
+    // Treat as "no robots fetched" — caller's fail-open path applies.
+    return { status: 0, body: '' };
+  }
   const res = await fetch(url, {
     headers: { 'user-agent': 'VIGIL-APEX/robots-check' },
     signal: AbortSignal.timeout(10_000),
   });
-  return { status: res.status, body: await res.text() };
+  // Read body chunk-by-chunk so we can abort on a hostile multi-GB
+  // response without first allocating the whole thing.
+  const reader = res.body?.getReader();
+  if (!reader) return { status: res.status, body: '' };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.length;
+      if (total > ROBOTS_MAX_BODY_BYTES) {
+        // Treat as no robots; the source's compliance commitment is
+        // not negotiable but a hostile body cannot OOM us.
+        await reader.cancel().catch(() => null);
+        return { status: 0, body: '' };
+      }
+      chunks.push(value);
+    }
+  }
+  const body = new TextDecoder('utf-8').decode(Buffer.concat(chunks.map((c) => Buffer.from(c))));
+  return { status: res.status, body };
 }
