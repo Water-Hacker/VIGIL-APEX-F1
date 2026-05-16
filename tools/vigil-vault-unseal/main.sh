@@ -54,7 +54,12 @@ fi
 unseal_with_share() {
   local share="$1"
   echo "[unseal] applying share"
-  "${VAULT_BIN}" operator unseal -address="${VAULT_ADDR}" "${share}" >/dev/null
+  # Tier-33 audit closure: pipe the share via stdin instead of argv.
+  # Pre-fix the share appeared in /proc/<pid>/cmdline for the `vault`
+  # child process — readable by any sidecar / supply-chain compromise
+  # with read access to /proc. Same attack as T22's CF token leak.
+  # `vault operator unseal -` reads the share from stdin instead.
+  printf '%s' "${share}" | "${VAULT_BIN}" operator unseal -address="${VAULT_ADDR}" - >/dev/null
 }
 
 case "${mode}" in

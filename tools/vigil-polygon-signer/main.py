@@ -255,9 +255,29 @@ def _handle(line: bytes) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+# Tier-33 audit closure: hard cap on per-line request size. The pre-fix
+# handler did `for raw in self.rfile` which reads until newline with no
+# byte cap. A misbehaving client could send a multi-MB single line and
+# exhaust the signer's memory. 64 KiB is comfortably larger than any
+# realistic sign_and_send request body (the largest data payload we
+# accept is _MAX_DATA_BYTES = 128 KiB, but it's a HEX-encoded value
+# whose decoded size is bounded by the validator and the surrounding
+# JSON envelope adds < 200 bytes).
+_MAX_REQUEST_LINE_BYTES = 64 * 1024 + 1024
+
+
 class Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:  # noqa: D401
-        for raw in self.rfile:
+        while True:
+            raw = self.rfile.readline(_MAX_REQUEST_LINE_BYTES + 1)
+            if not raw:
+                return
+            if len(raw) > _MAX_REQUEST_LINE_BYTES:
+                resp = {"ok": False, "error": f"request line exceeds {_MAX_REQUEST_LINE_BYTES}-byte cap"}
+                self.wfile.write((json.dumps(resp) + "\n").encode("utf-8"))
+                self.wfile.flush()
+                # Hostile clients can't recover from this; close the connection.
+                return
             resp = _handle(raw)
             self.wfile.write((json.dumps(resp) + "\n").encode("utf-8"))
             self.wfile.flush()
@@ -268,11 +288,28 @@ class Server(socketserver.UnixStreamServer):
 
 
 def main() -> None:
-    SOCKET_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Tier-33 audit closure: create the socket parent dir 0o710 so a
+    # transient TOCTOU window between `bind` (creates the socket with
+    # umask perms, often 0o644) and our `chmod 0o660` cannot be
+    # exploited by any user with read access to the parent. The
+    # parent's traversal bit lets the vigil group reach the socket
+    # (the chmod 0o660 still controls access at the socket node level).
+    SOCKET_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o710)
+    try:
+        os.chmod(SOCKET_PATH.parent, 0o710)
+    except OSError as exc:
+        log.warning("could not tighten parent dir perms on %s: %s", SOCKET_PATH.parent, exc)
     if SOCKET_PATH.exists():
         SOCKET_PATH.unlink()
-    log.info("listening on %s (helper at %s)", SOCKET_PATH, HELPER_BIN)
-    server = Server(str(SOCKET_PATH), Handler)
+    # Tier-33 audit closure: set a restrictive umask BEFORE bind so the
+    # socket node is created with safe perms from the outset. The
+    # chmod() below remains as belt-and-braces.
+    prior_umask = os.umask(0o117)  # rw-rw---- after mask
+    try:
+        log.info("listening on %s (helper at %s)", SOCKET_PATH, HELPER_BIN)
+        server = Server(str(SOCKET_PATH), Handler)
+    finally:
+        os.umask(prior_umask)
     os.chmod(SOCKET_PATH, 0o660)
     socket.gethostname()  # touch — sanity check before .serve_forever
     server.serve_forever()
