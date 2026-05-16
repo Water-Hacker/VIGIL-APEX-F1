@@ -91,6 +91,26 @@ export async function verifyEnvelopeWithPolicy(
     };
   }
 
+  // Tier-42 audit closure: explicit shape check on observedAtMs.
+  // Pre-fix, a non-finite value (NaN, Infinity) skipped both window
+  // comparisons (NaN > x and NaN < x are both false in JS) and
+  // proceeded to signature verification. The canonical-bytes encoder
+  // would then `BigInt(NaN)` and the verify path would fall through
+  // to SIGNATURE_INVALID — but the operator would see an opaque
+  // sig-failure for a structural-input problem, masking the real
+  // root cause. Reject with REPLAY_WINDOW since shape-of-timestamp
+  // is morally a replay-window concern.
+  if (
+    !Number.isFinite(env.observedAtMs) ||
+    !Number.isInteger(env.observedAtMs) ||
+    env.observedAtMs < 0
+  ) {
+    return {
+      ok: false,
+      code: 'REPLAY_WINDOW',
+      detail: `observed_at must be a non-negative integer epoch-ms; got ${env.observedAtMs}`,
+    };
+  }
   const now = (policy.nowMs ?? Date.now)();
   const forward = policy.forwardWindowMs ?? DEFAULT_FORWARD_WINDOW_MS;
   const backward = policy.backwardWindowMs ?? DEFAULT_BACKWARD_WINDOW_MS;
@@ -111,7 +131,11 @@ export async function verifyEnvelopeWithPolicy(
 
   const pem = await resolver.resolve(env.signingKeyId);
   if (!pem) {
-    return { ok: false, code: 'KEY_UNKNOWN', detail: `signing_key_id ${env.signingKeyId} not registered` };
+    return {
+      ok: false,
+      code: 'KEY_UNKNOWN',
+      detail: `signing_key_id ${env.signingKeyId} not registered`,
+    };
   }
 
   if (!verifyEnvelope(env, env.signature, pem)) {
