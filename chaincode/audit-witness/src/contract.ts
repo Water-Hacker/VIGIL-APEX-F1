@@ -92,7 +92,7 @@ export class AuditWitnessContract extends Contract {
   }
 
   /**
-   * Sweep — paginated read of [from, to] for the cross-witness
+   * Sweep — paginated read of [from, to] INCLUSIVE for the cross-witness
    * verifier. Fabric returns results in lexicographic key order; the
    * KEY() helper zero-pads seq to 20 chars so that order matches
    * numerical seq order.
@@ -102,6 +102,20 @@ export class AuditWitnessContract extends Contract {
    *     caller can't OOM the chaincode container.
    *   - Iterator closed in a `finally` so a corrupt state row (JSON.parse
    *     throw) does not leak the iterator handle on the way out.
+   *
+   * Tier-47 audit closure (inclusive-end bug):
+   *   Fabric's `getStateByRange(startKey, endKey)` is INCLUSIVE-EXCLUSIVE
+   *   (endKey is EXCLUSIVE — see Fabric docs). Pre-fix we passed
+   *   `KEY(to)` as endKey, so `ListCommitments("100","200")` returned
+   *   100..199 — silently dropping the last commitment. The off-chain
+   *   audit-verifier (apps/audit-verifier/src/cross-witness.ts) walks
+   *   the SAME range in Postgres expecting inclusive `to`. The missing
+   *   last commitment would surface as a false-positive divergence on
+   *   the on-chain side, triggering CT-03 alerts on otherwise-healthy
+   *   audit chains. Fix: pass KEY(toN + 1n) as the exclusive endKey
+   *   so the inclusive range maps correctly. Post-iterator filter
+   *   (seq <= to) is belt-and-braces — protects against any future
+   *   Fabric API behaviour change.
    */
   @Transaction(false)
   @Returns('string')
@@ -122,12 +136,20 @@ export class AuditWitnessContract extends Contract {
       );
     }
 
-    const iter = await ctx.stub.getStateByRange(KEY(from), KEY(to));
+    // Exclusive endKey for an INCLUSIVE [from, to] range.
+    const endKey = KEY((toN + 1n).toString());
+    const iter = await ctx.stub.getStateByRange(KEY(from), endKey);
     try {
       const out: Commitment[] = [];
       let res = await iter.next();
       while (!res.done) {
-        out.push(JSON.parse(res.value.value.toString('utf8')) as Commitment);
+        const c = JSON.parse(res.value.value.toString('utf8')) as Commitment;
+        // Belt-and-braces: keep the explicit upper-bound filter even
+        // though endKey is now correct. Cheap, and protects against
+        // a future Fabric API surprise.
+        if (BigInt(c.seq) <= toN) {
+          out.push(c);
+        }
         res = await iter.next();
       }
       return JSON.stringify(out);
