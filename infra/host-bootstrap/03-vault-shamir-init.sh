@@ -11,11 +11,32 @@
 
 set -euo pipefail
 
-VAULT_ADDR="${VAULT_ADDR:-http://vigil-vault:8200}"
+# Tier-22 audit closure: default to HTTPS. 05-secret-materialisation.sh
+# already uses `https://127.0.0.1:8200` — keeping the two scripts on
+# different schemes invites operator confusion where an HTTPS-only
+# Vault gets initialised over an HTTP listener that doesn't exist.
+# The development override still works via the env var.
+VAULT_ADDR="${VAULT_ADDR:-https://vigil-vault:8200}"
 SHARE_DIR="${SHARE_DIR:-/run/vigil/shamir}"
 
 mkdir -p "$SHARE_DIR"
 chmod 0700 "$SHARE_DIR"
+
+# Tier-22 audit closure: install a trap that wipes the share dir on
+# ANY non-success exit. Pre-fix, if `vault operator init` succeeded
+# but the script aborted before the architect-side encryption
+# ceremony, plaintext unseal shares + root token sat in tmpfs at
+# /run/vigil/shamir until manual cleanup. tmpfs survives until reboot.
+# The wipe uses `shred -u` so a recovered tmpfs page cannot reveal
+# share material.
+cleanup_on_error() {
+  local rc=$?
+  if [[ $rc -ne 0 && -d "${SHARE_DIR}" ]]; then
+    echo "[fatal] script aborted (rc=$rc) — shredding ${SHARE_DIR}/* to prevent share leakage" >&2
+    find "${SHARE_DIR}" -maxdepth 1 -type f -exec shred -u {} +
+  fi
+}
+trap cleanup_on_error EXIT
 
 echo "Initialising Vault: 5 shares, threshold 3..."
 INIT_OUT=$(vault operator init -key-shares=5 -key-threshold=3 -format=json)
