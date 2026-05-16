@@ -94,7 +94,10 @@ export class QueueClient {
       });
     }
 
-    this.redis.on('error', (e) => this.logger.error({ err: e }, 'redis-error'));
+    this.redis.on('error', (e) => {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error({ err_name: err.name, err_message: err.message }, 'redis-error');
+    });
     this.redis.on('close', () => this.logger.warn('redis-close'));
     this.redis.on('reconnecting', () => this.logger.warn('redis-reconnecting'));
   }
@@ -176,7 +179,11 @@ export function startRedisStreamScraper(
       try {
         await client.sampleStreamLength(s);
       } catch (err) {
-        logger.warn({ err, stream: s }, 'redis-stream-scrape-failed');
+        const e = err instanceof Error ? err : new Error(String(err));
+        logger.warn(
+          { err_name: e.name, err_message: e.message, stream: s },
+          'redis-stream-scrape-failed',
+        );
       }
     }
   };

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -134,7 +135,13 @@ export abstract class WorkerBase<TPayload> {
   constructor(cfg: WorkerBaseConfig<TPayload>) {
     this.logger = cfg.logger ?? createLogger({ service: cfg.name });
     this.clock = cfg.clock ?? Time.systemClock;
-    this.instanceId = `${hostname()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    // Tier-21 audit closure: HARDEN-#7 forbids Math.random for any
+    // operation that could be measured. The consumer-group name is
+    // derived from this id — collision would corrupt pending-message
+    // accounting in XAUTOCLAIM (two workers thinking they own the
+    // same redisId). Switch to crypto.randomBytes for collision
+    // resistance.
+    this.instanceId = `${hostname()}-${process.pid}-${randomBytes(3).toString('hex')}`;
     this.config = {
       ...cfg,
       concurrency: cfg.concurrency ?? 8,
@@ -336,7 +343,11 @@ export abstract class WorkerBase<TPayload> {
         };
       } catch (e) {
         errorsTotal.labels({ service: name, code: 'PARSE', severity: 'error' }).inc();
-        this.logger.error({ err: e, redisId }, 'envelope-parse-failed');
+        const err = e instanceof Error ? e : new Error(String(e));
+        this.logger.error(
+          { err_name: err.name, err_message: err.message, redisId },
+          'envelope-parse-failed',
+        );
         await this.deadLetter(redisId, body, 'envelope-parse-failed');
         return;
       }
@@ -404,12 +415,20 @@ export abstract class WorkerBase<TPayload> {
             }
           }
           this.logger.warn({ redisId, reason: outcome.reason }, 'handler-retry');
+          // Tier-21 audit closure: release the dedup lock BEFORE the
+          // optional retry-delay sleep. Pre-fix order was sleep → del,
+          // so a worker crash during the sleep window left the dedup
+          // key live for 24 h while the message remained un-ACKed in
+          // the consumer-group's pending list. On the next pending
+          // reclaim, the dedup-and-ack Lua saw the existing key and
+          // XACKed the message — silently dropping the intended retry.
+          // del-before-sleep means a crash during sleep is recoverable
+          // (next pending reclaim retries cleanly).
+          await client.redis.del(dedupKey);
           // Don't ACK — Redis will redeliver after pending-idle time
           if (outcome.delay_ms !== undefined && outcome.delay_ms > 0) {
             await sleep(outcome.delay_ms);
           }
-          // Release dedup lock so the retry can re-enter
-          await client.redis.del(dedupKey);
           this.recordOutcome(false);
           break;
         case 'dead-letter':
@@ -421,7 +440,10 @@ export abstract class WorkerBase<TPayload> {
     } catch (e) {
       const ve = Errors.asVigilError(e);
       errorsTotal.labels({ service: name, code: ve.code, severity: ve.severity }).inc();
-      this.logger.error({ err: ve, redisId }, 'handler-threw');
+      this.logger.error(
+        { err_name: ve.name, err_message: ve.message, err_code: ve.code, redisId },
+        'handler-threw',
+      );
       // Generic exception — push to DLQ; ACK so it doesn't loop forever.
       await this.deadLetterAndAck(redisId, body, ve.message);
       this.recordOutcome(false);
