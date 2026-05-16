@@ -71,7 +71,15 @@ export async function handleProposalOpened(
   proposer: string,
   uri: string,
 ): Promise<void> {
-  deps.logger.info({ idx, proposer, uri }, 'proposal-opened');
+  // Tier-45 audit closure: lowercase the address before recording so
+  // the same wallet has a SINGLE canonical actor representation across
+  // every audit-chain row. Pre-fix, handleVoteCast already lowercased
+  // `voter` for the DB projection (vote.voter_address) but the actor
+  // field in BOTH handlers was kept mixed-case — so searching the
+  // audit chain for an operator's history would split rows between
+  // checksummed and lowercase representations of the same identity.
+  const proposerLc = proposer.toLowerCase();
+  deps.logger.info({ idx, proposer: proposerLc, uri }, 'proposal-opened');
   const openedAt = nowOf(deps);
   await deps.repo.insertProposal({
     id: Ids.newEventId() as string,
@@ -91,7 +99,7 @@ export async function handleProposalOpened(
   });
   await deps.chain.append({
     action: 'governance.proposal_opened',
-    actor: proposer,
+    actor: proposerLc,
     subject_kind: 'proposal',
     subject_id: String(idx),
     payload: { findingHash, uri },
@@ -141,10 +149,16 @@ export async function handleVoteCast(
   }
   const choiceName = CHOICE_MAP[choice]!;
   const pillarName = PILLAR_MAP[pillar]!;
+  // Tier-45 audit closure: single canonical lowercase form for the
+  // address — matches what's persisted to vote.voter_address (already
+  // lowercased pre-fix). The audit-chain actor field was kept mixed-
+  // case, so a join from audit-chain history to vote table required
+  // case-insensitive matching. Normalise at the boundary.
+  const voterLc = voter.toLowerCase();
   await deps.repo.insertVote({
     id: Ids.newEventId() as string,
     proposal_id: String(idx), // placeholder; real lookup uses on_chain_index
-    voter_address: voter.toLowerCase(),
+    voter_address: voterLc,
     voter_pillar: pillarName,
     choice: choiceName,
     cast_at: nowOf(deps),
@@ -153,7 +167,7 @@ export async function handleVoteCast(
   });
   await deps.chain.append({
     action: 'governance.vote_cast',
-    actor: voter,
+    actor: voterLc,
     subject_kind: 'proposal',
     subject_id: String(idx),
     payload: { choice: choiceName, pillar: pillarName, recuseReason },
