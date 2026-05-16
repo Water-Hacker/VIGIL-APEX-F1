@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto';
 import { extractDeterministically, type DeterministicInput } from './deterministic.js';
 
 import type { LlmExtractor, LlmExtractionResult } from './llm-extractor.js';
+import type { Logger } from '@vigil/observability';
 import type {
   ProcurementFields,
   ProcurementExtractionProvenance,
@@ -38,6 +39,15 @@ export interface ExtractorConfig {
   readonly llm: LlmExtractor | null;
   /** When unset, no LLM record id is captured (used in tests). */
   readonly now: () => Date;
+  /**
+   * Optional logger — when provided, LLM-fallback failures are logged as
+   * structured `err_name`/`err_message` lines instead of being silently
+   * swallowed. Tier-16 audit closure: graceful degradation is good policy
+   * but observable degradation is better — operators couldn't previously
+   * tell whether the LLM tier was healthy without inspecting the
+   * call-record table directly.
+   */
+  readonly logger?: Logger;
 }
 
 export interface ExtractInput extends DeterministicInput {
@@ -91,10 +101,24 @@ export class ProcurementExtractor {
           rawText: inputJoin,
           requestedFields: det.unresolved,
         });
-      } catch {
+      } catch (e) {
         // LLM failure is non-fatal — we already have the deterministic
         // result. Per AI-SAFETY-DOCTRINE §B.10, LLM-as-fallback means
         // the system degrades gracefully when the model is unavailable.
+        // Tier-16 audit closure: log the failure so operators can see
+        // LLM-tier health from logs instead of having to grep the
+        // call-record table for missing entries.
+        const err = e instanceof Error ? e : new Error(String(e));
+        this.cfg.logger?.warn(
+          {
+            finding_id: input.findingId,
+            assessment_id: input.assessmentId,
+            unresolved_count: det.unresolved.length,
+            err_name: err.name,
+            err_message: err.message,
+          },
+          'extractor-llm-fallback-failed',
+        );
         llmResult = null;
       }
     }

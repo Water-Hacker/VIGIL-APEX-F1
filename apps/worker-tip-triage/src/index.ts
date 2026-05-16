@@ -126,6 +126,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });
