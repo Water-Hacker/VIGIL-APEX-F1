@@ -36,14 +36,42 @@ export class GovernanceRepo {
   }
 
   async insertVote(row: typeof govSchema.vote.$inferInsert): Promise<void> {
-    await this.db.insert(govSchema.vote).values(row);
-    // Increment counters on the proposal
-    const choiceCol = `${row.choice.toLowerCase()}_votes` as const;
-    await this.db.execute(
-      sql`UPDATE governance.proposal
-              SET ${sql.raw(choiceCol)} = ${sql.raw(choiceCol)} + 1
-            WHERE id = ${row.proposal_id}`,
-    );
+    // Tier-27 audit closure: previous insert + UPDATE were two separate
+    // statements outside a transaction. INSERT succeeding then UPDATE
+    // failing left a vote row with the counter un-incremented (the
+    // vote row referencing proposal_id existed, but the proposal's
+    // running tally was stale). Wrap both in a tx so the pair is
+    // atomic.
+    await this.db.transaction(async (tx) => {
+      await tx.insert(govSchema.vote).values(row);
+
+      // Tier-27 audit closure: previous code built the column name by
+      // string-templating `${row.choice.toLowerCase()}_votes` and
+      // passing it through `sql.raw` — drizzle's "interpolate
+      // literally, never quote" hand-grenade. With the type system
+      // bypassed (`as never` cast at a caller, schema drift, or new
+      // vote-choice added without updating this site) it was a clean
+      // SQL-injection surface. Replaced with an enum→drizzle-column
+      // map so the column reference is statically typed against the
+      // schema and `sql.raw` is no longer reachable from this path.
+      const choice = String(row.choice).toLowerCase();
+      const colByChoice = {
+        yes: govSchema.proposal.yes_votes,
+        no: govSchema.proposal.no_votes,
+        abstain: govSchema.proposal.abstain_votes,
+        recuse: govSchema.proposal.recuse_votes,
+      } as const;
+      const col = (colByChoice as Record<string, (typeof colByChoice)[keyof typeof colByChoice]>)[
+        choice
+      ];
+      if (!col) {
+        throw new Error(`unknown vote choice: ${JSON.stringify(row.choice)}`);
+      }
+      await tx
+        .update(govSchema.proposal)
+        .set({ [col.name]: sql`${col} + 1` })
+        .where(eq(govSchema.proposal.id, row.proposal_id));
+    });
   }
 
   async openProposals(limit = 50) {
@@ -103,7 +131,9 @@ export class GovernanceRepo {
     return rows[0] ?? null;
   }
 
-  async insertWebauthnChallenge(row: typeof govSchema.webauthnChallenge.$inferInsert): Promise<void> {
+  async insertWebauthnChallenge(
+    row: typeof govSchema.webauthnChallenge.$inferInsert,
+  ): Promise<void> {
     await this.db.insert(govSchema.webauthnChallenge).values(row);
   }
 
