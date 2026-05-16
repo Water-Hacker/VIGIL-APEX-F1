@@ -11,7 +11,7 @@
 #   APP_MODULE — Python module to launch, e.g. vigil_satellite.main
 #   EXTRA_APT  — space-separated apt packages required at runtime (e.g. tesseract-ocr)
 
-ARG PYTHON_VERSION=3.12.13
+ARG PYTHON_VERSION=3.12
 
 # ============================================================================
 # Stage 1 — base
@@ -26,6 +26,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN set -eux && \
     apt-get update && \
+    # Trivy CVE main-blocker (2026-05-16): the upstream
+    # python:3.12.13-slim-bookworm image was built before the Debian
+    # security archive picked up fixes for CVE-2026-0861 (glibc heap
+    # corruption), CVE-2026-4878 (libcap TOCTOU privilege escalation),
+    # and CVE-2026-29111 (systemd RCE via spurious IPC). `apt-get
+    # upgrade` here pulls the patched libc-bin, libc6, libcap2,
+    # libsystemd0, libudev1 layers on top of the base image so the
+    # downstream Trivy gate passes without waiting for an upstream
+    # python image rebuild.
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
