@@ -134,7 +134,11 @@ export async function handleTip(
   try {
     reconstructedSk = shamirCombineFromBase64(env.payload.decryption_shares);
   } catch (e) {
-    deps.logger.error({ err: e, tip_id: tip.id }, 'shamir-combine-failed');
+    const err = e instanceof Error ? e : new Error(String(e));
+    deps.logger.error(
+      { tip_id: tip.id, err_name: err.name, err_message: err.message },
+      'shamir-combine-failed',
+    );
     return { kind: 'dead-letter', reason: 'shamir-combine-failure' };
   }
 
@@ -152,10 +156,29 @@ export async function handleTip(
       skB64,
     );
   } catch (e) {
-    deps.logger.error({ tip_id: tip.id, err_message: (e as Error).message }, 'tip-decrypt-failed');
+    const err = e instanceof Error ? e : new Error(String(e));
+    deps.logger.error(
+      { tip_id: tip.id, err_name: err.name, err_message: err.message },
+      'tip-decrypt-failed',
+    );
     return { kind: 'dead-letter', reason: 'decrypt-failure' };
   }
   const text = new TextDecoder().decode(plaintext);
+
+  // The paraphrase prompt window is 4000 chars. Surface truncation so
+  // operators see "this tip was longer than the paraphrase budget" in
+  // the structured logs — silent slicing is a privacy/integrity issue
+  // (a citizen wrote 8000 chars; the operator should know their
+  // paraphrase covers only the first half).
+  const PARAPHRASE_BUDGET_CHARS = 4000;
+  const truncated = text.length > PARAPHRASE_BUDGET_CHARS;
+  const paraphraseInput = truncated ? text.slice(0, PARAPHRASE_BUDGET_CHARS) : text;
+  if (truncated) {
+    deps.logger.warn(
+      { tip_id: tip.id, full_length: text.length, paraphrase_length: paraphraseInput.length },
+      'tip-paraphrase-input-truncated',
+    );
+  }
 
   // LLM paraphrase pass — Block-B A2 migration: routes through
   // SafeLlmRouter so the doctrine system preamble + canary +
@@ -170,15 +193,22 @@ export async function handleTip(
       assessmentId: null,
       promptName: 'tip-triage.paraphrase',
       task: TIP_PARAPHRASE_TASK,
-      sources: [{ id: `tip:${tip.id}`, label: 'tip-body', text: text.slice(0, 4000) }],
+      sources: [{ id: `tip:${tip.id}`, label: 'tip-body', text: paraphraseInput }],
       responseSchema: zParaphrase,
       modelId: deps.modelId,
     });
-    deps.logger.info({ tip_id: tip.id, severity: outcome.value.severity_hint }, 'tip-paraphrased');
+    deps.logger.info(
+      { tip_id: tip.id, severity: outcome.value.severity_hint, truncated },
+      'tip-paraphrased',
+    );
     // Update disposition + paraphrase notes (encrypted at rest with the same operator-team key)
     await deps.tipRepo.setDisposition(tip.id, 'IN_TRIAGE', 'worker-tip-triage');
   } catch (e) {
-    deps.logger.error({ tip_id: tip.id, err_message: (e as Error).message }, 'paraphrase-failed');
+    const err = e instanceof Error ? e : new Error(String(e));
+    deps.logger.error(
+      { tip_id: tip.id, err_name: err.name, err_message: err.message },
+      'paraphrase-failed',
+    );
     return { kind: 'retry', reason: 'llm-failure', delay_ms: 60_000 };
   }
   return { kind: 'ack' };

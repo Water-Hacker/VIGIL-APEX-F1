@@ -523,5 +523,39 @@ describe('Block-E E.2 / D2 — tip-portal Tor flow E2E (citizen → council → 
     };
     expect(safeInput.sources[0]!.text.length).toBe(4000);
     expect(safeInput.sources[0]!.text).toBe(longText.slice(0, 4000));
+
+    // Tier-1 audit closure: truncation must surface as a structured
+    // warn-log so operators see "this tip was longer than the
+    // paraphrase budget" — silent slicing is a privacy/integrity
+    // issue (a citizen wrote 7100 chars; the operator should know
+    // their paraphrase covers only the first 4000).
+    expect(spies.loggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tip_id: TIP_ID,
+        full_length: longText.length,
+        paraphrase_length: 4000,
+      }),
+      'tip-paraphrase-input-truncated',
+    );
+  });
+
+  it('short plaintext (under budget) does NOT emit truncation warn (tier-1 audit)', async () => {
+    const shortText = KNOWN_PLAINTEXT; // well under 4000
+    const kp = await generateBoxKeyPair();
+    const ctB64 = await sealedBoxEncrypt(shortText, kp.publicKey);
+    const ctBytes = base64ToUint8(ctB64);
+    const skBytes = base64ToUint8(expose(kp.privateKey));
+    const localShares = shamirSplit(skBytes, 3, 5).map(uint8ToBase64);
+
+    const { deps, spies } = makeDeps(kp.publicKey, ctBytes);
+    const env = makeEnvelope([localShares[0]!, localShares[1]!, localShares[2]!]);
+    const outcome = await handleTip(deps, env);
+    expect(outcome).toEqual({ kind: 'ack' });
+
+    // No truncation warn — body was under budget.
+    const truncationCalls = spies.loggerWarn.mock.calls.filter(
+      (c: unknown[]) => c[1] === 'tip-paraphrase-input-truncated',
+    );
+    expect(truncationCalls).toHaveLength(0);
   });
 });

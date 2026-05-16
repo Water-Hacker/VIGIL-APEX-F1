@@ -70,7 +70,16 @@ describe('worker-tip-triage — SafeLlmRouter migration (Block-B A2)', () => {
     // <source_document> tag via the sources array, not pasted into a
     // user template that the model treats as instructions.
     expect(TRIAGE_FLOW_TS).toMatch(/sources:\s*\[\s*\{[^}]*id:\s*`tip:\$\{tip\.id\}`/);
-    expect(TRIAGE_FLOW_TS).toMatch(/text:\s*text\.slice\(0,\s*4000\)/);
+    // The 4000-char paraphrase budget is now a named constant so the
+    // truncation is observable in a warn-log when triggered (tier-1
+    // audit closure). Pin three invariants instead of the prior single
+    // literal:
+    //   (a) the budget is exactly 4000 chars
+    //   (b) the slice uses the named constant (not a magic literal)
+    //   (c) the safe.call source carries the truncated form, not raw text
+    expect(TRIAGE_FLOW_TS).toMatch(/PARAPHRASE_BUDGET_CHARS\s*=\s*4000/);
+    expect(TRIAGE_FLOW_TS).toMatch(/text\.slice\(0,\s*PARAPHRASE_BUDGET_CHARS\)/);
+    expect(TRIAGE_FLOW_TS).toMatch(/text:\s*paraphraseInput/);
   });
 
   it('schema validation via zParaphrase is preserved (L5)', () => {
