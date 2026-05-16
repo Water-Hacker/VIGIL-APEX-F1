@@ -116,16 +116,18 @@ jobs:
           pytest --cov-fail-under=0 \
             --cov=vigil_common --cov=vigil_satellite --cov=vigil_forensics \
             apps/worker-satellite/tests apps/worker-image-forensics/tests
-      - name: pytest coverage threshold (soft gate, aspirational 60%)
-        # SOFT GATE — non-blocking pending the Python test-coverage
-        # follow-up PR. Local coverage at this commit is 47.22%; the
-        # threshold is set at 60% as a target (and 45% as the current
-        # floor that should never regress). Output is informational
-        # until a dedicated test-coverage PR closes the gap.
+      - name: pytest coverage threshold (HARD GATE, 60%)
+        # HARD GATE — local coverage at this commit is 81.49%; the Python
+        # test-coverage follow-up PR added 129 tests across worker-satellite
+        # and worker-image-forensics (py-common is covered via the
+        # `--cov=vigil_common` flag from the satellite test suite). The 60%
+        # threshold gives us ~20% margin so day-to-day refactors don't
+        # bounce off the line. When raising the floor, raise it carefully
+        # (each module's coverage is shown in the previous step's
+        # term-missing report).
         env:
           REDIS_HOST: localhost
           REDIS_PORT: '6379'
-        continue-on-error: true
         run: |
           coverage report --fail-under=60
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
