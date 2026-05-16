@@ -95,6 +95,25 @@ export abstract class Adapter {
   /**
    * Build a deterministic dedup_key for an event. Subclasses MUST call this
    * (or an override that produces equally stable keys).
+   *
+   * Tier-6 adapter audit (collision-vector note, NOT changed):
+   * the `|` separator below could in principle let a scraped string
+   * containing `|` shift the canonical field layout and collide with
+   * a different logical event. Example:
+   *   parts=['company', 'A|B', 'C']  → 'company|A|B|C'
+   *   parts=['company', 'A', 'B|C']  → 'company|A|B|C'  ← collision
+   * The collision-proof fix (length-prefix or non-printable separator)
+   * is a HARD compatibility break: every already-emitted event's
+   * dedup_key would change, every prior row would re-emit on the next
+   * adapter run, the audit chain would balloon. Requires architect
+   * sign-off + a migration plan. Flagged for follow-up; algorithm
+   * unchanged here.
+   *
+   * Realistic risk in the meantime: an adapter-emitted scraped string
+   * containing `|` (e.g. a company name with a pipe) could silently
+   * suppress a legitimate event as a duplicate of a differently-
+   * shaped event. Adapter content is from trusted government sources
+   * — attacker-controlled `|` injection is bounded, not nil.
    */
   protected dedupKey(parts: ReadonlyArray<string | number | null | undefined>): string {
     const norm = parts.map((p) => (p === null || p === undefined ? '' : String(p))).join('|');
