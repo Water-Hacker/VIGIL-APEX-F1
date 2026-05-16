@@ -37,12 +37,22 @@ import { registerAllPatterns } from './_register-patterns.js';
 const logger = createLogger({ service: 'worker-pattern' });
 const tracer = getServiceTracer('worker-pattern');
 
-const zEntitySubject = z.object({
+// Tier-23 audit closure: cap the payload arrays. Pre-fix `related_ids`
+// and `event_ids` were unbounded — a malicious or buggy upstream
+// emitting an envelope with 10k uuids would issue a single
+// `IN (..., ..., ...)` query with 10k bindings against
+// entity.canonical / source.events. Bound at 256 ids each — enough for
+// any realistic 1-hop graph fan-out (Neo4j's own LIMIT is 64 at line
+// 306) and small enough to keep the worker's per-message footprint
+// predictable.
+export const MAX_RELATED_IDS_PER_PAYLOAD = 256;
+export const MAX_EVENT_IDS_PER_PAYLOAD = 256;
+export const zEntitySubject = z.object({
   finding_id: z.string().uuid().optional(),
   subject_kind: z.enum(['Tender', 'Company', 'Person', 'Project', 'Payment']),
   canonical_id: z.string().uuid().nullable(),
-  related_ids: z.array(z.string().uuid()).default([]),
-  event_ids: z.array(z.string().uuid()).default([]),
+  related_ids: z.array(z.string().uuid()).max(MAX_RELATED_IDS_PER_PAYLOAD).default([]),
+  event_ids: z.array(z.string().uuid()).max(MAX_EVENT_IDS_PER_PAYLOAD).default([]),
 });
 type Payload = z.infer<typeof zEntitySubject>;
 
@@ -308,7 +318,11 @@ class PatternWorker extends WorkerBase<Payload> {
       );
       return rows.map((r) => r.id).filter((s): s is string => typeof s === 'string');
     } catch (err) {
-      logger.warn({ err, canonicalId }, 'neo4j-1hop-failed-falling-back-to-postgres');
+      const e = err instanceof Error ? err : new Error(String(err));
+      logger.warn(
+        { err_name: e.name, err_message: e.message, canonicalId },
+        'neo4j-1hop-failed-falling-back-to-postgres',
+      );
       const rels = await this.entityRepo.getRelationshipsForCanonical(canonicalId);
       const out = new Set<string>();
       for (const r of rels) {
@@ -382,7 +396,16 @@ async function main(): Promise<void> {
   logger.info('worker-pattern-ready');
 }
 
-main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
-  process.exit(1);
-});
+// Tier-23 audit closure: gate the top-level main() so importing this
+// module from a test file (to pin the zod-schema cap behaviour, for
+// example) does not attempt to connect to Vault / Redis / Postgres
+// and surface a fatal-startup error in the test output. The
+// `require.main === module` check ensures `main()` only runs when
+// the file is the entrypoint, not when it's imported.
+if (require.main === module) {
+  main().catch((e: unknown) => {
+    const err = e instanceof Error ? e : new Error(String(e));
+    logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
+    process.exit(1);
+  });
+}
