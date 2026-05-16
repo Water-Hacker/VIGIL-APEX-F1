@@ -387,3 +387,23 @@ keycloak:
   resources:
     requests: { memory: '1Gi', cpu: '500m' }
     limits: { memory: '4Gi', cpu: '2' }
+
+# ----------------------------------------------------------------------
+# Phase 12a — cosign image-signature verification (modes 9.9 + 10.8)
+# ----------------------------------------------------------------------
+#
+# `enabled: false` by default — Phase 12a ships the framework only.
+# Activation prerequisites:
+#   1. Kyverno operator installed in the cluster (kyverno.io CRDs).
+#   2. cosignVerify.publicKey populated with the architect's cosign
+#      public key (same key whose private half lives in the
+#      `COSIGN_PRIVATE_KEY` GitHub Actions secret).
+#   3. Every chart-deployed image signed by the security.yml
+#      `cosign-sign-images` release-tag job.
+#
+# See docs/runbooks/cosign-rollout.md for end-to-end activation.
+cosignVerify:
+  enabled: false
+  failureAction: Audit
+  publicKey: ''
+  rekorURL: https://rekor.sigstore.dev

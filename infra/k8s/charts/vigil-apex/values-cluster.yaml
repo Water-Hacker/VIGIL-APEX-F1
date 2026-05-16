@@ -1,5 +1,18 @@
 # VIGIL APEX — HA-cluster overrides for the 3-node DL380 Gen11 deployment.
 #
+# Hardware tier: AI / Security Node (per DECISION-020) —
+#   2× Intel Xeon Platinum 8xxx (32c+/socket = 64c+ per node)
+#   1 TB+ DDR5-5200 RDIMM
+#   ~19 TB usable NVMe per node (4× 1.92 TB hot + 8× 3.84 TB warm, RAID-10)
+#   4–8× NVIDIA L4 (24 GB GDDR6 each; 96–192 GB pooled VRAM per node)
+#   2× 1600 W Platinum PSU, HPE iLO 6, TPM 2.0
+# Reference: docs/decisions/decision-020-dl380-ai-security-tier.md
+#
+# Resource limits below are scaled to the AI/Security tier — 4× the
+# leaner Gold/256 GB spec the previous revision targeted. If procurement
+# falls back to the leaner spec (see DECISION-020 re-open triggers),
+# halve every memory limit and drop the `nvidia.com/gpu:` sections.
+#
 # Apply on top of values.yaml + values-prod.yaml:
 #   helm upgrade --install vigil-apex ./infra/k8s/charts/vigil-apex \
 #     -f infra/k8s/charts/vigil-apex/values.yaml \
@@ -61,8 +74,11 @@ postgres:
   persistence:
     size: 1Ti
   resources:
-    requests: { memory: '2Gi', cpu: '1' }
-    limits: { memory: '16Gi', cpu: '4' }
+    # DECISION-020: 4× memory budget for Postgres on the AI/Security tier.
+    # shared_buffers can be sized to ~256 GB (25% of 1 TB node RAM) — moves
+    # heavy OLTP working set into RAM.
+    requests: { memory: '32Gi', cpu: '4' }
+    limits: { memory: '64Gi', cpu: '16' }
 
 redis:
   ha:
@@ -79,6 +95,11 @@ redis:
       minReplicasMaxLag: 10
   persistence:
     size: 50Gi
+  resources:
+    # DECISION-020: 4× memory budget for Redis. Larger maxmemory absorbs
+    # higher stream-length retention + LLM call-result cache.
+    requests: { memory: '4Gi', cpu: '1' }
+    limits: { memory: '32Gi', cpu: '4' }
 
 neo4j:
   enabled: true
@@ -88,14 +109,27 @@ neo4j:
     pinnedNode: 'c'
     schedule: '0 */6 * * *'
   resources:
-    requests: { memory: '8Gi', cpu: '2' }
-    limits: { memory: '32Gi', cpu: '4' }
+    # DECISION-020: 4× memory budget for Neo4j. 96 GB heap +
+    # 32 GB page cache fits the entity graph at the projected
+    # entity-resolution corpus size.
+    requests: { memory: '32Gi', cpu: '4' }
+    limits: { memory: '128Gi', cpu: '16' }
 
 ipfs:
   enabled: true
   replicaCount: 3
   persistence:
-    size: 500Gi
+    # DECISION-020: bulk-tier collapse — IPFS now lives on the warm
+    # NVMe pool (was SAS HDD bulk in the previous spec). 5 TiB per
+    # node leaves headroom for evidence growth without committing the
+    # full warm budget.
+    size: 5Ti
+  resources:
+    # DECISION-020: with no SAS HDD bulk tier, IPFS pinset lives on the
+    # warm NVMe tier (~15.36 TB usable per node). The increased memory
+    # accommodates a larger pin index + pin-cache.
+    requests: { memory: '4Gi', cpu: '1' }
+    limits: { memory: '32Gi', cpu: '4' }
 
 ipfsCluster:
   enabled: true
@@ -140,3 +174,80 @@ observability:
     replicaCount: 2
   falco:
     enabled: true
+
+# ─── GPU-bound workloads (DECISION-020 — AI/Security Node tier) ──────────
+#
+# These sections are gated off until:
+#   (a) NVIDIA device plugin is installed in the k3s cluster.
+#   (b) DECISION-011 (AI-SAFETY-DOCTRINE) review for local-LLM lands.
+#   (c) The architect's procurement closure on the actual GPU count
+#       (4× L4 minimum, 8× L4 maximum per node).
+# Flip each `enabled: true` after its dependencies land.
+
+workerLocalLlm:
+  enabled: false # DECISION-011 review gate
+  image:
+    repository: vllm/vllm-openai
+    tag: 'v0.6.4'
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: '4'
+      memory: '32Gi'
+      nvidia.com/gpu: 2
+    limits:
+      cpu: '16'
+      memory: '128Gi'
+      nvidia.com/gpu: 2
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+  modelVolume:
+    enabled: true
+    size: 200Gi
+    storageClass: local-path
+
+workerZkProve:
+  enabled: false
+  image:
+    repository: vigil-apex/worker-zk-prove
+    tag: '0.1.0'
+  replicaCount: 3
+  resources:
+    requests: { cpu: '2', memory: '8Gi', nvidia.com/gpu: 1 }
+    limits: { cpu: '8', memory: '32Gi', nvidia.com/gpu: 1 }
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+
+workerSatelliteCuda:
+  enabled: false
+  image:
+    repository: vigil-apex/worker-satellite
+    tag: '0.2.0-cuda'
+  replicaCount: 1
+  resources:
+    requests: { cpu: '2', memory: '8Gi', nvidia.com/gpu: 1 }
+    limits: { cpu: '8', memory: '32Gi', nvidia.com/gpu: 1 }
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+
+workerImageForensicsCuda:
+  enabled: false
+  image:
+    repository: vigil-apex/worker-image-forensics
+    tag: '0.2.0-cuda'
+  replicaCount: 1
+  resources:
+    requests: { cpu: '2', memory: '8Gi', nvidia.com/gpu: 1 }
+    limits: { cpu: '8', memory: '32Gi', nvidia.com/gpu: 1 }
+  nodeSelector:
+    nvidia.com/gpu.present: 'true'
+
+workerSecurityAnomaly:
+  enabled: false
+  image:
+    repository: vigil-apex/worker-security-anomaly
+    tag: '0.1.0'
+  replicaCount: 3
+  resources:
+    requests: { cpu: '2', memory: '4Gi' }
+    limits: { cpu: '8', memory: '16Gi' }

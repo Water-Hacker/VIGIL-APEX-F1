@@ -172,3 +172,99 @@ jobs:
             vigil-apex.summary.json
             vigil-apex.summary.json.asc
           fail_on_unmatched_files: false
+
+  # ── Phase 12a / Modes 9.9 + 10.8: cosign sign container images ───
+  #
+  # Active only on tag-push events (matches the SBOM-signing job above).
+  # The signing key (COSIGN_PRIVATE_KEY) + password (COSIGN_PASSWORD)
+  # are architect-provisioned per docs/runbooks/cosign-key-rotation.md.
+  # Both secrets are produced by `cosign generate-key-pair` and stored
+  # in Vault; the architect copies them into repo secrets at first
+  # release.
+  #
+  # ACTIVATION STATUS (2026-05-15): framework only. Steps are gated to
+  # tag-push events; on every other event this job is a no-op (the
+  # `if:` short-circuits before the cosign-install runs). On a real
+  # tag-push, the step fails-loud if either COSIGN_PRIVATE_KEY or
+  # COSIGN_PASSWORD is absent — mirroring the GPG_SIGNING_KEY pattern
+  # above. Activation requires:
+  #
+  #   (1) Registry deployed at registry.vigilapex.local (Forgejo) so
+  #       there's somewhere to push signed images. SRD §1253 declares
+  #       this; deployment lands in Phase 12b.
+  #   (2) `docker buildx bake` working end-to-end (currently
+  #       continue-on-error: true in ci.yml's docker-build job
+  #       because docker-bake.hcl is incomplete).
+  #   (3) Architect runs the YubiKey-backed cosign key-gen ceremony
+  #       per docs/runbooks/cosign-key-rotation.md and seeds the
+  #       repo secrets.
+  #
+  # See docs/runbooks/cosign-rollout.md for the end-to-end activation
+  # procedure.
+  cosign-sign-images:
+    name: cosign-sign-images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [snyk, sbom]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # required for keyless / OIDC mode if we adopt later
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Validate cosign secrets present (release-gate)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          if [ -z "${COSIGN_PRIVATE_KEY}" ] || [ -z "${COSIGN_PASSWORD}" ]; then
+            echo "::error::COSIGN_PRIVATE_KEY / COSIGN_PASSWORD secrets must be set for tag-push image signing (Phase 12a; see docs/runbooks/cosign-rollout.md)."
+            exit 1
+          fi
+      # SHA-pinned per mode 10.3 discipline. sigstore/cosign-installer
+      # v3.7.0 pulls a sha256-verified cosign binary from the cosign
+      # release page (cosign verifies its own release SBOM, so this is
+      # the canonical low-trust install path).
+      - name: Install cosign (pinned)
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        with:
+          cosign-release: 'v2.4.1'
+      - name: Resolve image list to sign
+        id: imagelist
+        run: |
+          set -euo pipefail
+          # Enumerate the images we publish at release time. The list is
+          # derived from infra/docker/dockerfiles/*.Dockerfile (one image
+          # per worker dockerfile target). Future bake-rendered tags land
+          # in this list once docker-bake.hcl is complete.
+          IMAGES=$(pnpm exec tsx scripts/enumerate-publish-images.ts)
+          {
+            echo 'images<<EOF'
+            echo "$IMAGES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "Will sign:"
+          echo "$IMAGES"
+      - name: Sign each image with cosign
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          IMAGES: ${{ steps.imagelist.outputs.images }}
+        run: |
+          set -euo pipefail
+          # Write the key to a temp file (cosign expects --key file:...).
+          KEY_FILE=$(mktemp)
+          printf '%s' "${COSIGN_PRIVATE_KEY}" > "${KEY_FILE}"
+          trap 'rm -f "${KEY_FILE}"' EXIT
+          while IFS= read -r IMG; do
+            [ -z "$IMG" ] && continue
+            echo "::group::cosign sign $IMG"
+            cosign sign --yes \
+              --key "${KEY_FILE}" \
+              "${IMG}"
+            cosign verify \
+              --key "${KEY_FILE}" \
+              "${IMG}"
+            echo "::endgroup::"
+          done <<< "${IMAGES}"
