@@ -4,6 +4,11 @@ import * as sourceSchema from '../schema/source.js';
 
 import type { Db } from '../client.js';
 
+// Tier-28 audit closure: per-call bulk-id cap. See getEventsByIds
+// for rationale. Public-readonly so callers can size their chunking
+// off the same constant.
+export const SOURCE_REPO_MAX_BULK_IDS = 1000;
+
 export class SourceRepo {
   constructor(private readonly db: Db) {}
 
@@ -69,10 +74,25 @@ export class SourceRepo {
     return rows[0] ?? null;
   }
 
+  /**
+   * Bulk read by id. Tier-28 audit closure: cap the input array to
+   * MAX_BULK_IDS. The node-postgres driver has a hard ceiling around
+   * 32k parameter bindings per query; beyond that the call fails with
+   * an opaque "bind message has X parameter formats but Y parameters"
+   * 500. We refuse at MAX_BULK_IDS = 1000 so the caller hits a clear
+   * error and learns to chunk the lookup. T23 worker-pattern caps
+   * its own payload at 256 ids; other call sites benefit from the
+   * symmetric defence here.
+   */
   async getEventsByIds(
     ids: readonly string[],
   ): Promise<readonly (typeof sourceSchema.events.$inferSelect)[]> {
     if (ids.length === 0) return [];
+    if (ids.length > SOURCE_REPO_MAX_BULK_IDS) {
+      throw new Error(
+        `getEventsByIds: received ${ids.length} ids, cap is ${SOURCE_REPO_MAX_BULK_IDS}; caller must chunk`,
+      );
+    }
     return this.db
       .select()
       .from(sourceSchema.events)
