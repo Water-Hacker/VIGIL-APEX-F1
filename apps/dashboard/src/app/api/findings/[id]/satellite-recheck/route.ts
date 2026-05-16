@@ -1,21 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { HashChain } from '@vigil/audit-chain';
-import {
-  FindingRepo,
-  SatelliteRequestRepo,
-  getDb,
-  getPool,
-} from '@vigil/db-postgres';
+import { FindingRepo, SatelliteRequestRepo, getDb, getPool } from '@vigil/db-postgres';
 import { QueueClient } from '@vigil/queue';
-import {
-  SatelliteClient,
-  polygonFromCentroidMeters,
-  type Provider,
-} from '@vigil/satellite-client';
+import { SatelliteClient, polygonFromCentroidMeters, type Provider } from '@vigil/satellite-client';
 import { sql } from 'drizzle-orm';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
+
+import { requireAuthProof } from '../../../../../lib/auth-proof-require';
 
 /**
  * POST /api/findings/[id]/satellite-recheck
@@ -47,6 +40,13 @@ export async function POST(
   req: NextRequest,
   ctx: { params: { id: string } },
 ): Promise<NextResponse> {
+  // Tier-17 audit closure: verify the middleware-minted auth-proof HMAC.
+  // Satellite recheck triggers external paid-API calls (Maxar / Airbus
+  // when included in the provider chain) so the spoofable role-header
+  // path was not acceptable.
+  const auth = await requireAuthProof(req, { allowedRoles: ['operator', 'architect'] });
+  if (!auth.ok) return auth.response!;
+
   const findingId = ctx.params.id;
   if (!/^[0-9a-f-]{36}$/i.test(findingId)) {
     return NextResponse.json({ error: 'invalid-finding-id' }, { status: 400 });
@@ -59,8 +59,11 @@ export async function POST(
       { status: 400 },
     );
   }
-  const providers: ReadonlyArray<Provider> =
-    parsed.data.providers ?? ['nicfi', 'sentinel-2', 'sentinel-1'];
+  const providers: ReadonlyArray<Provider> = parsed.data.providers ?? [
+    'nicfi',
+    'sentinel-2',
+    'sentinel-1',
+  ];
   const maxCloudPct = parsed.data.max_cloud_pct ?? 20;
   const maxCostUsd = parsed.data.max_cost_usd ?? 0;
 
@@ -113,10 +116,7 @@ export async function POST(
     row.contract_start === null ||
     row.contract_end === null
   ) {
-    return NextResponse.json(
-      { error: 'no-gps-bearing-event-linked-to-finding' },
-      { status: 422 },
-    );
+    return NextResponse.json({ error: 'no-gps-bearing-event-linked-to-finding' }, { status: 422 });
   }
 
   const projectId = row.project_id;
@@ -128,11 +128,7 @@ export async function POST(
     row.contract_end instanceof Date ? row.contract_end : new Date(row.contract_end);
 
   // Idempotency.
-  const existing = await trackingRepo.findByProjectWindow(
-    projectId,
-    contractStart,
-    contractEnd,
-  );
+  const existing = await trackingRepo.findByProjectWindow(projectId, contractStart, contractEnd);
   if (existing) {
     return NextResponse.json(
       { requestId: existing.request_id, status: existing.status, deduplicated: true },
@@ -180,7 +176,13 @@ export async function POST(
         actor: req.headers.get('x-vigil-username') ?? 'unknown',
         subject_kind: 'finding',
         subject_id: findingId,
-        payload: { project_id: projectId, request_id: requestId, providers, maxCloudPct, maxCostUsd },
+        payload: {
+          project_id: projectId,
+          request_id: requestId,
+          providers,
+          maxCloudPct,
+          maxCostUsd,
+        },
       });
     } catch (err) {
       console.error('audit-emit-failed', err);
