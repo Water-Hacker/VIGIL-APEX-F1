@@ -1,6 +1,6 @@
 # Mode 9.8 — Image pulled by mutable tag
 
-**State after closure:** framework-closed, activation-pending
+**State after closure:** closed-verified (digest-pin half) — see §Activation update
 **Closed at:** 2026-05-15
 **Pass:** code-hardening 90-mode pass, Phase 12a / Cross-cutting
 **Branch:** `hardening/phase-1-orientation`
@@ -126,3 +126,53 @@ and the `--verify` step is added to CI. Then the mode is closed-verified.
 
 See `docs/audit/evidence/hardening/category-10/mode-10.2b/CLOSURE.md` —
 the sister closure that this mode is part of (10.2 sub-task (b)).
+
+---
+
+## Activation update (2026-05-15)
+
+`scripts/pin-image-digests.ts --apply` ran successfully against the
+local docker daemon, resolving **23 upstream image digests** via
+`docker buildx imagetools inspect`. All resolved tags are now
+`@sha256:DIGEST`-pinned across:
+
+- `infra/docker/dockerfiles/AdapterRunner.Dockerfile` (playwright)
+- `infra/docker/dockerfiles/Caddy.Dockerfile` (caddy:2.11.3-{builder,alpine})
+- `infra/docker/dockerfiles/Dashboard.Dockerfile` (node:20.20.2-alpine)
+- `infra/docker/dockerfiles/Worker.Dockerfile` (node:20.20.2-alpine)
+- `infra/docker/docker-compose.yaml` (15 service images: postgres,
+  redis, neo4j, vault, ipfs, ipfs-cluster, keycloak, torproxy,
+  alertmanager, logstash, filebeat, fabric-tools, fabric-orderer,
+  fabric-peer, prometheus, grafana, falco)
+
+The canonical `tag → sha256` mapping lives at
+`infra/docker/image-digests.lock` (23 entries, JSON object).
+
+### Vigil-owned image refs
+
+The script skips `vigil-apex/*` and `vigil-caddy` refs (and any
+`registry.vigilapex.local/...` ref) because those images don't exist
+in any reachable registry until the docker-bake CI job builds and
+pushes them. The skip-list is logged; once the registry is deployed
+(Phase 2 / docs/runbooks/cosign-rollout.md §"Pre-flight gate 1"),
+the architect re-runs `--apply` and the lock file picks up the
+vigil-owned digests too.
+
+### CI gate posture
+
+`pin-image-digests.ts --verify` is the runtime gate that diffs the
+committed lock file against what the registry currently serves. It's
+not yet wired into ci.yml; flagged for a follow-up commit alongside
+the vigil-owned-ref activation.
+
+### State at this commit
+
+- Upstream image digest pinning: **closed-verified**.
+- Vigil-owned image digest pinning: pending Phase 2 docker-bake
+  push pipeline activation. The skip-list pattern in the script
+  lets the lockfile grow incrementally without manual edit.
+
+Mode 9.8 is **closed-verified** for the upstream half (where the
+attack surface is most acute — a compromised public registry could
+serve a malicious base image without digest pinning). Mode 10.2(b)
+is the same scope; see its sister CLOSURE.md.

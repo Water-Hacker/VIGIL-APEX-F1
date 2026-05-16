@@ -2,7 +2,7 @@
   "name": "worker-fabric-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Postgres audit.actions \u2192 Fabric audit-witness chaincode replication. Phase G of the country-grade plan.",
+  "description": "Postgres audit.actions → Fabric audit-witness chaincode replication. Phase G of the country-grade plan.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
     "@vigil/fabric-bridge": "workspace:*",
     "@vigil/observability": "workspace:*",

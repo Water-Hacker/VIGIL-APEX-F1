@@ -186,3 +186,34 @@ that belongs with the cosign work (Phase 12).
 If the architect prefers a different posture — e.g., "no closure
 without rendered-diff" — mode 9.1 reverts to partial and the gate
 becomes the Phase 12 work item.
+
+---
+
+## Tier 2 activation update (2026-05-15)
+
+Helm goldens rendered + committed at `infra/k8s/charts/vigil-apex/golden/`:
+
+- `dev.yaml` (1,866 lines) — `helm template -f values.yaml -f values-dev.yaml`
+- `prod.yaml` (2,109 lines) — `helm template -f values.yaml -f values-prod.yaml`
+- `cluster.yaml` (5,218 lines) — `helm template -f values.yaml -f values-prod.yaml -f values-cluster.yaml`
+
+The CI `helm-golden-drift` gate (already wired in ci.yml) auto-detects
+the golden presence and switches from "skip with notice" to active
+verification. Any subsequent change to the chart templates OR values
+files that materially alters the rendered output trips the gate; the
+architect re-runs `scripts/render-helm-golden.sh` (no args) to refresh
+the golden + commits the refresh PR.
+
+Mode 9.1 is now **closed-verified at both tiers**:
+
+- Tier 1: values-lint (already closed; 7 invariants on
+  values-prod.yaml).
+- Tier 2: helm-template golden diff (this update; rendered manifests
+  match between live render + committed golden).
+
+The third orientation recommendation — ArgoCD ApplicationSet wiring
+values-{dev,prod,staging}.yaml to cluster labels/namespaces — is in
+place at `infra/k8s/argocd/vigil-apex.applicationset.yaml` but
+activates only when ArgoCD is installed in a live cluster (Phase 2
+cluster cutover). The scaffolding is committed; activation is
+operations work, not code work.

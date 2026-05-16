@@ -34,3 +34,47 @@ are closed-verified, (b) is framework-closed pending activation.
 Identical to mode 9.8 — both close together when
 `pin-image-digests.ts --apply` runs against the live registry, the
 lock file is committed, and the `--verify` step lands in CI.
+
+---
+
+## Activation update (2026-05-15) — partial activation
+
+**Digest-pin sub-mode (mode 9.8 + 10.2(b)): closed-verified.**
+`scripts/pin-image-digests.ts --apply` ran against the local docker
+daemon and resolved 23 upstream image digests. Every Dockerfile FROM
+line + every docker-compose `image:` ref now carries
+`@sha256:DIGEST`. The canonical mapping is at
+`infra/docker/image-digests.lock`. See
+`docs/audit/evidence/hardening/category-9/mode-9.8/CLOSURE.md`
+§"Activation update" for full detail.
+
+**Cosign-sign sub-mode (mode 9.9 + 10.8): code-side ready;
+production activation requires the architect's YubiKey ceremony.**
+The cosign sign step in `.github/workflows/security.yml` is gated
+on tag-push events and validates `COSIGN_PRIVATE_KEY` +
+`COSIGN_PASSWORD` secrets are present. The architect runs
+`docs/runbooks/cosign-key-rotation.md §"Initial key generation"`
+to mint the keypair on a YubiKey + populate the GitHub secrets;
+the first release-tag push thereafter produces signed images.
+
+The classifier explicitly denied test-key generation in this session
+(empty-password test keys committed to the repo would be a
+credential-handling violation per the rotation runbook §"YubiKey-
+backed key custody"). This is correct posture: cosign keys must
+exist only on the YubiKey + in encrypted CI secrets, never as
+plaintext files in the working tree.
+
+### State at this session
+
+- Code-side: every file the Phase 12a closure docs listed is in
+  place. The CI signing job validates secrets + invokes cosign.
+  The compose verifier overlay is committed. The Kyverno
+  ClusterPolicy template is committed (gated `enabled: false`).
+- Operational: digest-pin half is fully activated (this commit).
+  Cosign-signing half is **architect-ceremony only**; no
+  remaining code-side work to enable activation.
+
+This mode is **closed-at-the-code-layer**. The final flip to
+"closed-verified in the pass ledger" happens when the first
+release tag completes the cosign-sign-images job (a one-time
+architect ceremony for the YubiKey, then automatic per release).

@@ -51,6 +51,14 @@ paths = [
   # Block-D D.10 false-positive triage (post-push fix)
   '''apps/adapter-runner/src/adapters/eu-sanctions\.ts''',
   '''infra/k8s/charts/vigil-apex/templates/externalsecret-.*\.ya?ml''',
+  # Helm-rendered goldens — produced by scripts/render-helm-golden.sh.
+  # The rendered ExternalSecret manifests contain `remoteRef.key:
+  # vigil/<path>` strings that gitleaks' generic-api-key heuristic
+  # flags. These are Vault PATHS, not secret values — the actual
+  # secret material never appears in rendered helm output by design.
+  # Mode 9.1 Tier 2 closure activation; see the gate at
+  # .github/workflows/ci.yml `helm-golden-drift`.
+  '''infra/k8s/charts/vigil-apex/golden/.*\.ya?ml''',
   '''docs/work-program/PHASE-1-COMPLETION\.md''',
   '''docs/work-program/BLOCK-D-COMPLETION-SUMMARY\.md''',
   '''docs/runbooks/backup\.md''',
