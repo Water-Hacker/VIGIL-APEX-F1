@@ -145,7 +145,14 @@ export class LlmRouter {
         return { ...result, content: typedContent as T extends string ? string : T };
       } catch (e) {
         lastErr = e;
-        this.logger.warn({ err: e, provider: provider.name }, 'provider-call-failed');
+        // Tier-41 audit closure: normalise the failure log to
+        // err_name / err_message matching the convention from T13/T15/
+        // T16/T17/T19/T21/T24/T29/T30/T36.
+        const err = e instanceof Error ? e : new Error(String(e));
+        this.logger.warn(
+          { err_name: err.name, err_message: err.message, provider: provider.name },
+          'provider-call-failed',
+        );
         llmCallsTotal
           .labels({ provider: provider.name, model: 'unknown', tier: 'n/a', outcome: 'error' })
           .inc();
