@@ -134,6 +134,17 @@ contract VIGILGovernanceV1 is Initializable, AccessControl, ReentrancyGuard {
     error CommitmentNotFound();
     error CommitmentTooEarly();
     error AccountAlreadyMember();
+    error UriTooLarge();
+
+    /// @notice Tier-51 audit closure — cap proposal URI size.
+    ///         Mirrors the non-upgradeable VIGILGovernance defence. Without
+    ///         this bound a pillar member could push a multi-MB URI into
+    ///         ProposalOpened event logs + storage (calldata is ~16 gas/
+    ///         byte, so up to ~1.8 MB fits in a Polygon block). 2048 chars
+    ///         is comfortably above ipfs://CID and dual-hash URIs.
+    ///         Adding the constant + error is upgrade-safe — constants
+    ///         don't occupy storage slots and errors live in the metadata.
+    uint256 public constant MAX_URI_BYTES = 2048;
 
     /// @dev Lock the implementation against direct initialisation. Only the
     /// proxy (with its own delegatecalled storage) may initialise.
@@ -201,6 +212,8 @@ contract VIGILGovernanceV1 is Initializable, AccessControl, ReentrancyGuard {
         Member storage m = memberByAccount[msg.sender];
         if (!m.active) revert NotPillarMember();
         if (findingHash == bytes32(0)) revert EmptyFinding();
+        // Tier-51 — cap URI size. See MAX_URI_BYTES doc above.
+        if (bytes(uri).length > MAX_URI_BYTES) revert UriTooLarge();
 
         bytes32 commitment = keccak256(abi.encode(findingHash, uri, salt, msg.sender));
         uint64 committedAt = commitments[msg.sender][commitment];

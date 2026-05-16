@@ -119,6 +119,21 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     error EmptyFinding();
     error NotYetExpired();
     error AccountAlreadyMember();
+    error UriTooLarge();
+
+    /**
+     * @notice Tier-51 audit closure — cap proposal URI size.
+     *         openProposal() accepts a calldata `string uri` (off-chain
+     *         dossier reference, typically `ipfs://CID` ~70 chars). Pre-fix
+     *         there was no upper bound, so a pillar member could submit a
+     *         multi-MB URI: calldata costs ~16 gas/non-zero-byte on EVM,
+     *         so within the ~30M Polygon block-gas limit a single proposal
+     *         could push ~1.8 MB of URI into ProposalOpened event logs and
+     *         storage. Cheap griefing surface; bloats indexers; bloats
+     *         per-block log size for every dashboard reader. Cap at 2048
+     *         chars — comfortably above ipfs://CID and dual-hash URIs.
+     */
+    uint256 public constant MAX_URI_BYTES = 2048;
 
     constructor(address admin) {
         if (admin == address(0)) revert ZeroAddress();
@@ -214,6 +229,10 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
         Member storage m = memberByAccount[msg.sender];
         if (!m.active) revert NotPillarMember();
         if (findingHash == bytes32(0)) revert EmptyFinding();
+        // Tier-51 — cap URI size. See MAX_URI_BYTES doc above for
+        // the gas-griefing rationale. bytes(uri).length on calldata is
+        // a constant-gas read of the length prefix.
+        if (bytes(uri).length > MAX_URI_BYTES) revert UriTooLarge();
 
         bytes32 commitment = keccak256(abi.encode(findingHash, uri, salt, msg.sender));
         uint64 committedAt = commitments[msg.sender][commitment];
