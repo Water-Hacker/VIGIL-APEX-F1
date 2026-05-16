@@ -37,6 +37,21 @@ contract VIGILAnchor is Ownable2Step {
     /// @notice Last committed `toSeq` — enforces monotonicity.
     uint256 public lastToSeq;
 
+    /// @notice Tier-51 audit closure — bound on per-commit range span.
+    ///         The off-chain anchor (PolygonAnchor in the audit-chain
+    ///         package) commits Merkle roots over modest per-cycle ranges
+    ///         (hundreds to a few thousand events). MAX_RANGE_PER_COMMIT
+    ///         caps the per-call span at 1_000_000 — a typo or
+    ///         compromised committer submitting `toSeq = 1e30` would
+    ///         otherwise brick the anchor: every subsequent commit must
+    ///         satisfy `fromSeq == lastToSeq + 1`, so a giant lastToSeq
+    ///         permanently locks out the legitimate audit chain (which
+    ///         begins at seq=1 and advances one row per audit event).
+    ///         Reject loudly at the boundary so operator error surfaces
+    ///         as a structured revert instead of a silent
+    ///         denial-of-anchor.
+    uint256 public constant MAX_RANGE_PER_COMMIT = 1_000_000;
+
     event Anchored(
         uint256 indexed commitmentId,
         uint256 fromSeq,
@@ -53,6 +68,7 @@ contract VIGILAnchor is Ownable2Step {
     error NonContiguous();
     error CommitmentNotFound();
     error ZeroCommitterAddress();
+    error RangeTooLarge();
 
     modifier onlyCommitter() {
         if (msg.sender != committer) revert NotCommitter();
@@ -73,6 +89,14 @@ contract VIGILAnchor is Ownable2Step {
     function commit(uint256 fromSeq, uint256 toSeq, bytes32 rootHash) external onlyCommitter {
         if (fromSeq > toSeq) revert InvalidRange();
         if (rootHash == bytes32(0)) revert EmptyRoot();
+        // Tier-51 — cap per-commit range span. See MAX_RANGE_PER_COMMIT
+        // doc above for the rationale (defence against operator typo /
+        // compromised-committer bricking the anchor with a giant
+        // lastToSeq that no legitimate next-commit can satisfy).
+        // Use addition rather than subtraction to keep the math
+        // checked-arithmetic friendly: span = toSeq - fromSeq + 1.
+        // Equivalent guard via the inverse keeps the failure mode clear.
+        if (toSeq - fromSeq + 1 > MAX_RANGE_PER_COMMIT) revert RangeTooLarge();
         // Tier-15 audit closure: the previous check `lastToSeq != 0 && ...`
         // gated monotonicity on a non-zero lastToSeq, which left the very
         // first call to commit() free to set fromSeq to any value. A
