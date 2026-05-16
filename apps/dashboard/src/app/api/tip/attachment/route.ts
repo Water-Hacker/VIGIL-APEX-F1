@@ -77,7 +77,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'unsupported-content-type' }, { status: 415 });
   }
 
-  // Read body with a hard cap
+  // Pre-check content-length to short-circuit oversized bodies BEFORE
+  // we buffer them. `Number('abc')` is NaN and `NaN > N` is false, so
+  // the body-side check after read can be bypassed by a non-numeric
+  // header. The /^\d+$/ pre-test forces an explicit reject on
+  // malformed headers rather than treating them as "0".
+  const clRaw = req.headers.get('content-length');
+  if (clRaw !== null) {
+    if (!/^\d+$/.test(clRaw)) {
+      return NextResponse.json({ error: 'invalid-content-length' }, { status: 400 });
+    }
+    if (Number(clRaw) > MAX_BLOB_BYTES) {
+      return NextResponse.json({ error: 'too-large' }, { status: 413 });
+    }
+  }
+
+  // Read body with a hard cap (defence in depth — the pre-check above
+  // catches the easy case; this catches chunked-transfer-encoded bodies
+  // where Content-Length is absent).
   let buf: Buffer;
   try {
     const ab = await req.arrayBuffer();

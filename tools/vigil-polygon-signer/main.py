@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 import socketserver
 import subprocess
@@ -105,25 +106,111 @@ def _yubikey_sign_hash(msg_hash: bytes) -> tuple[int, int, int]:
     return int(r_hex, 16), int(s_hex, 16), int(v_str, 10)
 
 
+# Tier-2 audit input-validation gates. Pre-fix, the signer accepted any
+# string for `to`/`data`/`value`/`chainId` and only failed deep inside
+# web3.py's serializer. The on-socket attacker can already do worse, but
+# explicit gates surface bad input as a structured error response
+# rather than a stack trace in the journal.
+_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_HEX_DATA_RE = re.compile(r"^(0x)?[a-fA-F0-9]*$")
+_DEC_INT_RE = re.compile(r"^[0-9]+$")
+# Hard cap on the data payload. A 1 MB transaction data field would
+# blow the L1 gas budget anyway — refuse early. 128 KB is comfortable
+# for any anchor/witness payload we generate.
+_MAX_DATA_BYTES = 128 * 1024
+# Floor on dynamic gas estimation. An estimate below 21000 is a
+# protocol-level impossibility; treat it as RPC failure and refuse.
+_GAS_FLOOR = 21_000
+# Ceiling on dynamic gas estimation. Polygon block gas limit is
+# ~30M; a single tx requesting more than 8M is either a runaway loop
+# or a misconfigured client. Cap and warn rather than silently send.
+_GAS_CEILING = 8_000_000
+
+
+def _validate_tx_inputs(to: str, data: str, value: str, chain_id: str) -> tuple[str, str, int, int]:
+    """Validate + normalise sign_and_send params. Raises ValueError on bad input.
+
+    Returns (to_checksummed, data_hex_with_prefix, value_int, chain_id_int).
+    """
+    if not to or not _ADDR_RE.fullmatch(to):
+        raise ValueError("param 'to' must be 0x-prefixed 40-hex address")
+    data_norm = data if data else "0x"
+    if not _HEX_DATA_RE.fullmatch(data_norm):
+        raise ValueError("param 'data' must be hex (optional 0x prefix)")
+    # Decoded byte length, not hex char length.
+    hex_body = data_norm[2:] if data_norm.startswith("0x") else data_norm
+    if len(hex_body) % 2 != 0:
+        raise ValueError("param 'data' has odd-length hex")
+    if len(hex_body) // 2 > _MAX_DATA_BYTES:
+        raise ValueError(f"param 'data' exceeds {_MAX_DATA_BYTES}-byte cap")
+    if not data_norm.startswith("0x"):
+        data_norm = "0x" + data_norm
+    value_str = value if value else "0"
+    if not _DEC_INT_RE.fullmatch(value_str):
+        raise ValueError("param 'value' must be a decimal non-negative integer")
+    chain_str = chain_id if chain_id else str(CHAIN_ID)
+    if not _DEC_INT_RE.fullmatch(chain_str):
+        raise ValueError("param 'chainId' must be a decimal non-negative integer")
+    chain_int = int(chain_str)
+    if chain_int != CHAIN_ID:
+        raise ValueError(
+            f"param 'chainId' ({chain_int}) does not match configured "
+            f"POLYGON_CHAIN_ID ({CHAIN_ID}); refusing cross-chain replay"
+        )
+    return Web3.to_checksum_address(to), data_norm, int(value_str), chain_int
+
+
 def _sign_and_send(to: str, data: str, value: str, chain_id: str) -> str:
     """Build an EIP-1559 transaction, sign via YubiKey, broadcast.
 
     FIND-007 closure — the prior NotImplementedError is replaced with
-    the helper-delegated sign path.
+    the helper-delegated sign path. Tier-2 audit hardening: input
+    validation + dynamic gas estimation replace the prior hardcoded
+    500_000-gas tx that would silently fail on-chain if the payload
+    grew unexpectedly.
     """
+    to_ok, data_ok, value_int, chain_int = _validate_tx_inputs(to, data, value, chain_id)
     w3 = Web3(Web3.HTTPProvider(RPC_URL))
     addr = _signer_address()
     nonce = w3.eth.get_transaction_count(addr)
     fees = w3.eth.fee_history(5, "latest")
     base = fees["baseFeePerGas"][-1]
     tip = w3.to_wei(30, "gwei")
+    # Dynamic gas estimation. Falls back to a sane ceiling on RPC
+    # failure (Polygon nodes occasionally return malformed traces);
+    # never silently use a hardcoded value that could underpay and
+    # cause an on-chain revert.
+    try:
+        estimated = w3.eth.estimate_gas({
+            "from": addr,
+            "to": to_ok,
+            "data": HexBytes(data_ok),
+            "value": value_int,
+        })
+        # 20% safety margin to absorb estimator drift.
+        gas_limit = int(estimated * 12 // 10)
+        if gas_limit < _GAS_FLOOR:
+            raise ValueError(f"estimate_gas returned implausibly low {estimated}")
+        if gas_limit > _GAS_CEILING:
+            log.warning(
+                "gas estimate %d exceeds ceiling %d; capping to ceiling",
+                gas_limit, _GAS_CEILING,
+            )
+            gas_limit = _GAS_CEILING
+    except Exception as e:
+        # Surface estimation failure to operators but proceed with
+        # the ceiling so a one-off node hiccup doesn't drop an audit
+        # anchor. The Polygon-side cost of using the ceiling for a
+        # small payload is negligible (unused gas is refunded).
+        log.warning("gas estimation failed (%s); using ceiling %d", e, _GAS_CEILING)
+        gas_limit = _GAS_CEILING
     tx_dict = {
-        "to": Web3.to_checksum_address(to),
-        "data": HexBytes(data or "0x"),
-        "value": int(value or "0"),
-        "chainId": int(chain_id or CHAIN_ID),
+        "to": to_ok,
+        "data": HexBytes(data_ok),
+        "value": value_int,
+        "chainId": chain_int,
         "nonce": nonce,
-        "gas": 500_000,
+        "gas": gas_limit,
         "maxPriorityFeePerGas": tip,
         "maxFeePerGas": base * 2 + tip,
         "type": 2,

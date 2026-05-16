@@ -87,9 +87,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!ct.toLowerCase().startsWith('application/json')) {
       return NextResponse.json({ error: 'unsupported-content-type' }, { status: 415 });
     }
-    const cl = Number(req.headers.get('content-length') ?? 0);
-    if (cl > 256 * 1024) {
-      return NextResponse.json({ error: 'payload-too-large' }, { status: 413 });
+    // Strict content-length parse. `Number('abc')` is NaN and `NaN > N`
+    // is always false, so the previous `Number(...) > 256*1024` check
+    // silently let through any non-numeric header. The /^\d+$/ pre-test
+    // forces us to reject malformed headers explicitly rather than
+    // treat them as "0".
+    const clRaw = req.headers.get('content-length');
+    if (clRaw !== null) {
+      if (!/^\d+$/.test(clRaw)) {
+        return NextResponse.json({ error: 'invalid-content-length' }, { status: 400 });
+      }
+      const cl = Number(clRaw);
+      if (cl > 256 * 1024) {
+        return NextResponse.json({ error: 'payload-too-large' }, { status: 413 });
+      }
     }
 
     const body = (await req.json()) as Record<string, unknown>;

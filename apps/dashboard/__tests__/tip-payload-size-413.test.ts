@@ -115,3 +115,76 @@ describe('mode 7.9 — tip-attachment oversized binary body → 413', () => {
     expect(body.error).toBe('empty-body');
   });
 });
+
+describe('tier-1 audit — Content-Length parsing strictness', () => {
+  // Pre-fix: `Number('abc')` evaluates to NaN; `NaN > 256*1024` is false.
+  // A request with a non-numeric Content-Length silently bypassed the
+  // size cap. These tests pin the strict /^\d+$/ pre-check on both
+  // tip-submit and tip-attachment.
+
+  it('tip-submit rejects non-numeric Content-Length with 400', async () => {
+    const req = new NextRequest('http://localhost/api/tip/submit', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': 'abc-not-a-number',
+      },
+      body: '{}',
+    });
+    const res = await submitPost(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('invalid-content-length');
+  });
+
+  it('tip-submit rejects Content-Length with a sign character', async () => {
+    // "-1" trivially passes Number(...) > N (= -1 > N is false) but also
+    // signals a malformed client. The strict /^\d+$/ test rejects it.
+    const req = new NextRequest('http://localhost/api/tip/submit', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': '-1',
+      },
+      body: '{}',
+    });
+    const res = await submitPost(req);
+    expect(res.status).toBe(400);
+  });
+
+  it('tip-attachment rejects non-numeric Content-Length with 400 (pre-check)', async () => {
+    const req = new NextRequest('http://localhost/api/tip/attachment', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-libsodium-sealed-box',
+        'content-length': 'nine-hundred',
+        'x-forwarded-for': '10.0.0.101',
+      },
+      body: new Uint8Array(64),
+    });
+    const res = await attachmentPost(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('invalid-content-length');
+  });
+
+  it('tip-attachment rejects oversized Content-Length BEFORE buffering the body', async () => {
+    // Claim 50 MB via header. The pre-check should 413 immediately,
+    // without first reading the body. We provide a small body (the
+    // mismatch is acceptable — the route trusts the header for the
+    // gate, then re-validates after reading).
+    const req = new NextRequest('http://localhost/api/tip/attachment', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-libsodium-sealed-box',
+        'content-length': String(50 * 1024 * 1024),
+        'x-forwarded-for': '10.0.0.102',
+      },
+      body: new Uint8Array(64),
+    });
+    const res = await attachmentPost(req);
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('too-large');
+  });
+});
