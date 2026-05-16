@@ -1,4 +1,5 @@
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -14,6 +15,9 @@ import { createAuditBridgeServer } from './server.js';
 const logger = createLogger({ service: 'audit-bridge' });
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'audit-bridge', logger });
+  await guard.check();
+
   await initTracing({ service: 'audit-bridge' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -32,6 +36,8 @@ async function main(): Promise<void> {
   const server = await createAuditBridgeServer({ logger, socketPath });
   await server.start();
   registerShutdown('audit-bridge', () => server.stop());
+
+  await guard.markBootSuccess();
   logger.info({ socketPath }, 'audit-bridge-ready');
 }
 

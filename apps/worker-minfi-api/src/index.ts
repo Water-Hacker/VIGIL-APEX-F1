@@ -6,6 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -64,6 +65,9 @@ function loadMinfiMtls(): {
  */
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-minfi-api', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-minfi-api' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -250,8 +254,10 @@ async function main(): Promise<void> {
 
   const port = Number(process.env.MINFI_API_PORT ?? 4001);
   await fastify.listen({ port, host: '0.0.0.0' });
-  logger.info({ port }, 'worker-minfi-api-ready');
   registerShutdown('fastify', () => fastify.close());
+
+  await guard.markBootSuccess();
+  logger.info({ port }, 'worker-minfi-api-ready');
 }
 
 function bandTitleFr(b: Schemas.MinfiScoreBand): string {

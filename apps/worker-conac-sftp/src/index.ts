@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { HashChain } from '@vigil/audit-chain';
 import { DossierRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -299,6 +300,9 @@ class ConacSftpWorker extends WorkerBase<Payload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-conac-sftp', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-conac-sftp' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -336,6 +340,8 @@ async function main(): Promise<void> {
   const worker = new ConacSftpWorker(vault, dossierRepo, findingRepo, ipfsApiUrl, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-conac-sftp-ready');
 }
 

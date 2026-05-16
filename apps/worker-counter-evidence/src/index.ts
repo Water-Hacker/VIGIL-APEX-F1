@@ -7,6 +7,7 @@ import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 // SafeLlmRouter registry. Must be imported before any SafeLlmRouter call.
 import './prompts.js';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -222,6 +223,9 @@ class CounterWorker extends WorkerBase<Payload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-counter-evidence', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-counter-evidence' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -286,6 +290,8 @@ async function main(): Promise<void> {
   void llm;
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-counter-evidence-ready');
 }
 

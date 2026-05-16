@@ -2,6 +2,7 @@ import { HashChain } from '@vigil/audit-chain';
 import { DossierRepo, FindingRepo, GovernanceRepo, getDb, getPool } from '@vigil/db-postgres';
 import { GovernanceReadClient } from '@vigil/governance';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -26,6 +27,9 @@ const logger = createLogger({ service: 'worker-governance' });
  * canonical record; this worker is a read-projection cache.
  */
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-governance', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-governance' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -78,6 +82,7 @@ async function main(): Promise<void> {
   );
   registerShutdown('unsubscribe', () => unsubscribe());
 
+  await guard.markBootSuccess();
   logger.info({ contract: contractAddress }, 'worker-governance-ready');
 }
 

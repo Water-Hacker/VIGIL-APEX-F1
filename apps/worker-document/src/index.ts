@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { HashChain } from '@vigil/audit-chain';
 import { SourceRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -299,6 +300,9 @@ class DocumentWorker extends WorkerBase<DocPayload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-document', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-document' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -339,6 +343,8 @@ async function main(): Promise<void> {
   const worker = new DocumentWorker(sourceRepo, ipfsApiUrl, ocrPool, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-document-ready');
 }
 

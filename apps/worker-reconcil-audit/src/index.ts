@@ -4,6 +4,7 @@ import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -227,6 +228,9 @@ async function tick(
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-reconcil-audit', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-reconcil-audit' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -265,6 +269,8 @@ async function main(): Promise<void> {
   registerShutdown('reconcil-loop', () => {
     stopping = true;
   });
+
+  await guard.markBootSuccess();
 
   // Mode 1.6 — adaptive sleep on consecutive failures.
   const backoff = new LoopBackoff({ initialMs: 1_000, capMs: cfg.intervalMs });

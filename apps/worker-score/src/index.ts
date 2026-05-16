@@ -11,6 +11,7 @@ import {
 } from '@vigil/certainty-engine';
 import { CertaintyRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -277,6 +278,9 @@ function extractRationale(metadata: Record<string, unknown> | null): string | nu
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-score', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-score' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -328,6 +332,8 @@ async function main(): Promise<void> {
   const worker = new ScoreWorker(db, findingRepo, certaintyRepo, lr, indep, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-score-ready');
 }
 

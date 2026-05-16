@@ -11,6 +11,7 @@ import {
 import { AnomalyAlertRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -36,6 +37,9 @@ const logger = createLogger({ service: 'worker-audit-watch' });
  */
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-audit-watch', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-audit-watch' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -86,6 +90,7 @@ async function main(): Promise<void> {
         return tail.seq > window ? BigInt(tail.seq) - window + 1n : 1n;
       })();
 
+  await guard.markBootSuccess();
   logger.info(
     {
       intervalMs,

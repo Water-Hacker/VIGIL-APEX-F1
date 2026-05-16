@@ -2,6 +2,7 @@ import { HashChain } from '@vigil/audit-chain';
 import { Neo4jClient } from '@vigil/db-neo4j';
 import { EntityRepo, FindingRepo, SourceRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -331,6 +332,9 @@ class PatternWorker extends WorkerBase<Payload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-pattern', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-pattern' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -373,6 +377,8 @@ async function main(): Promise<void> {
   const worker = new PatternWorker(neo4j, entityRepo, sourceRepo, findingRepo, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-pattern-ready');
 }
 

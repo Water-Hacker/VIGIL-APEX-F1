@@ -5,6 +5,7 @@ import { HashChain, PolygonAnchor, UnixSocketSignerAdapter } from '@vigil/audit-
 import { PublicAnchorRepo, UserActionEventRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -28,6 +29,9 @@ const logger = createLogger({ service: 'worker-anchor' });
  * range was already committed (gap-free seq tracking), skip.
  */
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-anchor', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-anchor' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -99,6 +103,7 @@ async function main(): Promise<void> {
     () => stopping,
   ).catch((e: unknown) => logger.error({ err: e }, 'high-sig-loop-fatal'));
 
+  await guard.markBootSuccess();
   logger.info({ intervalMs, highSigIntervalMs, contract: polygonContract }, 'worker-anchor-ready');
 
   // Mode 1.6 — adaptive sleep on consecutive failures. Steady-state

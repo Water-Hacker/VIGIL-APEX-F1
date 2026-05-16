@@ -4,6 +4,7 @@ import {
   type RegionCode,
 } from '@vigil/federation-stream';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -49,6 +50,9 @@ function readRegion(): RegionCode {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-federation-agent', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-federation-agent' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -95,6 +99,8 @@ async function main(): Promise<void> {
   const worker = new FederationAgentWorker({ client, queue, logger, region });
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info({ region, signingKeyId, coreEndpoint }, 'worker-federation-agent-ready');
 }
 

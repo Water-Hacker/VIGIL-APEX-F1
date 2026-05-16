@@ -4,6 +4,7 @@ import { HashChain } from '@vigil/audit-chain';
 import { CallRecordRepo, getDb, getPool } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   boundedBodyText,
   boundedRequest,
@@ -245,6 +246,9 @@ async function hourlyShadowSweep(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-adapter-repair', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-adapter-repair' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -299,6 +303,7 @@ async function main(): Promise<void> {
     void hourlyShadowSweep();
   });
 
+  await guard.markBootSuccess();
   logger.info({ modelId }, 'worker-adapter-repair-ready');
 }
 

@@ -1,6 +1,7 @@
 import { HashChain } from '@vigil/audit-chain';
 import { TipRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -77,6 +78,9 @@ class TipChannelsWorker extends WorkerBase<TipChannelsPayload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-tip-channels', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-tip-channels' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -121,6 +125,8 @@ async function main(): Promise<void> {
   const worker = new TipChannelsWorker(tipRepo, chain, councilPublicKeyB64, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info({ stream: STREAMS.TIP_CHANNELS_INCOMING }, 'worker-tip-channels-ready');
 }
 

@@ -3,6 +3,7 @@ import { Neo4jClient, Cypher } from '@vigil/db-neo4j';
 import { CallRecordRepo, EntityRepo, getDb, getPool, normalizeName } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -522,6 +523,9 @@ export { RCCM_RE, NIU_RE, detectLanguage } from './rule-pass.js';
 export type { Payload, RuleMatch };
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-entity', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-entity' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -610,6 +614,7 @@ async function main(): Promise<void> {
     return Promise.resolve();
   });
 
+  await guard.markBootSuccess();
   logger.info({ modelId }, 'worker-entity-ready');
 }
 

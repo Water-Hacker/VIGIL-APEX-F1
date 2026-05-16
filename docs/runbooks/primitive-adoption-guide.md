@@ -17,12 +17,12 @@
 
 ## The four primitives
 
-| Primitive                 | Closes mode | Package                | Touch points in `main()`      |
-| ------------------------- | ----------- | ---------------------- | ----------------------------- |
-| `auditFeatureFlagsAtBoot` | 6.9         | `@vigil/observability` | 1 call after `getDb()`        |
-| `startRedisStreamScraper` | 6.8         | `@vigil/queue`         | 1 call after `queue.ping()`   |
-| `StartupGuard`            | 1.7         | `@vigil/observability` | `main().catch(…)` wrapper     |
-| `RetryBudget`             | 1.5         | `@vigil/observability` | Per-call site at retry points |
+| Primitive                 | Closes mode | Package                | Touch points in `main()`                        |
+| ------------------------- | ----------- | ---------------------- | ----------------------------------------------- |
+| `auditFeatureFlagsAtBoot` | 6.9         | `@vigil/observability` | 1 call after `getDb()`                          |
+| `startRedisStreamScraper` | 6.8         | `@vigil/queue`         | 1 call after `queue.ping()`                     |
+| `StartupGuard`            | 1.7         | `@vigil/observability` | `check()` + `markBootSuccess()` inside `main()` |
+| `RetryBudget`             | 1.5         | `@vigil/observability` | Per-call site at retry points                   |
 
 The first two are cheap (1-line additions); the latter two restructure
 worker startup / retry shape and warrant per-worker review.
@@ -173,30 +173,36 @@ critical alert.
 
 ### Insertion site
 
-Replaces the bottom of `apps/<worker>/src/index.ts`:
+Two insertion points inside `main()` in `apps/<worker>/src/index.ts`:
 
 ```ts
-// Before:
+import { StartupGuard } from '@vigil/observability';
+
+async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-<NAME>', logger });
+  await guard.check(); // FIRST line of main()
+
+  // ... init work: initTracing, queue.ping, DB pool, Vault, registerShutdown,
+  // auditFeatureFlagsAtBoot, worker.start(), etc. ...
+
+  await guard.markBootSuccess(); // AFTER every fail-able init step
+  logger.info('worker-<NAME>-ready');
+}
+
 main().catch((e: unknown) => {
   logger.error({ err: e }, 'fatal-startup');
   process.exit(1);
 });
-
-// After:
-import { StartupGuard } from '@vigil/observability';
-
-const guard = new StartupGuard({
-  service: 'worker-<NAME>',
-  maxAttempts: 5, // crash-loop after 5 failures in window
-  windowMs: 5 * 60_000, // 5 min window
-  logger,
-});
-
-guard.run(main).catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
-  process.exit(1);
-});
 ```
+
+`check()` reads the sentinel file under `/run/vigil/<service>.startup-failures.json`,
+prunes entries older than `windowMs`, and exits with code 42 after an
+exponential pre-exit sleep once `maxFailures` (default 5 in `windowMs`,
+default 5 min) is exceeded. `markBootSuccess()` clears the in-progress
+marker so a healthy boot does not inflate the failure window.
+
+Defaults: `windowMs=5min`, `maxFailures=5`, `tripSleepInitialMs=30s`,
+`tripSleepCapMs=5min`, `exitCode=42`. Override via constructor options.
 
 ### Per-worker scope review
 
@@ -208,11 +214,18 @@ guard.run(main).catch((e: unknown) => {
    emits at every boot, so 5 boot attempts in 5 min = 5 audit rows.
    That's intentional, not a bug.
 
-### Why deferred for routine workers
+### Per-worker placement guidance
 
-Several workers have non-trivial main() shapes (large try/finally
-blocks, multi-stage init). Adopting `StartupGuard` requires a small
-restructure per worker. Schedule as a per-PR adoption.
+`markBootSuccess()` must sit AFTER every resource that could fail at
+init (DB pool, queue, Vault, audit chain, `auditFeatureFlagsAtBoot`,
+`worker.start()`). Placing it earlier means an "almost-fully-booted-
+then-died" failure does not bump the guard's failure counter.
+
+For workers whose `main()` ends with an infinite `while (!stopping)`
+loop, place `markBootSuccess()` immediately before the loop. For
+workers whose `main()` ends with `worker.start()` + `registerShutdown`,
+place `markBootSuccess()` after the registerShutdown call so a worker
+that fails to attach its shutdown hook still counts as a failed boot.
 
 ---
 

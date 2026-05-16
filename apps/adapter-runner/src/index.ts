@@ -27,6 +27,7 @@ import {
   getPool,
 } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -56,6 +57,9 @@ import { runVerbatimAuditSampler } from './triggers/verbatim-audit-sampler.js';
 const logger = createLogger({ service: 'adapter-runner' });
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'adapter-runner', logger });
+  await guard.check();
+
   // Tracing first (instrument fetch/pg/redis)
   await initTracing({ service: 'adapter-runner', version: '0.1.0' });
 
@@ -419,6 +423,8 @@ async function main(): Promise<void> {
   registerShutdown('cron-tasks', () => {
     for (const t of tasks) t.stop();
   });
+
+  await guard.markBootSuccess();
 
   // Surface health endpoint for the watchdog
   logger.info(

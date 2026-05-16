@@ -1,5 +1,6 @@
 import { FederationStreamServer } from '@vigil/federation-stream';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -36,6 +37,9 @@ const logger = createLogger({ service: 'worker-federation-receiver' });
  */
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-federation-receiver', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-federation-receiver' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -143,6 +147,8 @@ async function main(): Promise<void> {
   const server = new FederationStreamServer(serverOpts);
   await server.start();
   registerShutdown('federation-server', () => server.stop());
+
+  await guard.markBootSuccess();
   logger.info({ listenAddress, keysLoaded: loaded }, 'worker-federation-receiver-ready');
 }
 

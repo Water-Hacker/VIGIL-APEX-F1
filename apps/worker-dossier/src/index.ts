@@ -8,6 +8,7 @@ import { HashChain } from '@vigil/audit-chain';
 import { DossierRepo, EntityRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import { renderDossierDocx, gpgDetachSign } from '@vigil/dossier';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -280,6 +281,9 @@ function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-dossier', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-dossier' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -334,6 +338,8 @@ async function main(): Promise<void> {
   );
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info('worker-dossier-ready');
 }
 

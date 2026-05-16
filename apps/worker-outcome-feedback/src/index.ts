@@ -6,6 +6,7 @@ import {
   listRecentDeliveredDossiersForMatching,
 } from '@vigil/db-postgres';
 import {
+  StartupGuard,
   auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
@@ -82,6 +83,9 @@ class OutcomeFeedbackWorker extends WorkerBase<OutcomeSignalPayload> {
 }
 
 async function main(): Promise<void> {
+  const guard = new StartupGuard({ serviceName: 'worker-outcome-feedback', logger });
+  await guard.check();
+
   await initTracing({ service: 'worker-outcome-feedback' });
   const metrics = await startMetricsServer();
   registerShutdown('metrics', () => metrics.close());
@@ -113,6 +117,8 @@ async function main(): Promise<void> {
   const worker = new OutcomeFeedbackWorker(chain, outcomeRepo, listDelivered, queue);
   await worker.start();
   registerShutdown('worker', () => worker.stop());
+
+  await guard.markBootSuccess();
   logger.info({ stream: STREAMS.OUTCOME_SIGNAL }, 'worker-outcome-feedback-ready');
 }
 
