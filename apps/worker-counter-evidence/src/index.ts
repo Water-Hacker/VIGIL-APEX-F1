@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { HashChain } from '@vigil/audit-chain';
 import { createClaudeLlmEvaluator, runAdversarial } from '@vigil/certainty-engine';
 import { CallRecordRepo, CertaintyRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
@@ -128,7 +130,7 @@ class CounterWorker extends WorkerBase<Payload> {
               : 'log_only'
             : (assessment.tier as 'action_queue' | 'investigation_queue' | 'log_only');
           await this.certaintyRepo.upsertAssessment({
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             finding_id: assessment.finding_id,
             engine_version: assessment.engine_version,
             prior_probability: assessment.prior_probability,
@@ -162,10 +164,75 @@ class CounterWorker extends WorkerBase<Payload> {
             await this.findingRepo.setState(finding.id, 'review');
           }
         } catch (err) {
-          logger.error({ err, finding_id: finding.id }, 'adversarial-pipeline-failed');
-          // Adversarial failure ≠ counter-evidence failure; keep going so
-          // the operator at least sees the narrative.
+          // Tier-36 audit closure: pre-fix this branch logged and kept
+          // going — the assessment row from worker-score still carried
+          // DEFAULT_ADVERSARIAL (everything-passed) so the council saw
+          // the finding at action_queue tier as if all checks had
+          // PASSED. Silent adversarial-pipeline failure → false-
+          // positive escalation. Fix: if the pipeline fails to run at
+          // all, force a downgrade with the synthetic hold reason
+          // `adversarial_pipeline_failed` so the council sees the
+          // finding only as investigation_queue (or log_only if the
+          // posterior didn't clear 0.8).
+          const e = err instanceof Error ? err : new Error(String(err));
+          logger.error(
+            { err_name: e.name, err_message: e.message, finding_id: finding.id },
+            'adversarial-pipeline-failed',
+          );
+          try {
+            const posterior = Number(assessment.posterior_probability);
+            const downgradedTier: 'investigation_queue' | 'log_only' =
+              posterior >= 0.8 ? 'investigation_queue' : 'log_only';
+            const holdReasons: Schemas.HoldReason[] = [
+              ...(assessment.hold_reasons as Schemas.HoldReason[]),
+              'adversarial_pipeline_failed' as Schemas.HoldReason,
+            ];
+            await this.certaintyRepo.upsertAssessment({
+              id: randomUUID(),
+              finding_id: assessment.finding_id,
+              engine_version: assessment.engine_version,
+              prior_probability: assessment.prior_probability,
+              posterior_probability: assessment.posterior_probability,
+              independent_source_count: assessment.independent_source_count,
+              tier: downgradedTier,
+              hold_reasons: holdReasons,
+              adversarial: assessment.adversarial,
+              components: assessment.components,
+              severity: assessment.severity,
+              input_hash: assessment.input_hash,
+              prompt_registry_hash: assessment.prompt_registry_hash,
+              model_version: assessment.model_version,
+              computed_at: new Date(),
+            });
+            await this.findingRepo.setState(finding.id, 'review');
+            logger.warn(
+              { finding_id: finding.id, downgraded_tier: downgradedTier },
+              'adversarial-pipeline-failed-downgraded-tier',
+            );
+          } catch (writeErr) {
+            const we = writeErr instanceof Error ? writeErr : new Error(String(writeErr));
+            logger.error(
+              { err_name: we.name, err_message: we.message, finding_id: finding.id },
+              'adversarial-downgrade-write-failed',
+            );
+            // Re-throw so the worker dead-letters this envelope rather
+            // than ack a finding whose tier may now be inconsistent.
+            throw writeErr;
+          }
         }
+      } else if (env.payload.assessment_id) {
+        // Tier-36 audit closure: the linked assessment is missing or
+        // has been superseded by a newer write. Pre-fix this case fell
+        // through silently. Log so operators investigating "why didn't
+        // the adversarial pipeline run for X?" can see the cause.
+        logger.warn(
+          {
+            finding_id: finding.id,
+            expected_assessment_id: env.payload.assessment_id,
+            actual_assessment_id: assessment?.id ?? null,
+          },
+          'counter-evidence-assessment-mismatch; adversarial pipeline skipped',
+        );
       }
     }
 
@@ -216,7 +283,11 @@ class CounterWorker extends WorkerBase<Payload> {
       void this.callRecordRepo;
       return { kind: 'ack' };
     } catch (e) {
-      logger.error({ err: e }, 'counter-evidence-failed');
+      const err = e instanceof Error ? e : new Error(String(e));
+      logger.error(
+        { err_name: err.name, err_message: err.message, finding_id: finding.id },
+        'counter-evidence-failed',
+      );
       return { kind: 'retry', reason: 'llm-failure', delay_ms: 30_000 };
     }
   }
@@ -296,6 +367,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });
