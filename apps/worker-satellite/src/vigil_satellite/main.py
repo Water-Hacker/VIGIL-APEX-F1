@@ -25,7 +25,6 @@ import contextlib
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import cast
 
 from pystac_client.exceptions import APIError
 
@@ -149,7 +148,7 @@ class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
                         "provider-skipped",
                         provider=provider,
                         code=ve.code,
-                        message=ve.message,
+                        message=str(ve),
                     )
                     continue
 
@@ -248,8 +247,8 @@ class SatelliteWorker(RedisStreamWorker[SatelliteRequest]):
             return Retry(reason=f"STAC API error: {e}", delay_ms=10 * 60_000)
         except VigilError as ve:
             if ve.retryable:
-                return Retry(reason=ve.message, delay_ms=15 * 60_000)
-            return DeadLetter(reason=ve.message)
+                return Retry(reason=str(ve), delay_ms=15 * 60_000)
+            return DeadLetter(reason=str(ve))
 
     def _run_provider(
         self,
@@ -385,7 +384,11 @@ def _ndvi_pipeline(
             best_centroid = centroid
             best_ndvi_delta = ndvi_delta
             best_ndbi_delta = ndbi_delta
-            best_pixel_change_pct = result.pixel_change_pct
+            # `ActivityResult.spatial_extent_change` is a [0, 1] fraction of
+            # NDBI-changed pixels among valid pixels; the downstream payload
+            # field `pixel_change_pct` is a percentage in [0, 100] (see
+            # `SatelliteEventPayload.pixel_change_pct` in schemas.py).
+            best_pixel_change_pct = result.spatial_extent_change * 100.0
     if not findings:
         return None
     return ProviderResult(
@@ -448,7 +451,7 @@ def _pixel_to_lonlat(
 ) -> GeoPoint | None:
     if pixel is None or len(shape) != 2:
         return None
-    h, w = cast(tuple[int, int], shape)
+    h, w = shape
     py, px = pixel
     lon = aoi.min_lon + (px + 0.5) / max(w, 1) * (aoi.max_lon - aoi.min_lon)
     lat = aoi.max_lat - (py + 0.5) / max(h, 1) * (aoi.max_lat - aoi.min_lat)
@@ -461,7 +464,13 @@ async def _async_main() -> None:
     install_shutdown()
 
     health_task = await serve_health(service=settings.worker_name, port=settings.prometheus_port)
-    register_shutdown("health-server", health_task.cancel)
+
+    # `Task.cancel` returns bool and accepts an optional message arg, neither
+    # of which matches the ShutdownCallback signature `() -> None`. Wrap it.
+    def _cancel_health() -> None:
+        health_task.cancel()
+
+    register_shutdown("health-server", _cancel_health)
 
     worker = SatelliteWorker(settings)
     register_shutdown("worker", worker.stop)

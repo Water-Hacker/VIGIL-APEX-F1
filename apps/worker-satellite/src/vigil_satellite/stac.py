@@ -12,7 +12,7 @@ import math
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import rasterio
@@ -28,7 +28,9 @@ from vigil_common.logging import get_logger
 from .schemas import GeoBBox, GeoPoint
 
 try:
-    import planetary_computer as _pc
+    # `planetary_computer` ships no py.typed marker; we opt out of stub
+    # analysis for this optional dependency rather than vendor a stub.
+    import planetary_computer as _pc  # type: ignore[import-untyped]
 except Exception:  # optional dep; absence is non-fatal — callers fall through
     _pc = None
 
@@ -139,7 +141,8 @@ def _planetary_computer_signer() -> Callable[[Any], Any] | None:
     """
     if _pc is None:
         return None
-    return _pc.sign_inplace
+    # `_pc.sign_inplace` is Any because planetary_computer is stub-less.
+    return cast("Callable[[Any], Any]", _pc.sign_inplace)
 
 
 def read_band(href: str, aoi: GeoBBox, target_resolution_m: float = 10.0) -> NDArray[np.float32]:
@@ -184,7 +187,9 @@ def read_cog_to_bytes(href: str) -> bytes:
     ):
         dst.write(src.read(1), 1)
         memfile.seek(0)
-        return memfile.read()
+        # rasterio is stub-less (`ignore_missing_imports = True` in mypy.ini);
+        # the read returns Any. Cast localises the boundary.
+        return cast("bytes", memfile.read())
 
 
 def reproject_match(src: NDArray[np.float32], target_shape: tuple[int, int]) -> NDArray[np.float32]:

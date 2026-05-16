@@ -42,13 +42,17 @@ def strip_exif(input_bytes: bytes) -> tuple[bytes, ExifReport]:
     img = Image.open(BytesIO(input_bytes))
     out = BytesIO()
     fmt = (img.format or "PNG").upper()
-    save_kwargs: dict[str, object] = {"format": fmt, "optimize": True}
-    if fmt in {"JPEG", "JPG"}:
-        save_kwargs["quality"] = 92
-    # Re-save without exif/info dict
+    # Re-save without exif/info dict.
     img.info.pop("exif", None)
     img.info.pop("xmp", None)
-    img.save(out, **save_kwargs)
+    # Pillow's `Image.save(fp, format, **params)` accepts arbitrary plugin
+    # params via **kwargs, but the typed stubs constrain to `str | None` for
+    # the positional `format`. Passing the explicitly-typed kwargs avoids the
+    # `**dict[str, object]` widening that mypy rejects.
+    if fmt in {"JPEG", "JPG"}:
+        img.save(out, format=fmt, optimize=True, quality=92)
+    else:
+        img.save(out, format=fmt, optimize=True)
     return out.getvalue(), ExifReport(
         had_gps=had_gps,
         had_author=had_author,

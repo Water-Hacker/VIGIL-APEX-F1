@@ -49,25 +49,20 @@ jobs:
           pip install -e packages/py-common[test]
           pip install -e apps/worker-satellite[test]
           pip install -e apps/worker-image-forensics[test]
-          pip install ruff mypy
+          pip install ruff mypy types-hvac
       - name: Ruff lint + format check
         run: |
           ruff check packages/py-common apps/worker-satellite apps/worker-image-forensics
           ruff format --check packages/py-common apps/worker-satellite apps/worker-image-forensics
       - name: mypy --strict
-        # SOFT GATE — non-blocking pending the Python type-cleanup follow-up
-        # PR. ~20 mypy --strict errors are pre-existing latent debt in the
-        # worker source (e.g. `VigilError.message` missing, `Asset|None.href`
-        # not null-checked, missing stubs for hvac/planetary_computer). They
-        # have been latent because python-ci was failing at install before
-        # commit c7763a0 (dropped `vigil-common @ file:///app/...` URL in
-        # the workers' pyproject.toml).
-        #
-        # Ruff is the hard gate above; mypy runs informationally so the
-        # output is visible without blocking other Cat 10 work. Flip back
-        # to a hard gate after a dedicated `chore(worker-satellite):
-        # mypy --strict cleanup` PR addresses the ~20 errors.
-        continue-on-error: true
+        # HARD GATE — the Python type-cleanup follow-up PR cleared the
+        # previous ~20 mypy --strict errors (VigilError.message →
+        # str(ve); Asset|None.href null-checks in NICFI; ActivityResult
+        # field rename; register_shutdown signature wrapper; planetary_
+        # computer / skimage opt-out via per-line type: ignore). The
+        # `types-hvac` stub package is installed above to type the Vault
+        # client without per-line ignores. Failure here blocks the
+        # workflow so type regressions cannot land.
         run: |
           mypy packages/py-common/src apps/worker-satellite/src apps/worker-image-forensics/src
 

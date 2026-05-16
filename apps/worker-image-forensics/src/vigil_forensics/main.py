@@ -173,8 +173,8 @@ class ForensicsWorker(RedisStreamWorker[ForensicsRequest]):
                 outcome="error",
             ).inc()
             if ve.retryable:
-                return Retry(reason=ve.message, delay_ms=2 * 60_000)
-            return DeadLetter(reason=ve.message)
+                return Retry(reason=str(ve), delay_ms=2 * 60_000)
+            return DeadLetter(reason=str(ve))
 
 
 async def _async_main() -> None:
@@ -186,7 +186,13 @@ async def _async_main() -> None:
     install_shutdown()
 
     health_task = await serve_health(service=settings.worker_name, port=settings.prometheus_port)
-    register_shutdown("health-server", health_task.cancel)
+
+    # `Task.cancel` returns bool and accepts an optional message arg, neither
+    # of which matches the ShutdownCallback signature `() -> None`. Wrap it.
+    def _cancel_health() -> None:
+        health_task.cancel()
+
+    register_shutdown("health-server", _cancel_health)
 
     worker = ForensicsWorker(settings)
     register_shutdown("worker", worker.stop)

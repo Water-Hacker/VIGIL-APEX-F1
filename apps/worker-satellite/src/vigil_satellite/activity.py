@@ -113,11 +113,11 @@ def compute_activity(
     ndvi_change_norm = float(np.clip(-np.nanmean(ndvi_delta[valid]) * 4.0, -1.0, 1.0))
 
     construction_pixels = (ndbi_delta > ndbi_threshold) & valid
-    spatial_extent = (
-        float(np.count_nonzero(construction_pixels) / max(np.count_nonzero(valid), 1))
-        if np.any(valid)
-        else 0.0
-    )
+    # Cast both counts to Python int so the division/max overloads resolve to
+    # builtin int → float; numpy's `intp` confuses mypy's `max` overload set.
+    valid_count = int(np.count_nonzero(valid))
+    construction_count = int(np.count_nonzero(construction_pixels))
+    spatial_extent = construction_count / max(valid_count, 1) if valid_count > 0 else 0.0
 
     w_b, w_v, w_t = weights
     # spatial_extent is in [0, 1] — use it as a non-negative contribution so

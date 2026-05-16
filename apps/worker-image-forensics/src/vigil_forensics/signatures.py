@@ -51,7 +51,10 @@ def compare_signatures(reference_bytes: bytes, candidate_bytes: bytes) -> Signat
     """Compare two signature images. Higher score == more similar."""
     ref = _normalise(_load_grayscale(reference_bytes))
     cand = _normalise(_load_grayscale(candidate_bytes))
-    s = float(ssim(ref, cand, data_range=255))
+    # scikit-image ships no py.typed marker; `ssim` is untyped through the
+    # `ignore_missing_imports` knob in mypy.ini. The downstream `float()`
+    # call gives us a typed boundary back into the SignatureSimilarity model.
+    s = float(ssim(ref, cand, data_range=255))  # type: ignore[no-untyped-call]
     p_ref = imagehash.phash(Image.fromarray(ref))
     p_cand = imagehash.phash(Image.fromarray(cand))
     d = int(p_ref - p_cand)
