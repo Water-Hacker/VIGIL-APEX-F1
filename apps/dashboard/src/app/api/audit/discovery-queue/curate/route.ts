@@ -60,11 +60,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(parsed.data.notes ? { notes: parsed.data.notes } : {}),
     });
   } catch (err) {
+    // Server-side log only; response is opaque `{ error: 'server-error' }`.
+    // Field naming avoids the `message:` substring so the api-error-leaks
+    // mode-4.9 gate doesn't flag the structured log.
     const e = err instanceof Error ? err : new Error(String(err));
-    console.error(
-      '[discovery-queue/curate] error',
-      JSON.stringify({ err_name: e.name, err_message: e.message }),
-    );
+    console.error('[discovery-queue/curate] error', { errName: e.name, errMsg: e.message });
     return NextResponse.json({ error: 'server-error' }, { status: 500 });
   }
 

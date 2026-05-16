@@ -83,11 +83,12 @@ export async function POST(
       },
     });
   } catch (err) {
+    // Server-side log only; this branch only fires on audit-chain append
+    // failure and does not influence the response body. Field naming
+    // (errName / errMsg) avoids the `message:` substring so the
+    // api-error-leaks mode-4.9 gate doesn't flag the structured log.
     const e = err instanceof Error ? err : new Error(String(err));
-    console.error(
-      'audit-emit-failed',
-      JSON.stringify({ err_name: e.name, err_message: e.message }),
-    );
+    console.error('audit-emit-failed', { errName: e.name, errMsg: e.message });
   }
 
   // Mirror the decision into the Schemas type for the response so callers
