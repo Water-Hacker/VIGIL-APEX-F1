@@ -73,7 +73,19 @@ contract VIGILAnchor is Ownable2Step {
     function commit(uint256 fromSeq, uint256 toSeq, bytes32 rootHash) external onlyCommitter {
         if (fromSeq > toSeq) revert InvalidRange();
         if (rootHash == bytes32(0)) revert EmptyRoot();
-        if (lastToSeq != 0 && fromSeq != lastToSeq + 1) revert NonContiguous();
+        // Tier-15 audit closure: the previous check `lastToSeq != 0 && ...`
+        // gated monotonicity on a non-zero lastToSeq, which left the very
+        // first call to commit() free to set fromSeq to any value. A
+        // compromised committer could submit commit(2^256-1, 2^256-1, x)
+        // as the first commit, permanently locking out the legitimate
+        // audit-chain (which off-chain begins at seq=1, per the @vigil/
+        // audit-chain HashChain.append() implementation). Anchor the
+        // first commit to seq=1 explicitly.
+        if (_commitments.length == 0) {
+            if (fromSeq != 1) revert NonContiguous();
+        } else if (fromSeq != lastToSeq + 1) {
+            revert NonContiguous();
+        }
 
         uint256 id = _commitments.length;
         _commitments.push(
