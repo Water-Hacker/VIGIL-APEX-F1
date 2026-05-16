@@ -36,8 +36,21 @@ async function main(): Promise<void> {
   installShutdownHandler(logger);
   registerShutdown('tracing', shutdownTracing);
 
+  // Tier-12 council audit closure: validate the contract address shape.
+  // worker-anchor (the write-side) refuses to boot on a malformed
+  // address; the watch-side worker-governance previously accepted
+  // anything that wasn't the zero address. A typo like
+  // POLYGON_GOVERNANCE_CONTRACT=0x123 would have been accepted here and
+  // crashed deep inside the GovernanceReadClient when it first tried
+  // to subscribe. Fail at boot with a clear message instead.
   const contractAddress =
     process.env.POLYGON_GOVERNANCE_CONTRACT ?? '0x0000000000000000000000000000000000000000';
+  const isEvmAddress = (v: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(v);
+  if (!isEvmAddress(contractAddress)) {
+    throw new Error(
+      `POLYGON_GOVERNANCE_CONTRACT=${JSON.stringify(contractAddress)} is not a valid EVM 20-byte address; refusing to start worker-governance`,
+    );
+  }
   if (contractAddress === '0x0000000000000000000000000000000000000000') {
     logger.warn('POLYGON_GOVERNANCE_CONTRACT not deployed; running in idle mode');
   }
@@ -87,6 +100,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });

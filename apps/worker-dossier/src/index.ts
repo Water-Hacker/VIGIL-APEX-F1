@@ -186,16 +186,20 @@ class DossierWorker extends WorkerBase<Payload> {
       signature = await gpgDetachSign(pdfBytes, { fingerprint: this.gpgFingerprint });
       signatureFingerprint = this.gpgFingerprint;
     } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
       const devUnsignedAllowed =
         process.env.VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER === 'true' &&
         process.env.NODE_ENV !== 'production' &&
         Number(process.env.VIGIL_PHASE ?? '0') < 1;
       if (!devUnsignedAllowed) {
-        logger.error({ err: e }, 'gpg-sign-failed; refusing to write unsigned dossier');
+        logger.error(
+          { err_name: err.name, err_message: err.message },
+          'gpg-sign-failed; refusing to write unsigned dossier',
+        );
         return { kind: 'retry', reason: 'gpg-sign-failed', delay_ms: 60_000 };
       }
       logger.warn(
-        { err: e },
+        { err_name: err.name, err_message: err.message },
         'gpg-sign-failed; continuing UNSIGNED — VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER opt-in',
       );
       signature = Buffer.alloc(0);
@@ -263,6 +267,21 @@ class DossierWorker extends WorkerBase<Payload> {
   }
 }
 
+/**
+ * Tier-12 council-dossier audit closure: hard wall-clock cap on the
+ * LibreOffice headless convert. Pre-fix the spawn had no timeout — a
+ * hung soffice (font fallback loop, X server vestige, libreoffice
+ * background sync) would block the dossier worker indefinitely. With
+ * `concurrency: 2`, two hung renders would stall the entire dossier
+ * pipeline.
+ *
+ * 90 s is generous for any realistic dossier (typical render: 3–8 s,
+ * 95th percentile on heavily-formatted bilingual docs: ~20 s). Anything
+ * above that cap is presumed pathological; kill the child + reject so
+ * the worker retries on the queue with a fresh process.
+ */
+const LIBREOFFICE_TIMEOUT_MS = Number(process.env.LIBREOFFICE_TIMEOUT_MS ?? 90_000);
+
 function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn('soffice', [
@@ -273,10 +292,24 @@ function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
       outDir,
       docxPath,
     ]);
-    child.on('error', reject);
-    child.on('close', (code) =>
-      code === 0 ? resolve() : reject(new Error(`soffice exited ${code}`)),
-    );
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, LIBREOFFICE_TIMEOUT_MS);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`soffice exceeded ${LIBREOFFICE_TIMEOUT_MS}ms timeout (SIGKILLed)`));
+        return;
+      }
+      if (code === 0) resolve();
+      else reject(new Error(`soffice exited ${code}`));
+    });
   });
 }
 
@@ -344,6 +377,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });
