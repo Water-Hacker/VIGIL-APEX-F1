@@ -114,31 +114,44 @@ export class SafeLlmRouter {
     });
     const latency = Date.now() - start;
 
-    const outputText = typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+    const outputText =
+      typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
     const outputHash = createHash('sha256').update(outputText).digest('hex');
     const triggered = canaryTriggered(outputText, today);
     void canary; // retain reference for explicit closure
 
-    let schemaValid = true;
-    let verbatimRejections: ReadonlyArray<{ claim: unknown; reason: string }> = [];
-    let value: TResult;
-    try {
-      value = input.responseSchema.parse(result.content);
-    } catch {
-      schemaValid = false;
-      throw new Error(`safe-router: response failed schema validation for ${input.promptName}`);
-    }
+    // Tier-10 LLM-pipeline audit closure: persist the call-record
+    // BEFORE attempting schema validation. Pre-fix, a schema failure
+    // threw early and the sink.record was never reached, so:
+    //   (a) the AI-Safety dashboard saw 0 schema-failures (silent
+    //       under-reporting of every malformed response);
+    //   (b) the call had no audit trail at all.
+    // Per AI-SAFETY-DOCTRINE-v1, EVERY LLM call must be recorded —
+    // schema failures are exactly the kind of event operators need
+    // to see.
+    //
+    // We pre-parse with safeParse to compute schemaValid, persist the
+    // record, then throw on failure / proceed on success. Verbatim
+    // grounding still runs after on success, but the record reflects
+    // the schema outcome accurately.
+    const parsed = input.responseSchema.safeParse(result.content);
+    const schemaValid = parsed.success;
 
-    // Verbatim-grounding pass when the response is a CitedExtraction.
-    if (input.sourceIndex && isCitedExtraction(value as unknown)) {
-      const outcome = validateVerbatimGrounding(
-        value as unknown as CitedExtraction,
-        input.sourceIndex,
-      );
-      verbatimRejections = outcome.rejected;
-      // Replace the response's claims with the grounded subset — the
-      // engine never sees ungrounded claims.
-      (value as unknown as CitedExtraction).claims = [...outcome.grounded];
+    let verbatimRejections: ReadonlyArray<{ claim: unknown; reason: string }> = [];
+    let value: TResult | undefined;
+    if (parsed.success) {
+      value = parsed.data;
+      // Verbatim-grounding pass when the response is a CitedExtraction.
+      if (input.sourceIndex && isCitedExtraction(value as unknown)) {
+        const outcome = validateVerbatimGrounding(
+          value as unknown as CitedExtraction,
+          input.sourceIndex,
+        );
+        verbatimRejections = outcome.rejected;
+        // Replace the response's claims with the grounded subset — the
+        // engine never sees ungrounded claims.
+        (value as unknown as CitedExtraction).claims = [...outcome.grounded];
+      }
     }
 
     if (this.sink) {
@@ -165,6 +178,23 @@ export class SafeLlmRouter {
       }
     }
 
+    if (!parsed.success) {
+      // Tier-10 audit closure: surface the actual Zod issues in the
+      // log so operators can diagnose. Pre-fix the catch swallowed
+      // the error info, leaving operators with only a "schema failed"
+      // string and no path to root-cause.
+      this.logger.error(
+        {
+          prompt_name: input.promptName,
+          model_id: input.modelId,
+          output_hash: outputHash,
+          zod_issues: parsed.error.issues.slice(0, 8),
+        },
+        'safe-router-schema-validation-failed',
+      );
+      throw new Error(`safe-router: response failed schema validation for ${input.promptName}`);
+    }
+
     if (triggered) {
       throw new Error(
         `safe-router: canary phrase appeared in output for ${input.promptName} — ` +
@@ -173,7 +203,7 @@ export class SafeLlmRouter {
     }
 
     return {
-      value,
+      value: value as TResult,
       canaryTriggered: triggered,
       schemaValid,
       verbatimRejections,

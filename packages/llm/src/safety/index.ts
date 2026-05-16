@@ -9,6 +9,7 @@ export {
   type VerbatimValidationOutcome,
 } from './citation.js';
 export {
+  defangSourceTagBoundary,
   renderClosedContext,
   type ClosedContextSource,
   type ClosedContextRender,

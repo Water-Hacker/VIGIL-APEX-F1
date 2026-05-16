@@ -128,9 +128,53 @@ export class LocalLlmProvider implements ProviderClient {
         signal: ac.signal,
       });
       if (!r.ok) throw new Error(`ollama HTTP ${r.status}`);
-      return (await r.json()) as OllamaResponse;
+      // Tier-10 LLM-pipeline audit closure: bound the response body
+      // before parsing. `await r.json()` reads the entire body without
+      // a size cap; a compromised Ollama instance or network-injected
+      // response could serve a multi-GB blob and OOM the worker.
+      // 16 MB is generous for any realistic Ollama JSON (a typical
+      // response is well under 1 MB; the cap exists to fail loudly on
+      // pathological inputs rather than constrain legitimate use).
+      const text = await readWithCap(r, LOCAL_PROVIDER_MAX_BODY_BYTES);
+      return JSON.parse(text) as OllamaResponse;
     } finally {
       clearTimeout(timer);
     }
   }
+}
+
+export const LOCAL_PROVIDER_MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+async function readWithCap(r: Response, maxBytes: number): Promise<string> {
+  const reader = r.body?.getReader();
+  if (!reader) {
+    // No streaming body (mocked / synthetic Response). Fall back to
+    // text() but enforce cap after read; an attacker controlling the
+    // stream side can still emit huge content, so this path remains
+    // the slow-but-cap-enforced fallback.
+    const t = await r.text();
+    if (t.length > maxBytes) {
+      throw new Error(`ollama response exceeds ${maxBytes}-byte cap (got ${t.length})`);
+    }
+    return t;
+  }
+  const decoder = new TextDecoder();
+  let total = 0;
+  let out = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* best-effort */
+      }
+      throw new Error(`ollama response exceeds ${maxBytes}-byte cap (observed ≥${total})`);
+    }
+    out += decoder.decode(value, { stream: true });
+  }
+  out += decoder.decode();
+  return out;
 }
