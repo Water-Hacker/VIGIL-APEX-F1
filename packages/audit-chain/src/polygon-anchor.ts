@@ -1,10 +1,6 @@
 import { Socket } from 'node:net';
 
-import {
-  createLogger,
-  polygonAnchorSuccess,
-  type Logger,
-} from '@vigil/observability';
+import { createLogger, polygonAnchorSuccess, type Logger } from '@vigil/observability';
 import { Errors } from '@vigil/shared';
 import { ethers } from 'ethers';
 
@@ -68,6 +64,38 @@ export class PolygonAnchor {
    * @returns the Polygon transaction hash
    */
   async commit(fromSeq: number, toSeq: number, rootHashHex: string): Promise<string> {
+    // Tier-40 audit closure: client-side input validation mirroring the
+    // T15 on-chain VIGILAnchor.sol guards. Reaching the signer (a
+    // YubiKey-touched ECDSA sign) and the chain only to revert on
+    // contract-side `InvalidRange` / `NonContiguous` / `EmptyRoot` is
+    // wasted gas + wasted YubiKey touch + a confusing operator
+    // experience. Reject obviously-bad input at the boundary.
+    if (!Number.isInteger(fromSeq) || fromSeq < 1) {
+      throw new Errors.AuditChainError({
+        code: 'POLYGON_BAD_FROM_SEQ',
+        message: `fromSeq must be a positive integer (got ${fromSeq})`,
+        severity: 'error',
+      });
+    }
+    if (!Number.isInteger(toSeq) || toSeq < fromSeq) {
+      throw new Errors.AuditChainError({
+        code: 'POLYGON_BAD_SEQ_RANGE',
+        message: `toSeq must be an integer >= fromSeq (got fromSeq=${fromSeq}, toSeq=${toSeq})`,
+        severity: 'error',
+      });
+    }
+    // Tier-40 audit closure: enforce the same precision-ceiling guard as
+    // T20 added to HashChain.append. Once seq > 2^53 the JS Number
+    // representation loses precision; the ABI encoder would broadcast
+    // the rounded value to the chain and the on-chain commitment would
+    // record a different seq than the off-chain audit-chain row.
+    if (toSeq > Number.MAX_SAFE_INTEGER) {
+      throw new Errors.AuditChainError({
+        code: 'POLYGON_SEQ_PRECISION_CEILING',
+        message: `toSeq ${toSeq} exceeds Number.MAX_SAFE_INTEGER; canonical-v2 migration required before further anchoring`,
+        severity: 'fatal',
+      });
+    }
     if (!/^[0-9a-f]{64}$/i.test(rootHashHex)) {
       throw new Errors.AuditChainError({
         code: 'POLYGON_BAD_ROOT_HASH',
@@ -128,7 +156,13 @@ export class PolygonAnchor {
     committer: string;
     timestamp: number;
   }> {
-    const r = (await this.contract.getFunction('getCommitment').staticCall(id)) as [bigint, bigint, string, string, bigint];
+    const r = (await this.contract.getFunction('getCommitment').staticCall(id)) as [
+      bigint,
+      bigint,
+      string,
+      string,
+      bigint,
+    ];
     return {
       fromSeq: Number(r[0]),
       toSeq: Number(r[1]),
@@ -205,9 +239,7 @@ export class UnixSocketSignerAdapter implements SignerAdapter {
         if (newlineAt < 0) return; // wait for more bytes
         const line = buf.slice(0, newlineAt);
         try {
-          const r = JSON.parse(line) as
-            | { ok: true; result: string }
-            | { ok: false; error: string };
+          const r = JSON.parse(line) as { ok: true; result: string } | { ok: false; error: string };
           if (r.ok) finish(null, r.result);
           else finish(new Error(r.error));
         } catch (e) {
@@ -224,6 +256,19 @@ export class UnixSocketSignerAdapter implements SignerAdapter {
 export class LocalWalletAdapter implements SignerAdapter {
   private readonly wallet: ethers.Wallet;
   constructor(privateKey: string, provider: ethers.Provider) {
+    // Tier-40 audit closure: refuse to construct in NODE_ENV=production.
+    // Pre-fix the only safeguard was the "NEVER use in prod" comment,
+    // which is unenforceable. A misconfigured local-dev script left
+    // running with NODE_ENV=production (or simply imported via the
+    // wrong barrel by a future worker) would silently hold a plaintext
+    // EOA private key in process memory next to the YubiKey-bound
+    // production signer — the exact attack surface the unix-socket
+    // signer design exists to prevent.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'LocalWalletAdapter refuses to instantiate in NODE_ENV=production; use UnixSocketSignerAdapter against vigil-polygon-signer.service instead',
+      );
+    }
     this.wallet = new ethers.Wallet(privateKey, provider);
   }
   getAddress(): Promise<string> {
