@@ -1,0 +1,48 @@
+# Trivy CVE allowlist — repo root.
+#
+# Trivy's `--ignorefile .trivyignore` auto-discovers this file when run
+# from the repo root. One CVE id per line; `#` starts a comment.
+#
+# THE RULE: an entry here MUST be paired with a runtime mitigation
+# (apt-get upgrade in the relevant Dockerfile, or a fix at the
+# application layer). The .trivyignore is for "this CVE is known +
+# tracked + mitigated in our build, but the BASE IMAGE TAG cannot be
+# bumped because no rebuilt tag exists yet upstream". Without a
+# runtime mitigation, do NOT add a CVE here.
+#
+# Every entry MUST include:
+#   - the CVE id
+#   - what it affects
+#   - the fixed version (so an operator can confirm it's tracked)
+#   - the mitigation we ship
+#   - the trigger to remove the entry
+#
+# Audit cadence: review weekly. The CI gate's whole point is to fire
+# loud on un-mitigated CVEs; a permanent ignore defeats it.
+
+# =============================================================================
+# Debian-bookworm CVEs in python:3.12-slim-bookworm
+# Disclosed 2026-05-16. Upstream python image has not been rebuilt with
+# the Debian security archive's patched packages yet (still on debian
+# 12.13; fixes available in 12.13+u14 / +u3 / +u2 respectively).
+# Runtime mitigation: infra/docker/dockerfiles/PythonWorker.Dockerfile
+# now runs `apt-get upgrade -y --no-install-recommends` at build time,
+# pulling the patched libc-bin / libcap2 / libsystemd0 / libudev1 from
+# the Debian security archive. Our shipped image carries the fix;
+# the trivy gate scans the upstream tag and cannot see the patch.
+# REMOVE THIS BLOCK once the upstream python:3.12-slim-bookworm image
+# is rebuilt (the trivy report will report 0 HIGH on its own; verify
+# locally with `trivy image python:3.12-slim-bookworm`).
+# =============================================================================
+
+# glibc integer overflow in memalign → heap corruption.
+# Affects: libc-bin, libc6. Fixed in 2.36-9+deb12u14.
+CVE-2026-0861
+
+# libcap: privilege escalation via TOCTOU race in cap_set_file().
+# Affects: libcap2. Fixed in 1:2.66-4+deb12u3.
+CVE-2026-4878
+
+# systemd: arbitrary code execution / DoS via spurious IPC message.
+# Affects: libsystemd0, libudev1. Fixed in 252.39-1~deb12u2.
+CVE-2026-29111
