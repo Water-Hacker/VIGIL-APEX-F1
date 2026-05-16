@@ -47,11 +47,17 @@ export class VaultClient {
       token = (await readFile(file, 'utf8')).trim();
     }
     const namespace = opts.namespace ?? process.env.VAULT_NAMESPACE;
+    // Tier-0 audit closure: cap Vault request time so a hung Vault
+    // (network partition, sealed-during-request, misbehaving sidecar)
+    // doesn't hang the worker's secret-access path indefinitely. 30s
+    // is generous for KV reads + token renewals; tunable via env.
+    const requestTimeoutMs = Number(process.env.VAULT_REQUEST_TIMEOUT_MS ?? 30_000);
     const client = nodeVault({
       apiVersion: 'v1',
       endpoint: addr,
       token,
       ...(namespace !== undefined && { namespace }),
+      requestOptions: { timeout: requestTimeoutMs },
     });
     const c = new VaultClient(client, opts);
     await c.startTokenRenew();
