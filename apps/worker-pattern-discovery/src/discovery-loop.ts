@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
+  MAX_CANDIDATES_PER_CYCLE,
   detectAllAnomalies,
   type DiscoveryCandidate,
   type GraphSnapshot,
@@ -53,7 +54,28 @@ export async function runDiscoveryCycle(ctx: DiscoveryCycleContext): Promise<Dis
   const now = ctx.now ?? (() => new Date());
 
   const snapshot = await ctx.loadSnapshot(windowDays);
-  const candidates = detectAllAnomalies(snapshot, now());
+  const allCandidates = detectAllAnomalies(snapshot, now());
+
+  // Tier-43 audit closure: cap per-cycle work. The HashChain emit is on
+  // a single-row append path (the chain is by definition serial), so an
+  // unbounded candidate list would block the worker AND flood the audit
+  // surface. The detector layer enforces a smaller per-detector cap;
+  // this is the outermost safety net spanning ALL detectors combined.
+  // Drop with a structured log when exceeded — partial findings get
+  // persisted, the surplus is dropped, and the cap-hit signal is what
+  // tells the curator that the snapshot needs partitioned discovery.
+  const candidates = allCandidates.slice(0, MAX_CANDIDATES_PER_CYCLE);
+  const dropped = allCandidates.length - candidates.length;
+  if (dropped > 0) {
+    ctx.logger.warn(
+      {
+        total_detected: allCandidates.length,
+        cap: MAX_CANDIDATES_PER_CYCLE,
+        dropped,
+      },
+      'pattern-discovery-cycle-candidate-cap-hit',
+    );
+  }
 
   let inserted = 0;
   let already = 0;
