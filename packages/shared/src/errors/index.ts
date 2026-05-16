@@ -45,7 +45,23 @@ export class VigilError extends Error {
   }
 
   toJSON(): JsonObject {
-    return {
+    // Tier-39 audit closure: include `cause` in the serialised form so
+    // a wrapped chain ( `VigilError(cause: pgError)` ) carries the
+    // root-cause diagnostic across audit-bridge replays, dashboard
+    // error views, and Loki shipments. Pre-fix the cause was dropped
+    // entirely — JSON.stringify(err) returned only the outer envelope
+    // and operators investigating an UNCATEGORISED 5xx had nothing to
+    // chase.
+    //
+    // The cause is serialised conservatively:
+    //   - VigilError -> recurse via its own toJSON
+    //   - Error      -> { name, message } only (NO stack, NO
+    //                    arbitrary enumerable props that might carry
+    //                    upstream-leaked content)
+    //   - unknown    -> stringify with a short prefix tag
+    // This keeps the JSON line bounded and avoids leaking driver
+    // stacks / SQL text / RPC payloads into shipped logs.
+    const out: JsonObject = {
       name: this.name,
       code: this.code,
       message: this.message,
@@ -53,7 +69,26 @@ export class VigilError extends Error {
       severity: this.severity,
       context: this.context,
     };
+    if (this.cause !== undefined) {
+      out['cause'] = serialiseCause(this.cause);
+    }
+    return out;
   }
+}
+
+/**
+ * Conservative cause-serialiser used by `VigilError.toJSON`. Exported for
+ * tests; not intended for general use.
+ */
+export function serialiseCause(c: unknown): JsonObject | string {
+  if (c instanceof VigilError) {
+    return c.toJSON();
+  }
+  if (c instanceof Error) {
+    return { name: c.name, message: c.message };
+  }
+  if (typeof c === 'string') return `string: ${c}`;
+  return `non-error: ${typeof c}`;
 }
 
 /* =============================================================================
