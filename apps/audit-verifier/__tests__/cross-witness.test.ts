@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { verifyCrossWitness } from '../src/cross-witness.js';
+import { CROSS_WITNESS_MAX_RANGE, verifyCrossWitness } from '../src/cross-witness.js';
 
 function buf(hex: string): Buffer {
   return Buffer.from(hex.padStart(64, '0'), 'hex');
@@ -106,5 +106,48 @@ describe('verifyCrossWitness (FIND-013 — reverse scan)', () => {
     expect(report.missingFromFabric).toEqual(['4']);
     expect(report.missingFromPostgres).toEqual(['99']);
     expect(report.divergentSeqs.map((d) => d.seq)).toEqual(['2']);
+  });
+
+  // ─── Tier-9 audit closures ─────────────────────────────────────────
+
+  it('rejects a range larger than CROSS_WITNESS_MAX_RANGE (memory-DoS defence)', async () => {
+    const pool = makePool([]);
+    const bridge = makeBridge([]);
+    // CROSS_WITNESS_MAX_RANGE is 500k seqs; request 500_001 to trip the cap.
+    const oversize = { from: 1n, to: CROSS_WITNESS_MAX_RANGE + 1n };
+    await expect(verifyCrossWitness(pool as never, bridge as never, oversize)).rejects.toThrow(
+      /exceeds cap/,
+    );
+  });
+
+  it('accepts a range exactly at CROSS_WITNESS_MAX_RANGE (no off-by-one at the boundary)', async () => {
+    const pool = makePool([]);
+    const bridge = makeBridge([]);
+    // span = to - from + 1; want span === CROSS_WITNESS_MAX_RANGE.
+    const exact = { from: 1n, to: CROSS_WITNESS_MAX_RANGE };
+    await expect(verifyCrossWitness(pool as never, bridge as never, exact)).resolves.toMatchObject({
+      checked: 0,
+    });
+  });
+
+  it('rejects a range where to < from (caller error)', async () => {
+    const pool = makePool([]);
+    const bridge = makeBridge([]);
+    await expect(
+      verifyCrossWitness(pool as never, bridge as never, { from: 100n, to: 1n }),
+    ).rejects.toThrow(/range invalid/);
+  });
+
+  it('normalises Fabric bodyHash case before comparison (defensive)', async () => {
+    // Hypothetical: a future chaincode rev returns UPPERCASE hex.
+    // The PG side is lowercase. The post-fix `.toLowerCase()` on
+    // Fabric values means the equality compare succeeds without
+    // mis-reporting a divergence.
+    const pool = makePool([{ seq: '1', body_hash: buf('abcdef') }]);
+    const bridge = makeBridge([{ seq: '1', bodyHash: 'abcdef'.padStart(64, '0').toUpperCase() }]);
+    const report = await verifyCrossWitness(pool as never, bridge as never, RANGE);
+    expect(report.divergentSeqs).toEqual([]);
+    expect(report.missingFromFabric).toEqual([]);
+    expect(report.missingFromPostgres).toEqual([]);
   });
 });
