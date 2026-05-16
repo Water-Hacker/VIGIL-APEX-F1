@@ -229,40 +229,87 @@ that fails to attach its shutdown hook still counts as a failed boot.
 
 ---
 
-## Adoption 4: `RetryBudget` (mode 1.5) — heaviest
+## Adoption 4: `RetryBudget` (mode 1.5) — integrated in WorkerBase
 
 ### Goal
 
-Per-call-site retry budget. Each retry-prone call (Redis reconnection,
-audit-chain append, LLM call, etc.) consults a `RetryBudget` instance
-that caps retries within a window and emits a Prometheus signal when
-the budget is exhausted.
+Cap the cluster-wide retry rate per worker so a downstream outage
+can't pull the queue into a retry storm. When a handler returns
+`{ kind: 'retry', ... }` and the worker's retry budget is exhausted,
+the message is dead-lettered with reason
+`retry-budget-exhausted: <original-reason>` instead of being
+redelivered.
 
-### Insertion sites
+### Auto-adoption
 
-This is **per-call-site, not per-worker**. The pattern:
+`WorkerBase` (in `@vigil/queue`) now wires a `RetryBudget` instance
+in its constructor automatically. Every worker that extends
+`WorkerBase` inherits the gate — **no per-worker code change**.
+
+Defaults: `maxPerWindow=120` (2 retries/sec average per worker),
+`windowSeconds=60`. The budget name is the worker name; pressure
+shows up as `vigil_retry_budget_exhausted_total{name=<worker>}`.
+
+### Override / opt-out
+
+Pass `retryBudget` in `WorkerBaseConfig`:
+
+```ts
+new MyWorker({
+  name: 'worker-foo',
+  stream: STREAMS.FOO,
+  schema: ...,
+  client: queue,
+  retryBudget: {
+    // Bump the ceiling for a worker that handles legitimate bursts.
+    maxPerWindow: 300,
+    windowSeconds: 60,
+  },
+});
+```
+
+To opt out entirely (e.g., for integration tests that drive a
+synthetic burst):
+
+```ts
+new MyWorker({ ..., retryBudget: { enabled: false } });
+```
+
+### Per-call-site budgets (optional, advanced)
+
+Beyond the central WorkerBase budget, a worker can construct
+additional per-dependency budgets (one for Polygon, one for the LLM
+provider, etc.) and gate specific call sites:
 
 ```ts
 import { RetryBudget } from '@vigil/observability';
 
-// Constructed once per logical retry context (per-worker, per-resource).
-const redisRetryBudget = new RetryBudget({
-  name: 'worker-<NAME>:redis',
-  maxRetries: 10,
-  windowMs: 60_000,
-  logger,
+const polygonBudget = new RetryBudget(queue.redis, {
+  name: `${workerName}:polygon`,
+  maxPerWindow: 30,
 });
 
-// At each retry-prone call site:
-await redisRetryBudget.retry(async () => {
-  await queue.publish('vigil:stream', envelope);
-});
+// At a Polygon-call retry site:
+const reserve = await polygonBudget.tryReserve();
+if (!reserve.allowed) {
+  // skip the retry; fail-fast or wait the window
+  return { kind: 'dead-letter', reason: 'polygon-budget-exhausted' };
+}
 ```
 
-### Why deferred
+This is **optional**, not required for adoption — the central
+WorkerBase budget covers the common case.
 
-Requires identifying the worker's retry-prone code paths + restructuring
-each. Different shape per worker. Schedule as a focused per-worker PR.
+### Verification
+
+```bash
+# Cluster-wide retry rate per worker (current window):
+curl -s http://prometheus:9090/api/v1/query?query=vigil_retry_budget_exhausted_total
+
+# A worker hitting the ceiling triggers the
+# `handler-retry-budget-exhausted-deadletter` log at error level
+# AND increments the counter above.
+```
 
 ---
 

@@ -10,6 +10,7 @@ import {
   processingDuration,
   redisAckLatency,
   registerShutdown,
+  RetryBudget,
   withCorrelation,
   workerLastTickSeconds,
   type Logger,
@@ -79,12 +80,32 @@ export interface WorkerBaseConfig<TPayload> {
    * and the redisAckLatency histogram.
    */
   readonly clock?: Time.Clock;
+  /**
+   * Mode 1.5 — central retry-budget gate. The worker's retry path is
+   * checked against a Redis-backed sliding-window counter. When the
+   * worker's retry rate exceeds the budget, retries are converted to
+   * dead-letters with reason `retry-budget-exhausted: ...`.
+   *
+   * Defaults: maxPerWindow=120 (2/sec average), windowSeconds=60.
+   * Budget name = worker name; surfaces in
+   * vigil_retry_budget_exhausted_total{name=<worker>}.
+   *
+   * Set `enabled: false` to opt out (the worker reverts to unlimited
+   * retries up to maxRetries). Set `maxPerWindow` to override the
+   * default ceiling — e.g. for a worker known to handle bursts
+   * legitimately above 120/min.
+   */
+  readonly retryBudget?: {
+    readonly enabled?: boolean;
+    readonly maxPerWindow?: number;
+    readonly windowSeconds?: number;
+  };
 }
 
 export abstract class WorkerBase<TPayload> {
   protected readonly logger: Logger;
   protected readonly config: Required<
-    Omit<WorkerBaseConfig<TPayload>, 'logger' | 'schemaVersion' | 'clock'>
+    Omit<WorkerBaseConfig<TPayload>, 'logger' | 'schemaVersion' | 'clock' | 'retryBudget'>
   > & {
     schemaVersion: number;
   };
@@ -107,6 +128,9 @@ export abstract class WorkerBase<TPayload> {
   private readonly errorWindowMs = 60_000;
   private circuitOpenUntil = 0;
 
+  // Mode 1.5 — retry-budget gate; null when the worker opted out.
+  private readonly retryBudget: RetryBudget | null;
+
   constructor(cfg: WorkerBaseConfig<TPayload>) {
     this.logger = cfg.logger ?? createLogger({ service: cfg.name });
     this.clock = cfg.clock ?? Time.systemClock;
@@ -120,6 +144,17 @@ export abstract class WorkerBase<TPayload> {
         cfg.idleReclaimMs ?? Number(process.env.REDIS_CONSUMER_IDLE_RECLAIM_MS ?? 300_000),
       schemaVersion: cfg.schemaVersion ?? 1,
     };
+    // Always-on by default. The `enabled: false` escape hatch is for
+    // workers (e.g. integration tests with synthetic high burst) where
+    // the budget would interfere with intent.
+    const budgetEnabled = cfg.retryBudget?.enabled !== false;
+    this.retryBudget = budgetEnabled
+      ? new RetryBudget(cfg.client.redis, {
+          name: cfg.name,
+          maxPerWindow: cfg.retryBudget?.maxPerWindow ?? 120,
+          windowSeconds: cfg.retryBudget?.windowSeconds ?? 60,
+        })
+      : null;
   }
 
   /**
@@ -335,6 +370,33 @@ export abstract class WorkerBase<TPayload> {
           this.recordOutcome(true);
           break;
         case 'retry':
+          // Mode 1.5 — retry-budget gate. If the worker's retry rate
+          // has exceeded its sliding-window ceiling, convert the retry
+          // to a dead-letter so a downstream outage can't pull the
+          // queue into a retry storm. Budget instance is shared across
+          // worker replicas via Redis-backed counters.
+          if (this.retryBudget !== null) {
+            const reserve = await this.retryBudget.tryReserve();
+            if (!reserve.allowed) {
+              this.logger.error(
+                {
+                  redisId,
+                  reason: outcome.reason,
+                  budgetName: name,
+                  current: reserve.current,
+                  ceiling: reserve.ceiling,
+                },
+                'handler-retry-budget-exhausted-deadletter',
+              );
+              await this.deadLetterAndAck(
+                redisId,
+                body,
+                `retry-budget-exhausted: ${outcome.reason}`,
+              );
+              this.recordOutcome(false);
+              break;
+            }
+          }
           this.logger.warn({ redisId, reason: outcome.reason }, 'handler-retry');
           // Don't ACK — Redis will redeliver after pending-idle time
           if (outcome.delay_ms !== undefined && outcome.delay_ms > 0) {
