@@ -33,6 +33,14 @@ Thumbs.db
 .idea/
 *.swp
 
+# Local agent session state (Claude Code per-session cache)
+.claude/
+
+# Chaincode build artefacts — chaincode is built in CI from a clean
+# install; the lockfile is not part of the source of truth.
+chaincode/audit-witness/package-lock.json
+chaincode/audit-witness/node_modules/
+
 # Documentation extracts (kept under /tmp during work, not in repo)
 /tmp/
 
