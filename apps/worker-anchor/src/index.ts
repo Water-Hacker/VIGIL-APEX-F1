@@ -144,6 +144,28 @@ async function main(): Promise<void> {
       logger.info({ fromSeq, toSeq, rootHash }, 'anchoring');
       const txHash = await anchor.commit(fromSeq, toSeq, rootHash);
 
+      // Tier-11 audit FLAG (NOT fixed in this PR — needs architect
+      // input on VIGILAnchor.sol uniqueness semantics):
+      //
+      // Race: if anchor.commit() succeeds and this INSERT then fails
+      // (DB outage / connection drop / SERIALIZABLE conflict), the
+      // on-chain anchor is committed but there is no local
+      // anchor_commitment row. The MAX(seq_to) check at the top of
+      // the loop will not see the missing range; the next tick will
+      // re-anchor [fromSeq, toSeq] → duplicate on-chain commit.
+      //
+      // Mitigations to consider:
+      //   (a) pre-insert with polygon_tx_hash=NULL BEFORE commit, then
+      //       UPDATE the tx_hash on success. Failure leaves a row
+      //       with null tx_hash but the range is claimed (lastAnchored
+      //       advances). A separate recovery worker scans null-tx
+      //       rows and either retries or marks dead.
+      //   (b) make VIGILAnchor.sol revert on a re-commit of the same
+      //       (fromSeq, toSeq) tuple. Each duplicate would then fail
+      //       on-chain with a clear revert reason rather than land as
+      //       two distinct commitments.
+      //
+      // Both are larger changes. Logged as a known gap.
       await pool.query(
         `INSERT INTO audit.anchor_commitment (id, seq_from, seq_to, root_hash, polygon_tx_hash, polygon_confirmed_at)
          VALUES (gen_random_uuid(), $1, $2, $3, $4, NULL)`,
@@ -152,8 +174,13 @@ async function main(): Promise<void> {
       backoff.onSuccess();
     } catch (e) {
       backoff.onError();
+      const err = e instanceof Error ? e : new Error(String(e));
       logger.error(
-        { err: e, consecutiveFailures: backoff.consecutiveFailureCount },
+        {
+          err_name: err.name,
+          err_message: err.message,
+          consecutiveFailures: backoff.consecutiveFailureCount,
+        },
         'anchor-loop-error',
       );
     }
