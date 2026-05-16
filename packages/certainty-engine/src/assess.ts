@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-
 import {
   ENGINE_VERSION,
   computePosterior,
@@ -146,9 +145,33 @@ export function assessFinding(input: AssessFindingInput): AssessFindingOutput {
     independentSourceCount: independent,
   });
 
-  // Canonical input hash — independent of component ordering.
+  // Tier-32 audit closure: input_hash now covers the full reproducibility
+  // surface — prior + components + severity + modelVersion + promptRegistry
+  // + adversarial outcome. Pre-fix only `prior + components` were hashed,
+  // so two assessments produced from the same evidence under different
+  // models / different adversarial outcomes shared the same input_hash —
+  // making the hash useless for the "regenerate from the same inputs"
+  // reproducibility check that downstream callers rely on.
+  const canonicalAdversarial = JSON.stringify({
+    devils_advocate_coherent: adversarial.devils_advocate_coherent,
+    devils_advocate_summary: adversarial.devils_advocate_summary,
+    counterfactual_robust: adversarial.counterfactual_robust,
+    counterfactual_posterior: adversarial.counterfactual_posterior,
+    order_randomisation_stable: adversarial.order_randomisation_stable,
+    order_randomisation_min: adversarial.order_randomisation_min,
+    order_randomisation_max: adversarial.order_randomisation_max,
+    secondary_review_agreement: adversarial.secondary_review_agreement,
+  });
   const inputHash = createHash('sha256')
     .update(canonicalHashable({ prior, components }))
+    .update('|severity=')
+    .update(input.severity)
+    .update('|model=')
+    .update(input.modelVersion)
+    .update('|prompt-registry=')
+    .update(input.promptRegistryHash)
+    .update('|adversarial=')
+    .update(canonicalAdversarial)
     .digest('hex');
 
   const assessment: Schemas.CertaintyAssessment = {

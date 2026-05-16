@@ -38,9 +38,21 @@ export function priorToOdds(prior: number): number {
   return prior / (1 - prior);
 }
 
+/**
+ * Tier-32 audit closure: many high-LR components stacking multiplicatively
+ * can push odds past Number.MAX_VALUE, and Infinity → NaN through
+ * `Infinity / (1 + Infinity)`. Clamp at 1e15 so `clamp / (1 + clamp)`
+ * is still strictly < 1 at IEEE-754 precision (`1 + 1e18` rounds to
+ * `1e18` because 1e18 > 2^53; 1e15 stays representable).
+ */
+const ODDS_CLAMP = 1e15;
+
 export function oddsToProbability(odds: number): number {
-  if (!Number.isFinite(odds) || odds < 0) {
-    throw new Error(`odds must be finite >= 0, got ${odds}`);
+  if (Number.isNaN(odds) || odds < 0) {
+    throw new Error(`odds must be a non-negative number, got ${odds}`);
+  }
+  if (!Number.isFinite(odds) || odds > ODDS_CLAMP) {
+    return ODDS_CLAMP / (1 + ODDS_CLAMP);
   }
   return odds / (1 + odds);
 }
@@ -68,6 +80,10 @@ export function computePosterior(input: ComputePosteriorInput): ComputePosterior
       throw new Error(`damped LR went non-positive for ${c.evidence_id}`);
     }
     odds = odds * damped;
+    // Tier-32 audit closure: cap the running odds product so a long
+    // chain of high-LR components cannot push the multiplicative
+    // accumulator past Number.MAX_VALUE → Infinity → NaN downstream.
+    if (odds > ODDS_CLAMP) odds = ODDS_CLAMP;
   }
   return {
     priorOdds,
