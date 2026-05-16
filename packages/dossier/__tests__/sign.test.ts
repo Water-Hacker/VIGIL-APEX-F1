@@ -127,3 +127,73 @@ describe('AUDIT-063 — gpgDetachSign failure path', () => {
     expect((caught as Error).message).toMatch(/ENOENT|nonexistent/i);
   });
 });
+
+describe('Tier-35 — gpgDetachSign tmp-file hygiene', () => {
+  it('unlinks the tmp file on the success path', async () => {
+    const { readdirSync } = await import('node:fs');
+    const before = readdirSync(tmpdir()).filter((f) => f.startsWith('vigil-dossier-'));
+    await gpgDetachSign(Buffer.from('SUCCESS-PAYLOAD'), {
+      fingerprint: TEST_FINGERPRINT,
+      gpgBinary: fakeGpgOk,
+    });
+    const after = readdirSync(tmpdir()).filter((f) => f.startsWith('vigil-dossier-'));
+    // No new vigil-dossier-* file should remain after the call.
+    expect(after.length).toBeLessThanOrEqual(before.length);
+  });
+
+  it('unlinks the tmp file on the failure path too', async () => {
+    const { readdirSync } = await import('node:fs');
+    const before = readdirSync(tmpdir()).filter((f) => f.startsWith('vigil-dossier-'));
+    let caught: unknown;
+    try {
+      await gpgDetachSign(Buffer.from('FAIL-PAYLOAD'), {
+        fingerprint: TEST_FINGERPRINT,
+        gpgBinary: fakeGpgFail,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeDefined();
+    const after = readdirSync(tmpdir()).filter((f) => f.startsWith('vigil-dossier-'));
+    expect(after.length).toBeLessThanOrEqual(before.length);
+  });
+
+  it('uses a 32-hex-char random suffix (not pid+timestamp)', async () => {
+    const { readdirSync, writeFileSync, mkdtempSync: mk2 } = await import('node:fs');
+    // Capture the tmp-file path by intercepting via a fake gpg that
+    // echoes its argv. The last arg is the pdf path.
+    const probeDir = mk2(path.join(tmpdir(), 'vigil-dossier-probe-'));
+    const probeGpg = path.join(probeDir, 'gpg-probe.sh');
+    writeFileSync(
+      probeGpg,
+      '#!/bin/sh\nlast="${@: -1}"\nprintf "%s\\n" "$last" >&2\nprintf "%s" "ok-sig"\nexit 0\n',
+      { mode: 0o755 },
+    );
+    let stderrCapture = '';
+    const origLogger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: (obj: unknown) => {
+        stderrCapture = JSON.stringify(obj);
+      },
+      debug: () => undefined,
+      trace: () => undefined,
+      fatal: () => undefined,
+    };
+    // Spawn directly so we can read the path from stderr.
+    const { spawnSync } = await import('node:child_process');
+    const result = spawnSync(probeGpg, ['x']);
+    void result;
+    void readdirSync;
+    void origLogger;
+    void stderrCapture;
+    // Better approach: assert the source uses crypto.randomBytes for
+    // the filename instead. Source-grep regression matching the
+    // T24/T30/T31 style.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(path.join(__dirname, '..', 'src', 'sign.ts'), 'utf8');
+    expect(src).toMatch(/randomBytes\(16\)\.toString\(['"]hex['"]\)/);
+    // And NOT the predictable shape it had pre-T35.
+    expect(src).not.toMatch(/vigil-dossier-\$\{process\.pid\}-\$\{Date\.now\(\)\}/);
+  });
+});

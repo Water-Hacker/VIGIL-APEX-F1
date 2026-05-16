@@ -33,8 +33,17 @@ export async function renderDossierDocx(
   try {
     qrPng = await generateQrPng(input.publicLedgerCheckpointUrl);
   } catch (err) {
+    // Tier-35 audit closure: structured err_name / err_message rather
+    // than the raw Error object, matching the T13/T15/T16/T17/T19/T21/
+    // T24/T29 convention.
+    const e = err instanceof Error ? err : new Error(String(err));
     logger.error(
-      { err, ref: input.ref, url: input.publicLedgerCheckpointUrl },
+      {
+        err_name: e.name,
+        err_message: e.message,
+        ref: input.ref,
+        url: input.publicLedgerCheckpointUrl,
+      },
       'dossier-render-qr-failed',
     );
     throw err;
