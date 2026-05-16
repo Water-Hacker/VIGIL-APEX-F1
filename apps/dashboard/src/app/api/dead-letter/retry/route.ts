@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import { requireAuthProof } from '../../../../lib/auth-proof-require';
 import { batchDeadLetterUpdate, DeadLetterNotFoundError } from '../../../../lib/dead-letter.server';
 
 export const dynamic = 'force-dynamic';
@@ -26,10 +27,10 @@ const zBody = z.object({
  * itself, because that would couple the dashboard to the queue layout.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const roles = (req.headers.get('x-vigil-roles') ?? '').split(',').filter(Boolean);
-  if (!(roles.includes('operator') || roles.includes('architect'))) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  }
+  // Tier-17 audit closure: verify the middleware-minted auth-proof HMAC,
+  // not just the spoofable `x-vigil-roles` header.
+  const auth = await requireAuthProof(req, { allowedRoles: ['operator', 'architect'] });
+  if (!auth.ok) return auth.response!;
 
   const parsed = zBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { decideProposal, ProposalNotEligibleError } from '../../../../../lib/adapter-repair.server';
+import { requireAuthProof } from '../../../../../lib/auth-proof-require';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,20 +13,19 @@ const zBody = z.object({
 });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const roles = (req.headers.get('x-vigil-roles') ?? '').split(',').filter(Boolean);
+  // Tier-17 audit closure: verify the middleware-minted auth-proof HMAC.
   // Critical adapter approvals require architect role; operators can
   // only flip non-critical (and the worker auto-promotes those anyway,
   // so the operator's role here is effectively to manually trigger
   // a non-critical promotion early or to reject a noisy candidate).
-  if (!(roles.includes('operator') || roles.includes('architect'))) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  }
+  const auth = await requireAuthProof(req, { allowedRoles: ['operator', 'architect'] });
+  if (!auth.ok) return auth.response!;
   const parsed = zBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid', issues: parsed.error.issues }, { status: 400 });
   }
 
-  const decidedBy = req.headers.get('x-vigil-username') ?? 'unknown';
+  const decidedBy = auth.actor ?? req.headers.get('x-vigil-username') ?? 'unknown';
   try {
     await decideProposal(
       parsed.data.proposal_id,

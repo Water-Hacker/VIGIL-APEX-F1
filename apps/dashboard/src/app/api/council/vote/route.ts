@@ -6,6 +6,7 @@ import { Constants } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import { requireAuthProof } from '../../../../lib/auth-proof-require';
 import {
   InvalidWebauthnOriginError,
   parseAllowedWebauthnOrigins,
@@ -44,10 +45,18 @@ const zVote = z.object({
 });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Identity from middleware (C1) — server-only header injected after JWT verify.
-  const userId = req.headers.get('x-vigil-user');
-  const roles = (req.headers.get('x-vigil-roles') ?? '').split(',').filter(Boolean);
-  if (!userId || !(roles.includes('council_member') || roles.includes('architect'))) {
+  // Tier-17 audit closure: identity from middleware (C1) is verified via
+  // the auth-proof HMAC, not just the spoofable `x-vigil-roles` header.
+  // The WebAuthn assertion below remains the load-bearing council-member
+  // binding (DECISION-008); the proof gate is defence-in-depth so that a
+  // middleware bypass cannot reach the WebAuthn challenge lookup with a
+  // forged actor identity.
+  const auth = await requireAuthProof(req, {
+    allowedRoles: ['council_member', 'architect'],
+  });
+  if (!auth.ok) return auth.response!;
+  const userId = auth.actor ?? req.headers.get('x-vigil-user');
+  if (!userId) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
