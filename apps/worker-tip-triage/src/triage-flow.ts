@@ -124,6 +124,29 @@ export async function handleTip(
   deps: TipTriageDeps,
   env: Envelope<TipTriagePayload>,
 ): Promise<HandlerOutcome> {
+  // Tier-50 audit closure: reject duplicate decryption shares at the
+  // worker boundary. Shamir's secret sharing requires distinct
+  // (polynomially-independent) shares; combining identical shares
+  // produces a malformed key and surfaces opaquely as a decrypt-
+  // failure further down. Catch it here with a structured reason so
+  // operators see "duplicate-shares-submitted" instead of debugging
+  // a downstream libsodium error. Defence-in-depth against a caller
+  // bug or a replay where someone submits one council share three
+  // times in the hope of single-handedly clearing the 3-of-5 quorum.
+  const shares = env.payload.decryption_shares;
+  const uniqueShares = new Set(shares);
+  if (uniqueShares.size !== shares.length) {
+    deps.logger.error(
+      {
+        tip_id: env.payload.tip_id,
+        submitted: shares.length,
+        unique: uniqueShares.size,
+      },
+      'duplicate-decryption-shares; refusing triage',
+    );
+    return { kind: 'dead-letter', reason: 'duplicate-decryption-shares' };
+  }
+
   // tip_id is the row UUID (matches Zod schema + the dashboard
   // /api/triage/tips/decrypt body). Lookup must hit the id column, not ref.
   const tip = await deps.tipRepo.getById(env.payload.tip_id);
@@ -179,6 +202,21 @@ export async function handleTip(
       return { kind: 'dead-letter', reason: 'decrypt-failure' };
     }
     const text = new TextDecoder().decode(plaintext);
+    // Tier-50 audit closure: wipe the libsodium plaintext buffer
+    // IMMEDIATELY after decoding to a JS string. Pre-fix the Uint8Array
+    // sat through the entire LLM round-trip (potentially many seconds
+    // on slow Bedrock latency); even though the finally block wiped on
+    // exit, the exposure window was unnecessarily wide. The JS string
+    // `text` (and the derived `paraphraseInput`) cannot be wiped by
+    // the application — V8 strings are immutable, so the libsodium
+    // buffer is the only handle the worker fully controls. Drop it
+    // the moment it stops being needed.
+    await wipe(plaintext);
+    plaintext = ZERO_BYTES;
+    // Same for the Shamir-reconstructed key: the LLM call doesn't
+    // need it, so shrink that exposure window too.
+    await wipe(reconstructedSkBytes);
+    reconstructedSkBytes = null;
 
     // The paraphrase prompt window is 4000 chars. Surface truncation so
     // operators see "this tip was longer than the paraphrase budget" in
