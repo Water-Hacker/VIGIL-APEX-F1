@@ -29,6 +29,14 @@ export class VaultClient {
   private readonly logger: Logger;
   private readonly kvMount: string;
   private renewTimer: NodeJS.Timeout | null = null;
+  // Tier-25 audit closure: track consecutive token-renew failures. The
+  // pre-fix loop incremented a metric but kept firing forever — a
+  // wedged Vault would leave the worker holding an expired token until
+  // the next vault.read 403'd. After N consecutive failures we surface
+  // a structured fatal log + emit a synthetic error event so the
+  // operator alert fires before any secret-using path errors out.
+  private consecutiveRenewFailures = 0;
+  private static readonly MAX_CONSECUTIVE_RENEW_FAILURES = 5;
 
   private constructor(client: ReturnType<typeof nodeVault>, opts: VaultClientOptions) {
     this.vault = client;
@@ -79,7 +87,16 @@ export class VaultClient {
       }
       return wrapSecret(value as T);
     } catch (e) {
-      this.logger.error({ err: e, path: fullPath, field }, 'vault-read-failed');
+      // Tier-25 audit closure: log err_name/err_message instead of the
+      // raw error object. node-vault's error responses can include the
+      // upstream Vault body, which may carry secret-derived context;
+      // structured fields avoid serialising attacker-influenced payloads
+      // and match the T13/T15/T16/T17/T19/T21 convention.
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error(
+        { err_name: err.name, err_message: err.message, path: fullPath, field },
+        'vault-read-failed',
+      );
       throw e instanceof Errors.VigilError
         ? e
         : new Errors.VigilError({
@@ -148,22 +165,53 @@ export class VaultClient {
       }, interval);
       this.renewTimer.unref();
     } catch (e) {
-      this.logger.warn({ err: e }, 'vault-token-lookup-failed');
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.warn(
+        { err_name: err.name, err_message: err.message },
+        'vault-token-lookup-failed',
+      );
     }
   }
 
   private async renewToken(): Promise<void> {
     try {
       await this.vault.tokenRenewSelf();
+      this.consecutiveRenewFailures = 0;
       this.logger.debug('vault-token-renewed');
     } catch (e) {
-      this.logger.error({ err: e }, 'vault-token-renew-failed');
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.consecutiveRenewFailures += 1;
+      this.logger.error(
+        {
+          err_name: err.name,
+          err_message: err.message,
+          consecutive_failures: this.consecutiveRenewFailures,
+        },
+        'vault-token-renew-failed',
+      );
       // AUDIT-058: increment a counter so an alert can fire on
       // sustained failures (a worker silently outliving its token
       // TTL would otherwise look like a Vault outage from the
       // dashboard hours later).
       const service = process.env.OTEL_SERVICE_NAME ?? 'unknown';
       vaultTokenRenewFailedTotal.labels({ service }).inc();
+      // Tier-25 audit closure: after MAX_CONSECUTIVE_RENEW_FAILURES,
+      // emit a fatal-level log so the on-call alert fires BEFORE the
+      // first secret-using path 403s. We deliberately do not exit the
+      // process here — the worker owner decides the escalation policy
+      // (some workers can degrade gracefully on a stale token; others
+      // can't). The fatal log + the AUDIT-058 counter both surface;
+      // the alertmanager rule on vault_token_renew_failed_total >= 5
+      // already covers the operational threshold.
+      if (this.consecutiveRenewFailures >= VaultClient.MAX_CONSECUTIVE_RENEW_FAILURES) {
+        this.logger.fatal(
+          {
+            consecutive_failures: this.consecutiveRenewFailures,
+            threshold: VaultClient.MAX_CONSECUTIVE_RENEW_FAILURES,
+          },
+          'vault-token-renew-exhausted; worker holding stale token',
+        );
+      }
     }
   }
 
