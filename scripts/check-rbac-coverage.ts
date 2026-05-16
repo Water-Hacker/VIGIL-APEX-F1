@@ -99,6 +99,30 @@ function walkPages(root: string, found: string[] = []): string[] {
   return found;
 }
 
+/**
+ * Tier-5 dashboard RBAC audit closure: also walk API `route.ts` files.
+ * Pre-fix, the coverage gate only checked `page.tsx` UI routes — a new
+ * API route handler at `apps/dashboard/src/app/api/<path>/route.ts`
+ * could ship with no matching ROUTE_RULES entry and middleware would
+ * silently let any authenticated user through. The gap was real: the
+ * audit caught two such routes (/api/audit/discovery-queue/curate and
+ * /api/realtime) shipping with no middleware rule.
+ *
+ * Now `route.ts` files under `api/` are enumerated alongside pages.
+ */
+function walkApiRoutes(root: string, found: string[] = []): string[] {
+  for (const entry of readdirSync(root)) {
+    const abs = join(root, entry);
+    const st = statSync(abs);
+    if (st.isDirectory()) {
+      walkApiRoutes(abs, found);
+    } else if (entry === 'route.ts' || entry === 'route.tsx' || entry === 'route.js') {
+      found.push(abs);
+    }
+  }
+  return found;
+}
+
 function pathToRoute(absPath: string): string {
   const rel = relative(APP_DIR, dirname(absPath));
   if (rel === '' || rel === '.') return '/';
@@ -132,8 +156,10 @@ function main(): void {
   if (pages.length === 0) {
     fail(2, `no page.tsx files found under ${APP_DIR}`);
   }
+  const apiRoutes = walkApiRoutes(join(APP_DIR, 'api'));
 
-  const violations: { route: string; file: string }[] = [];
+  const violations: { route: string; file: string; kind: 'page' | 'api' }[] = [];
+
   for (const pageFile of pages) {
     const route = pathToRoute(pageFile);
 
@@ -146,7 +172,16 @@ function main(): void {
 
     if (isPublic) continue;
     if (isRuled) continue;
-    violations.push({ route, file: relative(ROOT, pageFile) });
+    violations.push({ route, file: relative(ROOT, pageFile), kind: 'page' });
+  }
+
+  for (const apiFile of apiRoutes) {
+    const route = pathToRoute(apiFile);
+    const isPublic = publicPrefixes.some((p) => matches(route, p));
+    const isRuled = rulePrefixes.some((p) => matches(route, p));
+    if (isPublic) continue;
+    if (isRuled) continue;
+    violations.push({ route, file: relative(ROOT, apiFile), kind: 'api' });
   }
 
   if (violations.length > 0) {
@@ -154,22 +189,23 @@ function main(): void {
     console.error('[check-rbac-coverage] CRITICAL — unmapped operator routes (FIND-004 gate):');
     console.error('');
     for (const v of violations) {
-      console.error(`  ✗  ${v.route}`);
+      console.error(`  ✗  ${v.route}   [${v.kind}]`);
       console.error(`     ${v.file}`);
     }
     console.error('');
-    console.error('Each of the above pages is reachable WITHOUT middleware authorization.');
+    console.error('Each of the above routes is reachable WITHOUT middleware authorization.');
     console.error('Add a matching ROUTE_RULES entry in apps/dashboard/src/middleware.ts:');
     console.error("  { prefix: '/<your-prefix>', allow: ['<role>', ...] }");
     console.error('');
-    console.error('OR — if the page is intentionally public — add the prefix to');
+    console.error('OR — if the route is intentionally public — add the prefix to');
     console.error('PUBLIC_PREFIXES (above ROUTE_RULES) in the same file.');
     console.error('');
     process.exit(1);
   }
 
   console.log(
-    `[check-rbac-coverage] OK — ${pages.length} pages mapped (${publicPrefixes.length} public prefixes, ${rulePrefixes.length} route rules).`,
+    `[check-rbac-coverage] OK — ${pages.length} pages + ${apiRoutes.length} API routes mapped ` +
+      `(${publicPrefixes.length} public prefixes, ${rulePrefixes.length} route rules).`,
   );
 }
 
