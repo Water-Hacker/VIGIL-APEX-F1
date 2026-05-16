@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -93,6 +94,40 @@ export class StartupGuard {
     this.tripSleepInitialMs = opts.tripSleepInitialMs ?? DEFAULT_TRIP_SLEEP_INITIAL_MS;
     this.tripSleepCapMs = opts.tripSleepCapMs ?? DEFAULT_TRIP_SLEEP_CAP_MS;
     this.exitCode = opts.exitCode ?? DEFAULT_EXIT_CODE;
+
+    // Materialise the failures-counter label at construction so the
+    // `vigil_worker_startup_failures_total{service=<name>}` time series
+    // exists in the Prometheus exposition from the first scrape, before
+    // any failure has occurred. Without this, operators charting the
+    // counter wouldn't see the series until the first trip — which is
+    // both the time at which they most need it AND the time at which
+    // they'd struggle to differentiate "guard never armed" from "guard
+    // armed and clean". The label-materialise pattern is the
+    // prom-client-recommended replacement for inc-by-zero.
+    startupGuardFailuresTotal.labels({ service: this.serviceName });
+  }
+
+  /**
+   * Best-effort check that the sentinel directory is writable. Logs at
+   * warn level if not — does NOT throw, because boot-blocking on a
+   * misconfigured tmpfs would be worse than the diminished crash-loop
+   * detection (the sentinel-write failure path now also surfaces
+   * via metric + log, so degraded mode is observable).
+   *
+   * Override the sentinel dir via the VIGIL_STARTUP_SENTINEL_DIR env
+   * var or the `sentinelDir` constructor option.
+   */
+  async preflight(): Promise<void> {
+    const dir = dirname(this.sentinelPath);
+    try {
+      await mkdir(dir, { recursive: true });
+      await access(dir, fsConstants.W_OK);
+    } catch (e) {
+      this.logger?.warn(
+        { service: this.serviceName, dir, err: String(e) },
+        'startup-guard-sentinel-dir-not-writable; crash-loop detection will run in degraded mode',
+      );
+    }
   }
 
   /**
@@ -134,8 +169,22 @@ export class StartupGuard {
     // markBootSuccess() can remove it.
     const t = now();
     this.bootInProgressMarker = t;
-    await this.writeSentinel({ version: 1, failures: [...recent, t] });
-    startupGuardFailuresTotal.inc({ service: this.serviceName }, 0); // touch label so the gauge is observable
+    try {
+      await this.writeSentinel({ version: 1, failures: [...recent, t] });
+    } catch (e) {
+      // Issue #5 — fail-loud. If we cannot persist the boot-in-progress
+      // entry, the crash-loop guard is silently bypassed for this boot:
+      // a subsequent failure won't be counted because there's no record
+      // that this boot was ever in progress. Surface via both metric
+      // and log so operators can see the degradation; throw so the
+      // worker's main().catch sees the boot did not arm cleanly.
+      startupGuardFailuresTotal.inc({ service: this.serviceName }, 1);
+      this.logger?.error(
+        { service: this.serviceName, sentinelPath: this.sentinelPath, err: String(e) },
+        'startup-guard-sentinel-write-failed; crash-loop protection NOT armed for this boot',
+      );
+      throw new Error(`StartupGuard: sentinel write failed for ${this.serviceName}: ${String(e)}`);
+    }
     this.logger?.info(
       {
         service: this.serviceName,
@@ -155,7 +204,16 @@ export class StartupGuard {
   async markBootSuccess(): Promise<void> {
     if (this.bootInProgressMarker === null) return;
     const prior = await this.readSentinel();
-    const filtered = prior.failures.filter((t) => t !== this.bootInProgressMarker);
+    // Issue #4 mitigation — exact-once removal. The previous
+    // `filter(t => t !== marker)` would delete ALL entries matching
+    // the timestamp, which on a same-millisecond double-boot would
+    // erase the OTHER boot's marker too. indexOf+splice removes
+    // exactly one occurrence — the first match — which is correct
+    // for our use case (we're removing this boot's own entry, not
+    // all entries at that timestamp).
+    const filtered = [...prior.failures];
+    const idx = filtered.indexOf(this.bootInProgressMarker);
+    if (idx >= 0) filtered.splice(idx, 1);
     if (filtered.length === 0) {
       // Clean up the file entirely so an idle service doesn't leave junk.
       await rm(this.sentinelPath, { force: true });
@@ -190,7 +248,16 @@ export class StartupGuard {
   }
 
   private async writeSentinel(s: SentinelFile): Promise<void> {
+    // Issue #3 — atomic temp+rename write. POSIX `rename(2)` is atomic;
+    // concurrent boots cannot observe a half-written sentinel. Per-PID
+    // suffix prevents two writers from clobbering each other's tmp file.
+    // The non-atomic `writeFile(path, ...)` form (a) allowed a mid-write
+    // crash to leave a corrupt JSON, masking the data via the readSentinel
+    // fallback to `failures: []`, and (b) under a same-instant rolling
+    // deployment could let one writer's content interleave with another's.
     await mkdir(dirname(this.sentinelPath), { recursive: true });
-    await writeFile(this.sentinelPath, JSON.stringify(s), 'utf8');
+    const tmpPath = `${this.sentinelPath}.tmp.${process.pid}`;
+    await writeFile(tmpPath, JSON.stringify(s), 'utf8');
+    await rename(tmpPath, this.sentinelPath);
   }
 }

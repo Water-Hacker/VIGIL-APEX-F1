@@ -179,4 +179,101 @@ describe('StartupGuard (mode 1.7)', () => {
     const after = JSON.parse(await readFile(sentinelPath, 'utf8')) as { failures: number[] };
     expect(after.failures).toEqual([1_000]);
   });
+
+  // ── Code-review follow-ups ────────────────────────────────────────────
+
+  it('atomic write — no stale `.tmp` files left behind on success', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const exit = vi.fn();
+    const guard = new StartupGuard({
+      serviceName: 'svc-atomic',
+      sentinelDir: tmpDir,
+      maxFailures: 5,
+      windowMs: 60_000,
+      tripSleepInitialMs: 1,
+      tripSleepCapMs: 1,
+    });
+    await guard.check({ now: () => 1_000, exit: exit as never });
+    await guard.markBootSuccess();
+    // After a clean boot + success, the dir contains no tmp files
+    // (atomic rename removed the `.tmp.<pid>` artefact).
+    const entries = await readdir(tmpDir);
+    expect(entries.filter((e) => e.includes('.tmp.'))).toEqual([]);
+  });
+
+  it('exact-once removal: same-millisecond double-boot only removes ONE marker', async () => {
+    const sentinelPath = join(tmpDir, 'svc-collision.startup-failures.json');
+    // Two prior entries at the same timestamp (simulating two concurrent
+    // boots that both registered at t=5_000).
+    await writeFile(sentinelPath, JSON.stringify({ version: 1, failures: [5_000, 5_000, 9_999] }));
+    const exit = vi.fn();
+    const guard = new StartupGuard({
+      serviceName: 'svc-collision',
+      sentinelDir: tmpDir,
+      maxFailures: 10,
+      windowMs: 60_000,
+      tripSleepInitialMs: 1,
+      tripSleepCapMs: 1,
+    });
+    // This boot also lands at t=5_000 (the collision case).
+    await guard.check({ now: () => 5_000, exit: exit as never });
+    // After arm: [5_000, 5_000, 9_999, 5_000] — three entries at t=5_000.
+    const armed = JSON.parse(await readFile(sentinelPath, 'utf8')) as { failures: number[] };
+    expect(armed.failures.filter((t) => t === 5_000).length).toBe(3);
+
+    await guard.markBootSuccess();
+    // Exact-once removal: only ONE 5_000 entry deleted, the other two
+    // (representing in-flight peer boots) survive. Pre-fix `filter`
+    // would have deleted all three.
+    const cleared = JSON.parse(await readFile(sentinelPath, 'utf8')) as { failures: number[] };
+    expect(cleared.failures.filter((t) => t === 5_000).length).toBe(2);
+    expect(cleared.failures).toContain(9_999);
+  });
+
+  it('writeSentinel failure throws + does not silently bypass the guard', async () => {
+    const exit = vi.fn();
+    // Point at a non-existent + un-createable path so writeFile throws.
+    // Construct against a known-writable dir for the constructor, then
+    // swap the sentinelPath at the prototype level to an unwritable one.
+    const guard = new StartupGuard({
+      serviceName: 'svc-fail-loud',
+      sentinelDir: tmpDir,
+      maxFailures: 5,
+      windowMs: 60_000,
+      tripSleepInitialMs: 1,
+      tripSleepCapMs: 1,
+    });
+    (guard as unknown as { sentinelPath: string }).sentinelPath =
+      '/dev/null/cannot-write/here.json';
+    await expect(guard.check({ now: () => 1_000, exit: exit as never })).rejects.toThrow(
+      /sentinel write failed/,
+    );
+    expect(exit).not.toHaveBeenCalled(); // boot did NOT silently proceed
+  });
+
+  it('preflight: writable sentinel dir is a no-op; unwritable dir warns without throwing', async () => {
+    const warn = vi.fn();
+    const guard = new StartupGuard({
+      serviceName: 'svc-pre',
+      sentinelDir: tmpDir,
+      logger: {
+        info: vi.fn(),
+        warn,
+        error: vi.fn(),
+        debug: vi.fn(),
+        trace: vi.fn(),
+        fatal: vi.fn(),
+        silent: vi.fn(),
+        level: 'info',
+        child: vi.fn(),
+      } as never,
+    });
+    await guard.preflight();
+    expect(warn).not.toHaveBeenCalled();
+
+    // Now swap to an unwritable path and confirm warn-without-throw.
+    (guard as unknown as { sentinelPath: string }).sentinelPath = '/dev/null/x/y.json';
+    await expect(guard.preflight()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+  });
 });
