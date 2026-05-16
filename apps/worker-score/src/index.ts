@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { HashChain } from '@vigil/audit-chain';
 import {
   ENGINE_VERSION,
   IndependenceLookup,
@@ -8,14 +9,16 @@ import {
   loadRegistries,
   type RawSignal,
 } from '@vigil/certainty-engine';
-import { CertaintyRepo, FindingRepo, getDb } from '@vigil/db-postgres';
+import { CertaintyRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { bayesianPosterior, type BayesianSignal } from '@vigil/patterns';
 import {
@@ -23,6 +26,7 @@ import {
   STREAMS,
   WorkerBase,
   newEnvelope,
+  startRedisStreamScraper,
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
@@ -282,7 +286,27 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.COUNTER_EVIDENCE],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-score',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-score', emit });
+
   const findingRepo = new FindingRepo(db);
   const certaintyRepo = new CertaintyRepo(db);
 

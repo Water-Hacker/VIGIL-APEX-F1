@@ -11,12 +11,14 @@ import {
 import { AnomalyAlertRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
 
@@ -44,6 +46,17 @@ async function main(): Promise<void> {
   const anomalyRepo = new AnomalyAlertRepo(db);
   const pool = await getPool();
   const chain = new HashChain(pool, logger);
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-audit-watch',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-audit-watch', emit });
 
   const intervalMs = Number(process.env.AUDIT_WATCH_INTERVAL_MS ?? 5 * 60_000); // 5 min default
   const windowHours = Number(process.env.AUDIT_WATCH_WINDOW_HOURS ?? 24);

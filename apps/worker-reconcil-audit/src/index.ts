@@ -4,14 +4,16 @@ import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
-import { QueueClient } from '@vigil/queue';
+import { QueueClient, STREAMS, startRedisStreamScraper } from '@vigil/queue';
 
 import {
   computeReconciliationPlan,
@@ -241,6 +243,23 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.AUDIT_PUBLISH],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-reconcil-audit',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-reconcil-audit', emit });
 
   let stopping = false;
   registerShutdown('reconcil-loop', () => {

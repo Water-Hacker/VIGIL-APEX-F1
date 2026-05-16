@@ -1,17 +1,20 @@
+import { HashChain } from '@vigil/audit-chain';
 import { createClaudeLlmEvaluator, runAdversarial } from '@vigil/certainty-engine';
-import { CallRecordRepo, CertaintyRepo, FindingRepo, getDb } from '@vigil/db-postgres';
+import { CallRecordRepo, CertaintyRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 // AUDIT-027: side-effect import registers the
 // `counter-evidence.devils-advocate-narrative` prompt with the global
 // SafeLlmRouter registry. Must be imported before any SafeLlmRouter call.
 import './prompts.js';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import { VaultClient } from '@vigil/security';
@@ -229,6 +232,19 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-counter-evidence',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-counter-evidence', emit });
+
   const findingRepo = new FindingRepo(db);
   const certaintyRepo = new CertaintyRepo(db);
   const callRecordRepo = new CallRecordRepo(db);

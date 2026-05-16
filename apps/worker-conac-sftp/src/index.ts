@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { DossierRepo, FindingRepo, getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { DossierRepo, FindingRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 import { VaultClient, expose } from '@vigil/security';
@@ -310,6 +313,19 @@ async function main(): Promise<void> {
   await queue.ping();
   registerShutdown('queue', () => queue.close());
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-conac-sftp',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-conac-sftp', emit });
+
   const dossierRepo = new DossierRepo(db);
   const findingRepo = new FindingRepo(db);
   const vault = await VaultClient.connect();

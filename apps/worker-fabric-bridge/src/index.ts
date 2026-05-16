@@ -1,6 +1,8 @@
+import { HashChain } from '@vigil/audit-chain';
 import { getDb, getPool } from '@vigil/db-postgres';
 import { FabricBridge } from '@vigil/fabric-bridge';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   errorsTotal,
   eventsConsumed,
@@ -10,6 +12,7 @@ import {
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient, STREAMS, WorkerBase, type Envelope, type HandlerOutcome } from '@vigil/queue';
 
@@ -115,6 +118,18 @@ async function main(): Promise<void> {
   const db = await getDb();
   void db; // ensures migrations have run via the pool warmup
   const pool = await getPool();
+
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-fabric-bridge',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-fabric-bridge', emit });
 
   const bridge = new FabricBridge(
     {

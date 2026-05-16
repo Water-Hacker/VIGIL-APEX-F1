@@ -10,12 +10,14 @@ import { getPool } from '@vigil/db-postgres';
 import { FabricBridge } from '@vigil/fabric-bridge';
 import {
   LoopBackoff,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 
 import { verifyCrossWitness } from './cross-witness.js';
@@ -38,6 +40,18 @@ async function main(): Promise<void> {
 
   const pool = await getPool();
   const chain = new HashChain(pool, logger);
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'audit-verifier',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'audit-verifier', emit });
+
   const signer = new UnixSocketSignerAdapter();
   const polygonContract = process.env.POLYGON_ANCHOR_CONTRACT;
   if (!polygonContract || /^0x0+$/i.test(polygonContract)) {

@@ -3,14 +3,17 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { getDb } from '@vigil/db-postgres';
+import { HashChain } from '@vigil/audit-chain';
+import { getDb, getPool } from '@vigil/db-postgres';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { VaultClient, expose } from '@vigil/security';
 import { Schemas } from '@vigil/shared';
@@ -68,6 +71,19 @@ async function main(): Promise<void> {
   registerShutdown('tracing', shutdownTracing);
 
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-minfi-api',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-minfi-api', emit });
+
   const vault = await VaultClient.connect();
   registerShutdown('vault', () => vault.close());
 

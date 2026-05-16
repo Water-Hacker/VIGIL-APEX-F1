@@ -4,12 +4,14 @@ import {
   type RegionCode,
 } from '@vigil/federation-stream';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import { QueueClient } from '@vigil/queue';
 
@@ -68,6 +70,14 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    logger.info(
+      { flag: event.subject_id, payload: event.payload },
+      'feature-flag-snapshot (no audit chain available)',
+    );
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-federation-agent', emit });
 
   const client = new FederationStreamClient({
     coreEndpoint,

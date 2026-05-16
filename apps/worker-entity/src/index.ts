@@ -1,7 +1,9 @@
+import { HashChain } from '@vigil/audit-chain';
 import { Neo4jClient, Cypher } from '@vigil/db-neo4j';
-import { CallRecordRepo, EntityRepo, getDb, normalizeName } from '@vigil/db-postgres';
+import { CallRecordRepo, EntityRepo, getDb, getPool, normalizeName } from '@vigil/db-postgres';
 import { LlmRouter, SafeLlmRouter, Safety } from '@vigil/llm';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
@@ -9,12 +11,14 @@ import {
   startMetricsServer,
   registerShutdown,
   neo4jMirrorStateTotal,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 import {
   QueueClient,
   STREAMS,
   WorkerBase,
   newEnvelope,
+  startRedisStreamScraper,
   type Envelope,
   type HandlerOutcome,
 } from '@vigil/queue';
@@ -527,6 +531,13 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.PATTERN_DETECT],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
   const neo4j = await Neo4jClient.connect();
   registerShutdown('neo4j', () => neo4j.close());
   await neo4j.bootstrapSchema();
@@ -537,6 +548,19 @@ async function main(): Promise<void> {
   const llm = new LlmRouter({ anthropicApiKey: apiKey });
 
   const db = await getDb();
+  const pool = await getPool();
+  const chain = new HashChain(pool, logger);
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-entity',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-entity', emit });
+
   const callRecordRepo = new CallRecordRepo(db);
   const entityRepo = new EntityRepo(db);
 

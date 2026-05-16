@@ -1,13 +1,15 @@
 import { FederationStreamServer } from '@vigil/federation-stream';
 import {
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   registerShutdown,
   shutdownTracing,
   startMetricsServer,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
-import { QueueClient } from '@vigil/queue';
+import { QueueClient, STREAMS, startRedisStreamScraper } from '@vigil/queue';
 import IORedis from 'ioredis';
 
 import { FederationReceiverHandlers } from './handlers.js';
@@ -54,6 +56,20 @@ async function main(): Promise<void> {
   const queue = new QueueClient({ logger });
   await queue.ping();
   registerShutdown('queue', () => queue.close());
+
+  const scraper = startRedisStreamScraper(queue, {
+    streams: [STREAMS.ADAPTER_OUT],
+    logger,
+  });
+  registerShutdown('redis-stream-scraper', () => scraper.stop());
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    logger.info(
+      { flag: event.subject_id, payload: event.payload },
+      'feature-flag-snapshot (no audit chain available)',
+    );
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-federation-receiver', emit });
 
   const redis = new IORedis(process.env.REDIS_URL ?? 'redis://vigil-redis:6379');
   registerShutdown('redis', async () => {

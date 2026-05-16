@@ -2,7 +2,7 @@
   "name": "worker-counter-evidence",
   "version": "0.1.0",
   "private": true,
-  "description": "Devil's-advocate pass at posterior >= 0.85 (SRD \u00a719.6).",
+  "description": "Devil's-advocate pass at posterior >= 0.85 (SRD §19.6).",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "scripts": {
@@ -14,6 +14,7 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
+    "@vigil/audit-chain": "workspace:*",
     "@vigil/db-postgres": "workspace:*",
     "@vigil/llm": "workspace:*",
     "@vigil/observability": "workspace:*",

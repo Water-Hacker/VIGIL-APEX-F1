@@ -5,12 +5,14 @@ import { HashChain, PolygonAnchor, UnixSocketSignerAdapter } from '@vigil/audit-
 import { PublicAnchorRepo, UserActionEventRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
   LoopBackoff,
+  auditFeatureFlagsAtBoot,
   createLogger,
   installShutdownHandler,
   initTracing,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
+  type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 
 import { runHighSigAnchorLoop } from './high-sig-loop.js';
@@ -34,6 +36,17 @@ async function main(): Promise<void> {
 
   const pool = await getPool();
   const chain = new HashChain(pool, logger);
+
+  const emit: FeatureFlagAuditEmit = async (event) => {
+    await chain.append({
+      action: event.action,
+      actor: 'worker-anchor',
+      subject_kind: event.subject_kind,
+      subject_id: event.subject_id,
+      payload: event.payload,
+    });
+  };
+  await auditFeatureFlagsAtBoot({ service: 'worker-anchor', emit });
 
   const signer = new UnixSocketSignerAdapter();
   const polygonContract = process.env.POLYGON_ANCHOR_CONTRACT;
