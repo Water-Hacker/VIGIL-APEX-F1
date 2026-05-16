@@ -38,6 +38,17 @@ export interface CrossWitnessReport {
   }>;
 }
 
+/**
+ * Tier-9 audit closure: hard cap on the seq-range scanned in a single
+ * verifyCrossWitness invocation. Pre-cap, a caller could request the
+ * entire chain (range.to - range.from = N million seqs) which would
+ * load every row + every Fabric commitment into memory, eating both
+ * the PG pool and the worker's heap. Callers that need to cover the
+ * full chain should iterate windows. 500k seqs/window is generous
+ * for a 7-day chain at ~50 events/sec and bounded for memory.
+ */
+export const CROSS_WITNESS_MAX_RANGE = 500_000n;
+
 export async function verifyCrossWitness(
   pool: Pool,
   bridge: FabricBridge,
@@ -45,6 +56,17 @@ export async function verifyCrossWitness(
   logger?: Logger,
 ): Promise<CrossWitnessReport> {
   const log = logger ?? createLogger({ service: 'audit-verifier' });
+
+  if (range.to < range.from) {
+    throw new Error(`cross-witness range invalid: to (${range.to}) < from (${range.from})`);
+  }
+  const span = range.to - range.from + 1n;
+  if (span > CROSS_WITNESS_MAX_RANGE) {
+    throw new Error(
+      `cross-witness range ${span} exceeds cap ${CROSS_WITNESS_MAX_RANGE}; ` +
+        `iterate windows instead of one mega-scan`,
+    );
+  }
 
   // Read both sides in seq order. Both are paginable; we do a single
   // sweep here because the cross-witness verifier is meant to be run
@@ -59,7 +81,15 @@ export async function verifyCrossWitness(
 
   const fabRows = await bridge.listCommitments(range.from, range.to);
   const fabBySeq = new Map<string, FabricCommitment>();
-  for (const c of fabRows) fabBySeq.set(c.seq, c);
+  // Tier-9 audit closure: lowercase Fabric bodyHash defensively. The
+  // chaincode at chaincode/audit-witness/src/contract.ts:42 already
+  // lowercases before storing, but a future chaincode rev or a
+  // peer-side migration could break that invariant. The equality
+  // check at line below compares hex strings — case-sensitive
+  // mismatch would mis-report a divergence.
+  for (const c of fabRows) {
+    fabBySeq.set(c.seq, { ...c, bodyHash: c.bodyHash.toLowerCase() });
+  }
 
   // Postgres-side hash lookup for the reverse scan (FIND-013).
   const pgBySeq = new Map<string, string>();

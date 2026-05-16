@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
+import { chmod, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import { HashChain } from '@vigil/audit-chain';
@@ -53,7 +53,12 @@ export async function createAuditBridgeServer(
     await unlink(opts.socketPath);
   }
 
-  const app = Fastify({ logger: false });
+  // Tier-9 audit closure: cap request body at 64 KB. The /append route
+  // accepts arbitrary `payload: z.record(z.unknown())`; fastify's default
+  // bodyLimit is 1 MB but no audit-row payload should be anywhere near
+  // that. A pathologically large payload slows canonical.ts hashing AND
+  // bloats the audit row. 64 KB is generous for legitimate use.
+  const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
 
   app.get('/health', async () => ({ ok: true }));
 
@@ -65,7 +70,7 @@ export async function createAuditBridgeServer(
     }
     try {
       const pool = await getPool();
-      const chain = new HashChain(pool);
+      const chain = new HashChain(pool, opts.logger);
       const result = await chain.append({
         action: parsed.data.action,
         actor: parsed.data.actor,
@@ -81,9 +86,19 @@ export async function createAuditBridgeServer(
         occurred_at: result.occurred_at,
       };
     } catch (err) {
-      opts.logger.error({ err }, 'audit-bridge-append-failed');
+      // Tier-9 audit closure: don't echo raw error message in the HTTP
+      // response. The caller is UDS-local and the message is rarely
+      // actionable from their side; full err goes to the structured
+      // log where operators can correlate by request time. Opaque
+      // `append-failed` plus a request-correlation timestamp suffices
+      // for the caller.
+      const errNorm = err instanceof Error ? err : new Error(String(err));
+      opts.logger.error(
+        { err_name: errNorm.name, err_message: errNorm.message },
+        'audit-bridge-append-failed',
+      );
       reply.code(500);
-      return { error: 'append-failed', message: String(err) };
+      return { error: 'append-failed' };
     }
   });
 
@@ -92,6 +107,23 @@ export async function createAuditBridgeServer(
     socketPath: opts.socketPath,
     async start() {
       await app.listen({ path: opts.socketPath });
+      // Tier-9 audit closure: explicitly chmod the UDS socket to 0o660
+      // (owner+group rw, no world). Default UDS perms vary by OS; on
+      // Linux fastify creates the socket with 0o755 (world-readable
+      // file metadata, though only mode-0o600+ processes can connect).
+      // The audit-bridge accepts arbitrary audit-event appends — only
+      // the vigil-system group should reach it.
+      try {
+        await chmod(opts.socketPath, 0o660);
+      } catch (err) {
+        // Non-fatal — if chmod fails (e.g. tmpfs that ignores mode),
+        // surface a warn so operators can chase it. The socket is
+        // still gated by the parent directory's 0o770 mode set above.
+        opts.logger.warn(
+          { err, socketPath: opts.socketPath },
+          'audit-bridge-socket-chmod-failed; relying on parent-dir perms',
+        );
+      }
       opts.logger.info({ socketPath: opts.socketPath }, 'audit-bridge-listening');
     },
     async stop() {

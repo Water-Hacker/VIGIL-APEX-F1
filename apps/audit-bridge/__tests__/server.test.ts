@@ -101,4 +101,79 @@ describe('audit-bridge server', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  // ─── Tier-9 audit closures ─────────────────────────────────────────
+
+  it('413s on POST /append with a body larger than 64 KB (DoS defence)', async () => {
+    // Build a payload whose JSON serialisation exceeds 64 KB. The
+    // outer envelope adds ~150 bytes; 70 KB of opaque string ensures
+    // we cross the cap even after key + structural overhead.
+    const fat = 'x'.repeat(70 * 1024);
+    const res = await server.app.inject({
+      method: 'POST',
+      url: '/append',
+      payload: {
+        action: 'audit.public_export_published',
+        actor: 'system:test',
+        subject_kind: 'system',
+        subject_id: 'oversize-payload',
+        payload: { fat },
+      },
+    });
+    // Fastify returns 413 with `{ statusCode: 413, code: 'FST_ERR_CTP_BODY_TOO_LARGE' }`.
+    expect(res.statusCode).toBe(413);
+  });
+
+  it('returns an OPAQUE error on /append failure (no raw String(err) leak)', async () => {
+    // Force HashChain.append to throw with a message that would leak
+    // internal info if echoed verbatim. The post-fix response body
+    // should NOT contain the leaked string.
+    const leakyMessage =
+      'connection failed: postgres://vigil:internal-creds@vigil-postgres:5432/vigil';
+    fakeAppend.mockRejectedValueOnce(new Error(leakyMessage));
+
+    const res = await server.app.inject({
+      method: 'POST',
+      url: '/append',
+      payload: {
+        action: 'audit.public_export_published',
+        actor: 'system:test',
+        subject_kind: 'system',
+        subject_id: 'leak-test',
+      },
+    });
+    expect(res.statusCode).toBe(500);
+    const j = res.json() as { error?: string; message?: string };
+    expect(j.error).toBe('append-failed');
+    expect(j.message).toBeUndefined();
+    expect(JSON.stringify(j)).not.toContain('internal-creds');
+    expect(JSON.stringify(j)).not.toContain('vigil-postgres');
+  });
+
+  it('logs the full error message server-side even when the response is opaque', async () => {
+    // Companion to the previous test — operators must still see the
+    // root cause in structured logs; only the wire response is
+    // opaque.
+    const internalMessage = 'unique-internal-marker-for-test-assert';
+    fakeAppend.mockRejectedValueOnce(new Error(internalMessage));
+
+    await server.app.inject({
+      method: 'POST',
+      url: '/append',
+      payload: {
+        action: 'audit.public_export_published',
+        actor: 'system:test',
+        subject_kind: 'system',
+        subject_id: 'log-test',
+      },
+    });
+
+    const errorCalls = (FAKE_LOGGER.error as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls;
+    const matched = errorCalls.find((c) => JSON.stringify(c).includes(internalMessage));
+    expect(
+      matched,
+      'expected at least one logger.error call to carry the internal message',
+    ).toBeDefined();
+  });
 });
