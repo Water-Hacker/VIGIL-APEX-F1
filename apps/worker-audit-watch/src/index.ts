@@ -23,6 +23,8 @@ import {
 } from '@vigil/observability';
 import { sql } from 'drizzle-orm';
 
+import { parseNonNegativeIntEnv, parsePositiveIntEnv } from './env-helpers.js';
+
 const logger = createLogger({ service: 'worker-audit-watch' });
 
 /**
@@ -62,14 +64,20 @@ async function main(): Promise<void> {
   };
   await auditFeatureFlagsAtBoot({ service: 'worker-audit-watch', emit });
 
-  const intervalMs = Number(process.env.AUDIT_WATCH_INTERVAL_MS ?? 5 * 60_000); // 5 min default
-  const windowHours = Number(process.env.AUDIT_WATCH_WINDOW_HOURS ?? 24);
+  // Tier-11 audit closure: validate env-driven loop config. Pre-fix,
+  // a non-numeric env var (e.g. typo "60min") would return NaN; the
+  // tick would then compute `Date.now() - NaN * 3600000 = NaN` and
+  // crash with "Invalid time value" on every iteration. The fix is
+  // a positive-finite check at boot — fail loud rather than crash
+  // silently in the loop.
+  const intervalMs = parsePositiveIntEnv('AUDIT_WATCH_INTERVAL_MS', 5 * 60_000); // 5 min default
+  const windowHours = parsePositiveIntEnv('AUDIT_WATCH_WINDOW_HOURS', 24);
   // FIND-014 closure (whole-system-audit doc 10): cap on how many
   // audit.actions rows to replay each tick. 0 disables the chain
   // verify pass entirely. Default = 10 000 — enough to catch a tamper
   // attempt within a few hours of insertion on a typical traffic
   // profile without dominating the tick budget.
-  const verifyRows = Number(process.env.AUDIT_WATCH_CHAIN_VERIFY_ROWS ?? 10_000);
+  const verifyRows = parseNonNegativeIntEnv('AUDIT_WATCH_CHAIN_VERIFY_ROWS', 10_000);
 
   let stopping = false;
   registerShutdown('watch-loop', () => {
@@ -224,8 +232,13 @@ async function main(): Promise<void> {
       backoff.onSuccess();
     } catch (err) {
       backoff.onError();
+      const e = err instanceof Error ? err : new Error(String(err));
       logger.error(
-        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        {
+          err_name: e.name,
+          err_message: e.message,
+          consecutiveFailures: backoff.consecutiveFailureCount,
+        },
         'audit-watch-loop-error',
       );
     }

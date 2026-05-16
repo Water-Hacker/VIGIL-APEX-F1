@@ -291,8 +291,13 @@ async function main(): Promise<void> {
       }
     } catch (err) {
       backoff.onError();
+      const e = err instanceof Error ? err : new Error(String(err));
       logger.error(
-        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        {
+          err_name: e.name,
+          err_message: e.message,
+          consecutiveFailures: backoff.consecutiveFailureCount,
+        },
         'reconcil-tick-failed',
       );
     }

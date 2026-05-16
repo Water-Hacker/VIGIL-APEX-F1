@@ -50,7 +50,11 @@ export async function republishToFabricBridge(
       await queue.publish(STREAMS.AUDIT_PUBLISH, env);
       published += 1;
     } catch (err) {
-      logger.error({ err, seq: gap.seq }, 'reconcil-republish-failed');
+      const e = err instanceof Error ? err : new Error(String(err));
+      logger.error(
+        { err_name: e.name, err_message: e.message, seq: gap.seq },
+        'reconcil-republish-failed',
+      );
       failed += 1;
     }
   }

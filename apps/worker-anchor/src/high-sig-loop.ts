@@ -34,22 +34,62 @@ export async function processHighSigBatch(
       const ts = Math.floor(new Date(ev.timestamp_utc).getTime() / 1000);
       const seq = ts; // monotonic-ish; unique enough for a single-leaf commit
       const txHash = await deps.anchor.commit(seq, seq, ev.record_hash);
-      await deps.publicAnchorRepo.record({
-        id: randomUUID(),
-        event_id: ev.event_id,
-        polygon_tx_hash: txHash,
-        anchored_at: new Date(),
-        is_individual: true,
-      });
+      // Tier-11 audit closure: setAnchorTx FIRST (the dedup gate), then
+      // publicAnchorRepo.record (best-effort observability row).
+      //
+      // Pre-fix the ordering was publicAnchorRepo.record → setAnchorTx,
+      // so a failure of the first DB write left the event in the
+      // pending queue while the on-chain commit had already succeeded.
+      // Next tick would re-anchor the SAME event → duplicate Polygon
+      // anchor → real mainnet gas wasted + audit trail pollution.
+      //
+      // With setAnchorTx first, the event is durably "anchored" the
+      // moment the dedup gate persists. If publicAnchorRepo.record
+      // fails afterward, we lose ONLY the observability row — the
+      // event itself is consistent and the on-chain commit isn't
+      // duplicated. The audit-watch loop will surface the missing
+      // public_anchor row separately.
+      //
+      // FLAGGED: a deeper idempotency fix (use the chain commitment
+      // id, or pre-insert with tx=NULL then update) would close the
+      // remaining gap — anchor.commit() succeeds but BOTH DB writes
+      // fail. Requires architect input on VIGILAnchor.sol uniqueness
+      // semantics. Documented; not changed in this PR.
       await deps.userActionRepo.setAnchorTx(ev.event_id, txHash);
+      try {
+        await deps.publicAnchorRepo.record({
+          id: randomUUID(),
+          event_id: ev.event_id,
+          polygon_tx_hash: txHash,
+          anchored_at: new Date(),
+          is_individual: true,
+        });
+      } catch (recordErr) {
+        const e = recordErr instanceof Error ? recordErr : new Error(String(recordErr));
+        deps.logger.warn(
+          {
+            err_name: e.name,
+            err_message: e.message,
+            event_id: ev.event_id,
+            txHash,
+          },
+          'high-sig-public-anchor-row-write-failed; on-chain commit persisted',
+        );
+      }
       deps.logger.info(
         { event_id: ev.event_id, event_type: ev.event_type, txHash },
         'high-sig-anchored',
       );
       count++;
     } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
       deps.logger.error(
-        { err, event_id: ev.event_id, event_type: ev.event_type },
+        {
+          err_name: e.name,
+          err_message: e.message,
+          event_id: ev.event_id,
+          event_type: ev.event_type,
+        },
         'high-sig-anchor-failed',
       );
     }
