@@ -4,6 +4,10 @@ import * as entitySchema from '../schema/entity.js';
 
 import type { Db } from '../client.js';
 
+// Tier-28 audit closure: per-call bulk-id cap. See getCanonicalMany
+// for rationale.
+export const ENTITY_REPO_MAX_BULK_IDS = 1000;
+
 /**
  * Case-fold + accent-fold + ligature-fold + punctuation-collapse on a
  * display name for the rule-pass exact-match lookup. SRD §15.5.1
@@ -101,10 +105,21 @@ export class EntityRepo {
     return rows[0] ?? null;
   }
 
+  /**
+   * Bulk read by id. Tier-28 audit closure: cap to ENTITY_REPO_MAX_BULK_IDS
+   * for the same reason getEventsByIds caps — the node-postgres driver's
+   * ~32k parameter-binding ceiling produces an opaque 500 when crossed.
+   * Refuse loudly so callers learn to chunk.
+   */
   async getCanonicalMany(
     ids: readonly string[],
   ): Promise<readonly (typeof entitySchema.canonical.$inferSelect)[]> {
     if (ids.length === 0) return [];
+    if (ids.length > ENTITY_REPO_MAX_BULK_IDS) {
+      throw new Error(
+        `getCanonicalMany: received ${ids.length} ids, cap is ${ENTITY_REPO_MAX_BULK_IDS}; caller must chunk`,
+      );
+    }
     return this.db
       .select()
       .from(entitySchema.canonical)
