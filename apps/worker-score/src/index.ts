@@ -37,6 +37,12 @@ import { z } from 'zod';
 
 const logger = createLogger({ service: 'worker-score' });
 
+// Tier-30 audit closure: signal-scan cap. See handle() for rationale.
+// 1000 is generous (realistic findings carry < 100 signals); workers
+// that need a higher ceiling should split the finding into related
+// sub-findings rather than bumping the cap.
+const SIGNAL_SCAN_CAP = 1000;
+
 const zPayload = z.object({ finding_id: z.string().uuid() });
 type Payload = z.infer<typeof zPayload>;
 
@@ -69,11 +75,20 @@ class ScoreWorker extends WorkerBase<Payload> {
     // the certainty engine accepts the future-timed row as evidence
     // and trips the posterior. Rows with `contributed_at > NOW()` are
     // never legitimate; drop them at read time.
+    //
+    // Tier-30 audit closure: cap the signal sweep at SIGNAL_SCAN_CAP so
+    // a pathological finding (e.g. 10k+ signals from a stuck pattern
+    // detector loop) cannot OOM the certainty engine. Realistic
+    // findings carry at most a few dozen signals; the LIMIT + 1
+    // sentinel reads one more than the cap so we can detect truncation
+    // and warn the operator.
     const r = await this.db.execute(sql`
       SELECT id, pattern_id, source, prior, strength, weight, evidence_event_ids, evidence_document_cids, metadata
         FROM finding.signal
        WHERE finding_id = ${finding_id}
          AND contributed_at <= NOW()
+       ORDER BY contributed_at ASC
+       LIMIT ${SIGNAL_SCAN_CAP + 1}
     `);
     type Row = {
       id: string;
@@ -86,8 +101,42 @@ class ScoreWorker extends WorkerBase<Payload> {
       evidence_document_cids: string[];
       metadata: Record<string, unknown> | null;
     };
-    const rows = r.rows as Row[];
-    if (rows.length === 0) return { kind: 'ack' };
+    const allRows = r.rows as Row[];
+    if (allRows.length === 0) return { kind: 'ack' };
+
+    // Tier-30 audit closure: detect + log truncation, drop the +1 sentinel.
+    const truncated = allRows.length > SIGNAL_SCAN_CAP;
+    const rows = truncated ? allRows.slice(0, SIGNAL_SCAN_CAP) : allRows;
+    if (truncated) {
+      logger.warn(
+        { finding_id, scanned: rows.length, cap: SIGNAL_SCAN_CAP },
+        'signal-scan-truncated; finding has more signals than the cap; certainty assessment uses the oldest N',
+      );
+    }
+
+    // Tier-30 audit closure: warn (don't reject) when an adapter or
+    // pattern wrote a strength outside [0, 1]. The legacy clamp
+    // below silently snapped 1.5 → 1.0; we keep clamping for runtime
+    // safety but surface the offending pattern so the operator can
+    // fix the source. Track the count to avoid log spam on a finding
+    // with many out-of-range rows.
+    let outOfRangeCount = 0;
+    const outOfRangeSample: Array<{ id: string; pattern_id: string | null; strength: number }> = [];
+    for (const row of rows) {
+      const s = Number(row.strength);
+      if (Number.isFinite(s) && (s < 0 || s > 1)) {
+        outOfRangeCount += 1;
+        if (outOfRangeSample.length < 5) {
+          outOfRangeSample.push({ id: row.id, pattern_id: row.pattern_id, strength: s });
+        }
+      }
+    }
+    if (outOfRangeCount > 0) {
+      logger.warn(
+        { finding_id, count: outOfRangeCount, sample: outOfRangeSample },
+        'signal-strength-out-of-range; clamped to [0,1] for certainty assessment',
+      );
+    }
 
     const signals: BayesianSignal[] = rows.map((row) => ({
       pattern_id: row.pattern_id,
@@ -338,6 +387,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });
