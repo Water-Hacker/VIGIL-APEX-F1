@@ -268,7 +268,12 @@ export abstract class WorkerBase<TPayload> {
           }
         }
       } catch (e) {
-        this.logger.error({ err: e }, 'read-group-error');
+        // Tier-3 audit: normalise non-Error throwables so the logger
+        // serializes a meaningful err_name/err_message instead of an
+        // opaque "[object Object]" or undefined `.message`. Pattern
+        // matches the closure in PR #15 (StartupGuard / pin-image-digests).
+        const err = e instanceof Error ? e : new Error(String(e));
+        this.logger.error({ err_name: err.name, err_message: err.message }, 'read-group-error');
         await sleep(1000);
       }
     }
@@ -295,7 +300,8 @@ export abstract class WorkerBase<TPayload> {
           void this.process(redisId, body);
         }
       } catch (e) {
-        this.logger.error({ err: e }, 'autoclaim-error');
+        const err = e instanceof Error ? e : new Error(String(e));
+        this.logger.error({ err_name: err.name, err_message: err.message }, 'autoclaim-error');
       }
       await sleep(idleReclaimMs);
     }

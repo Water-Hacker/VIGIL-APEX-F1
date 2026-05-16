@@ -20,6 +20,7 @@
  */
 
 import { request as httpRequest, type RequestOptions } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
 
 export type SentinelOutcome = 'up' | 'down' | 'unknown';
@@ -75,9 +76,21 @@ export function quorumDecide(reports: ReadonlyArray<SentinelReport>): QuorumDeci
   return { decision: 'inconclusive', up, down, unknown, attesting_sites: [] };
 }
 
+/**
+ * Tier-3 audit hardening: pick http vs https module based on the
+ * `protocol` field in opts. The prior version always used `http`, so
+ * any https:// sentinel URL silently failed (wrong-protocol on port
+ * 443) and the probe became a permanent "unknown" — undermining the
+ * 2-of-3 quorum that the whole TAL-PA "watcher is watched" doctrine
+ * rests on. UDS calls (socketPath) keep using http (Unix sockets are
+ * scheme-agnostic at the wire level; the audit-bridge speaks plain
+ * HTTP on its UDS).
+ */
 function httpJson<T>(opts: RequestOptions, body?: string): Promise<{ status: number; body: T }> {
+  const useHttps = opts.protocol === 'https:';
+  const requestFn = useHttps ? httpsRequest : httpRequest;
   return new Promise((resolve, reject) => {
-    const req = httpRequest(opts, (res) => {
+    const req = requestFn(opts, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
@@ -97,15 +110,55 @@ function httpJson<T>(opts: RequestOptions, body?: string): Promise<{ status: num
   });
 }
 
+/**
+ * Optional sink for probe-error observability. Tier-3 audit: pre-fix
+ * the catch block swallowed all errors with no log; a permanently-down
+ * sentinel (DNS broken, cert expired, firewall) just became "unknown"
+ * forever and the operator had no signal. An injectable error-sink
+ * lets callers (e.g. scripts/sentinel-quorum.ts) wire pino without
+ * making this module depend on a logger implementation.
+ */
+export interface ProbeErrorSink {
+  onProbeError(site: SentinelEndpoint['site'], target: string, err: Error): void;
+  onProbeUnexpectedResponse(
+    site: SentinelEndpoint['site'],
+    target: string,
+    status: number,
+    bodyOutcome: unknown,
+  ): void;
+}
+
+let probeErrorSink: ProbeErrorSink = {
+  onProbeError(site, target, err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `sentinel-quorum: probe ${site} → ${target} failed (${err.name}: ${err.message})`,
+    );
+  },
+  onProbeUnexpectedResponse(site, target, status, bodyOutcome) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `sentinel-quorum: probe ${site} → ${target} returned status=${status} outcome=${JSON.stringify(bodyOutcome)}`,
+    );
+  },
+};
+
+/** Inject a structured sink. Call once at boot from scripts/sentinel-quorum.ts. */
+export function setProbeErrorSink(sink: ProbeErrorSink): void {
+  probeErrorSink = sink;
+}
+
 export async function probeSentinel(
   endpoint: SentinelEndpoint,
   target: string,
 ): Promise<SentinelReport> {
   try {
     const u = new URL(`/probe?target=${encodeURIComponent(target)}`, endpoint.url);
+    const useHttps = u.protocol === 'https:';
     const { status, body } = await httpJson<{ outcome: SentinelOutcome }>({
+      protocol: u.protocol,
       hostname: u.hostname,
-      port: u.port || 80,
+      port: u.port || (useHttps ? 443 : 80),
       path: `${u.pathname}${u.search}`,
       method: 'GET',
     });
@@ -114,6 +167,7 @@ export async function probeSentinel(
       !body ||
       (body.outcome !== 'up' && body.outcome !== 'down' && body.outcome !== 'unknown')
     ) {
+      probeErrorSink.onProbeUnexpectedResponse(endpoint.site, target, status, body?.outcome);
       return {
         site: endpoint.site,
         target,
@@ -127,7 +181,9 @@ export async function probeSentinel(
       outcome: body.outcome,
       observed_at: new Date().toISOString(),
     };
-  } catch {
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    probeErrorSink.onProbeError(endpoint.site, target, err);
     return {
       site: endpoint.site,
       target,
