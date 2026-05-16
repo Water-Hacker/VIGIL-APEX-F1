@@ -99,6 +99,22 @@ export const ROUTE_RULES: ReadonlyArray<RouteRule> = [
   { prefix: '/api/triage', allow: ['tip_handler', 'architect'] },
   // DECISION-010
   { prefix: '/api/dossier', allow: ['operator', 'auditor', 'architect'] },
+  // Tier-5 dashboard RBAC audit closure: /api/audit/* (excluding the
+  // already-public /api/audit/public and /api/audit/aggregate caught
+  // earlier by isPublic) carries auditor-curation endpoints. Pre-fix
+  // the discovery-queue/curate handler's own doc claimed middleware
+  // enforcement that did NOT exist — the route was protected only by
+  // its handler-level defensive role check.
+  { prefix: '/api/audit', allow: ['auditor', 'architect'] },
+  // Tier-5 dashboard RBAC audit closure: /api/realtime is the SSE
+  // broadcast of tip-arrival + finding-threshold + vote events. The
+  // route's existing in-handler gate only checks `x-vigil-user`
+  // presence, not role — so any authenticated user (including
+  // civil_society) could subscribe. Restrict to operator-class roles.
+  {
+    prefix: '/api/realtime',
+    allow: ['operator', 'auditor', 'tip_handler', 'council_member', 'architect'],
+  },
 ];
 
 function isPublic(pathname: string): boolean {
@@ -190,9 +206,16 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 
   let payload: VigilJwtPayload;
   try {
+    // Tier-5 dashboard RBAC audit closure: audience is the dashboard
+    // client only. The prior list included `'account'` — Keycloak's
+    // default audience for self-service operations on the
+    // account-management client. Allowing it here was a confused-
+    // deputy risk: a token minted for the `account` client could be
+    // replayed against this middleware. Dashboard-bound tokens have
+    // `aud: vigil-dashboard`; nothing else is legitimate.
     const { payload: verified } = await jwtVerify(token, JWKS, {
       issuer: KEYCLOAK_ISSUER,
-      audience: [KEYCLOAK_CLIENT_ID, 'account'],
+      audience: KEYCLOAK_CLIENT_ID,
     });
     payload = verified as VigilJwtPayload;
   } catch {
@@ -206,6 +229,21 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   }
 
   const rule = matchRule(pathname);
+  // Tier-5 dashboard RBAC audit closure: default-deny for any
+  // `/api/*` path that is neither public (caught earlier by isPublic)
+  // nor matched by an explicit ROUTE_RULES entry. Pre-fix, an
+  // authenticated request to an unmatched `/api/*` path passed
+  // through — so any new API route was implicitly accessible to ALL
+  // authenticated users (including low-privilege roles like
+  // civil_society) until someone remembered to add a rule.
+  //
+  // UI routes (non-/api/) keep the legacy pass-through because the
+  // build-time `check-rbac-coverage.ts` gate catches missing rules
+  // on page.tsx routes. API routes weren't covered by that gate;
+  // this runtime gate closes the gap as defence-in-depth.
+  if (!rule && pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'forbidden-unmatched-route' }, { status: 403 });
+  }
   if (rule) {
     const { realm, resource, merged } = rolesFromToken(payload);
     const allowed = rule.allow.some((r) => merged.has(r));

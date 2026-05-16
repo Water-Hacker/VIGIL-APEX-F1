@@ -19,9 +19,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, '..', 'check-rbac-coverage.ts');
 
 describe('check-rbac-coverage script (FIND-004)', () => {
-  it('passes on the current dashboard layout (all pages mapped)', () => {
+  it('passes on the current dashboard layout (all pages + API routes mapped)', () => {
     const out = execFileSync('npx', ['tsx', SCRIPT], { encoding: 'utf8' });
-    expect(out).toMatch(/OK — \d+ pages mapped/);
+    // Tier-5 dashboard RBAC audit closure: the script now reports
+    // pages AND API routes separately. Pre-fix it only walked pages.
+    expect(out).toMatch(/OK — \d+ pages \+ \d+ API routes mapped/);
   });
 
   it('exits non-zero if the script itself crashes (canary)', () => {
