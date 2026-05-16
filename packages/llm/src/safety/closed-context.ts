@@ -57,13 +57,27 @@ export function renderClosedContext(opts: {
   const documents = opts.sources
     .map((s) => {
       const labelAttr = s.label ? ` label="${escapeAttribute(s.label)}"` : '';
-      return `<source_document id="${escapeAttribute(s.id)}"${labelAttr}>\n${s.text}\n</source_document>`;
+      // Tier-10 LLM-pipeline audit closure: defang `</source_document>`
+      // inside the source text. Without this, a source-controlled
+      // string could literally close the data tag and inject prompt
+      // instructions OUTSIDE the closed-context zone — defeating
+      // failure-mode-4 defence. Rule 3 of the preamble tells Claude to
+      // treat tag content as data, but a tag-closing pattern in the
+      // text would visually end the data zone first. We replace any
+      // close-tag-like sequence (case-insensitive, with arbitrary
+      // attributes) with a neutered Unicode-modified form so the
+      // text remains readable while the literal closing pattern can
+      // no longer terminate the data wrapper.
+      const defangedText = defangSourceTagBoundary(s.text);
+      return `<source_document id="${escapeAttribute(s.id)}"${labelAttr}>\n${defangedText}\n</source_document>`;
     })
     .join('\n\n');
 
   const userMessage = [
     `<task>\n${opts.task}\n</task>`,
-    opts.extraInstructions ? `<extra_instructions>\n${opts.extraInstructions}\n</extra_instructions>` : '',
+    opts.extraInstructions
+      ? `<extra_instructions>\n${opts.extraInstructions}\n</extra_instructions>`
+      : '',
     `<sources>\n${documents}\n</sources>`,
   ]
     .filter((p) => p.length > 0)
@@ -78,4 +92,22 @@ function escapeAttribute(s: string): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+/**
+ * Neutralise `<source_document>` / `</source_document>` sequences in
+ * source text. The pattern is case-insensitive (Claude / SDK normalise
+ * tag-case) and tolerates attributes inside the opening form. We swap
+ * the literal `<` and `>` for their Unicode full-width equivalents
+ * U+FF1C / U+FF1E. The result remains readable to an analyst inspecting
+ * the captured prompt but the literal byte sequence that would close
+ * the data wrapper is no longer present.
+ *
+ * Exported for the test suite to assert exact behaviour at boundary
+ * conditions.
+ */
+export function defangSourceTagBoundary(s: string): string {
+  return s
+    .replace(/<\/source_document\s*>/gi, '＜/source_document＞')
+    .replace(/<source_document\b[^>]*>/gi, (m) => m.replace(/^</, '＜').replace(/>$/, '＞'));
 }

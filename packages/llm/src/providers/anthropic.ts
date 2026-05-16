@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import Anthropic, { RateLimitError } from '@anthropic-ai/sdk';
 import { createLogger, llmRateLimitExhaustedTotal, type Logger } from '@vigil/observability';
 import { expose, type Secret } from '@vigil/security';
@@ -181,7 +183,12 @@ export class AnthropicProvider implements ProviderClient {
     maxTokens: number,
   ): Promise<LlmCallResult> {
     const start = Date.now();
-    const customId = `vigil-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    // Tier-10 LLM-pipeline audit closure: use crypto.randomBytes for
+    // the batch customId. Repo HARDEN-#7 forbids Math.random for any
+    // operation that could be measured or predicted; batch IDs land in
+    // Anthropic's batch API and in our call-record logs, so a non-crypto
+    // generator is policy-violating even if the collision risk is low.
+    const customId = `vigil-${Date.now()}-${randomBytes(4).toString('hex')}`;
     const batchClient = (
       this.client as unknown as {
         messages: {
