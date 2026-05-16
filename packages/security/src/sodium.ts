@@ -43,7 +43,10 @@ export async function generateBoxKeyPair(): Promise<KeyPairB64> {
   };
 }
 
-export async function sealedBoxEncrypt(plaintext: Uint8Array | string, recipientPubKeyB64: string): Promise<string> {
+export async function sealedBoxEncrypt(
+  plaintext: Uint8Array | string,
+  recipientPubKeyB64: string,
+): Promise<string> {
   await ready();
   const m = typeof plaintext === 'string' ? sodium.from_string(plaintext) : plaintext;
   const pk = sodium.from_base64(recipientPubKeyB64, sodium.base64_variants.ORIGINAL);
@@ -78,13 +81,22 @@ export async function sealedBoxDecrypt(
  * Generic AEAD — for at-rest field-level encryption in Postgres
  * ===========================================================================*/
 
-export async function aeadEncrypt(plaintext: Uint8Array, key: Secret<Uint8Array>): Promise<{
+export async function aeadEncrypt(
+  plaintext: Uint8Array,
+  key: Secret<Uint8Array>,
+): Promise<{
   nonce: string;
   ciphertext: string;
 }> {
   await ready();
   const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-  const ct = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintext, null, null, nonce, expose(key));
+  const ct = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+    plaintext,
+    null,
+    null,
+    nonce,
+    expose(key),
+  );
   return {
     nonce: sodium.to_base64(nonce, sodium.base64_variants.ORIGINAL),
     ciphertext: sodium.to_base64(ct, sodium.base64_variants.ORIGINAL),
@@ -121,4 +133,37 @@ export async function sha512Hex(input: Uint8Array | string): Promise<string> {
   await ready();
   const m = typeof input === 'string' ? sodium.from_string(input) : input;
   return sodium.to_hex(sodium.crypto_hash_sha512(m));
+}
+
+/* =============================================================================
+ * Sensitive-memory hygiene
+ * ===========================================================================*/
+
+/**
+ * Best-effort zeroing of a `Uint8Array` buffer carrying sensitive material
+ * (decrypted plaintext, reconstructed private keys, intermediate secrets).
+ *
+ * libsodium's `memzero` overwrites the buffer in place with zeros and is
+ * compiled to not be elided by an optimising JIT — which a hand-rolled
+ * `.fill(0)` may be, depending on the V8 escape analysis pass. Use this
+ * helper in `finally` blocks immediately after the last legitimate use of
+ * a sensitive buffer.
+ *
+ * Caveats:
+ *   - Only zeroes the buffer you pass. Strings derived via
+ *     `TextDecoder.decode(plaintext)` cannot be zeroed (V8 strings are
+ *     immutable). Prefer keeping sensitive data as `Uint8Array` until
+ *     the last possible moment.
+ *   - V8 may have copied the buffer for inline caching; we cannot reach
+ *     those copies. This is best-effort, not a guarantee.
+ *   - Calling this multiple times is harmless.
+ *
+ * Tier-16 audit closure: worker-tip-triage previously held the decrypted
+ * tip plaintext + reconstructed Shamir SK alive until function return
+ * (heap-snapshot exposure window).
+ */
+export async function wipe(buf: Uint8Array | null | undefined): Promise<void> {
+  if (!buf || buf.length === 0) return;
+  await ready();
+  sodium.memzero(buf);
 }

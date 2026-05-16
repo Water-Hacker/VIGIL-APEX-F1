@@ -106,6 +106,90 @@ describe('ProcurementExtractor — deterministic-wins-over-LLM', () => {
     expect(out.llm_was_called).toBe(true);
   });
 
+  // ---- Tier-16 audit closure: observable LLM-fallback failure ----
+  //
+  // Previously the LLM `catch {}` silently swallowed every error.
+  // Operators couldn't tell whether the LLM tier was healthy without
+  // greping the call-record table for missing rows. The new
+  // `cfg.logger` opt enables structured `err_name`/`err_message`
+  // logging at warn level. The pin: when an LLM fallback throws AND
+  // a logger is provided, exactly one warn line fires with the
+  // expected shape.
+
+  it('LLM failure now logs a structured warn line when a logger is wired', async () => {
+    const warn = (await import('vitest')).vi.fn();
+    const error = (await import('vitest')).vi.fn();
+    const info = (await import('vitest')).vi.fn();
+    type LoggerLike = {
+      warn: typeof warn;
+      error: typeof error;
+      info: typeof info;
+      debug: typeof info;
+      trace: typeof info;
+      fatal: typeof info;
+      child: () => LoggerLike;
+    };
+    const loggerLike: LoggerLike = {
+      warn,
+      error,
+      info,
+      debug: info,
+      trace: info,
+      fatal: info,
+      child() {
+        return this;
+      },
+    };
+    const failingLlm = new StubLlmExtractor(
+      { fields: {}, provenance: {}, callRecordId: null },
+      'extract',
+    );
+    const ex = new ProcurementExtractor({
+      extractorVersion: 'test-v1',
+      llm: failingLlm,
+      now: () => FIXED_NOW,
+      logger: loggerLike as never,
+    });
+    const out = await ex.extract({
+      findingId: 'fnd-test-1',
+      assessmentId: 'asm-test-1',
+      cells: ['gré à gré'],
+    });
+    // Deterministic result still flows through.
+    expect(out.fields.procurement_method).toBe('gre_a_gre');
+    // The structured warn line fires exactly once with the
+    // expected shape.
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [context, msg] = warn.mock.calls[0]!;
+    expect(msg).toBe('extractor-llm-fallback-failed');
+    expect(context).toMatchObject({
+      finding_id: 'fnd-test-1',
+      assessment_id: 'asm-test-1',
+      err_name: 'Error',
+      err_message: 'upstream-llm-down',
+    });
+    // unresolved_count is non-zero (the test stub only resolved
+    // procurement_method deterministically).
+    expect(context.unresolved_count).toBeGreaterThan(0);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('LLM failure with NO logger configured remains silent (back-compat)', async () => {
+    const failingLlm = new StubLlmExtractor(
+      { fields: {}, provenance: {}, callRecordId: null },
+      'extract',
+    );
+    // No `logger` in cfg — the warn path is opt-in.
+    const ex = new ProcurementExtractor({
+      extractorVersion: 'test-v1',
+      llm: failingLlm,
+      now: () => FIXED_NOW,
+    });
+    // Should not throw and should fall through cleanly.
+    const out = await ex.extract({ findingId: null, assessmentId: null, cells: ['gré à gré'] });
+    expect(out.fields.procurement_method).toBe('gre_a_gre');
+  });
+
   it('skips LLM when all fields are resolved by deterministic', async () => {
     const stubLlm = new StubLlmExtractor({
       fields: { supplier_name: 'should-not-appear' },

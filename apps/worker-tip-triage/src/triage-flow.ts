@@ -25,7 +25,13 @@
  * §B.4 (closed-context); BLOCK-E-PLAN.md §2.2.
  */
 
-import { expose, sealedBoxDecrypt, shamirCombineFromBase64, wrapSecret } from '@vigil/security';
+import {
+  expose,
+  sealedBoxDecrypt,
+  shamirCombineFromBase64,
+  wipe,
+  wrapSecret,
+} from '@vigil/security';
 import { z } from 'zod';
 
 import { TIP_PARAPHRASE_TASK } from './prompt-tasks.js';
@@ -130,86 +136,105 @@ export async function handleTip(
   // /triage/tips operator UI (Phase C10) — never persisted server-side.
   const pk = await deps.vault.read<string>('tip-portal', 'operator_team_public_key');
 
-  let reconstructedSk;
-  try {
-    reconstructedSk = shamirCombineFromBase64(env.payload.decryption_shares);
-  } catch (e) {
-    const err = e instanceof Error ? e : new Error(String(e));
-    deps.logger.error(
-      { tip_id: tip.id, err_name: err.name, err_message: err.message },
-      'shamir-combine-failed',
-    );
-    return { kind: 'dead-letter', reason: 'shamir-combine-failure' };
-  }
-
+  // Tier-16 audit closure: the reconstructed Shamir private key and
+  // the decrypted plaintext live in two `Uint8Array` buffers below.
+  // We hold them through a single `try / finally` so they are wiped
+  // with libsodium.memzero on EVERY exit path (success, decrypt
+  // failure, LLM failure, dead-letter return). Without this, a
+  // crash-dump / heap-snapshot taken any time after the first await
+  // captures the citizen plaintext.
+  let reconstructedSkBytes: Uint8Array | null = null;
   let plaintext: Uint8Array = ZERO_BYTES;
   try {
-    // sealedBoxDecrypt expects base64-encoded keys/ciphertexts; the
-    // reconstructed Shamir bytes are the libsodium private key, so we
-    // re-encode through Secret<string> wrapping to keep the unwrap
-    // surface narrow.
-    const skBytes = expose(reconstructedSk);
-    const skB64 = wrapSecret(toBase64(skBytes));
-    plaintext = await sealedBoxDecrypt(
-      toBase64(tip.body_ciphertext as unknown as Uint8Array),
-      expose(pk),
-      skB64,
-    );
-  } catch (e) {
-    const err = e instanceof Error ? e : new Error(String(e));
-    deps.logger.error(
-      { tip_id: tip.id, err_name: err.name, err_message: err.message },
-      'tip-decrypt-failed',
-    );
-    return { kind: 'dead-letter', reason: 'decrypt-failure' };
-  }
-  const text = new TextDecoder().decode(plaintext);
+    let reconstructedSk;
+    try {
+      reconstructedSk = shamirCombineFromBase64(env.payload.decryption_shares);
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      deps.logger.error(
+        { tip_id: tip.id, err_name: err.name, err_message: err.message },
+        'shamir-combine-failed',
+      );
+      return { kind: 'dead-letter', reason: 'shamir-combine-failure' };
+    }
+    reconstructedSkBytes = expose(reconstructedSk);
 
-  // The paraphrase prompt window is 4000 chars. Surface truncation so
-  // operators see "this tip was longer than the paraphrase budget" in
-  // the structured logs — silent slicing is a privacy/integrity issue
-  // (a citizen wrote 8000 chars; the operator should know their
-  // paraphrase covers only the first half).
-  const PARAPHRASE_BUDGET_CHARS = 4000;
-  const truncated = text.length > PARAPHRASE_BUDGET_CHARS;
-  const paraphraseInput = truncated ? text.slice(0, PARAPHRASE_BUDGET_CHARS) : text;
-  if (truncated) {
-    deps.logger.warn(
-      { tip_id: tip.id, full_length: text.length, paraphrase_length: paraphraseInput.length },
-      'tip-paraphrase-input-truncated',
-    );
-  }
+    try {
+      // sealedBoxDecrypt expects base64-encoded keys/ciphertexts; the
+      // reconstructed Shamir bytes are the libsodium private key, so we
+      // re-encode through Secret<string> wrapping to keep the unwrap
+      // surface narrow.
+      const skB64 = wrapSecret(toBase64(reconstructedSkBytes));
+      plaintext = await sealedBoxDecrypt(
+        toBase64(tip.body_ciphertext as unknown as Uint8Array),
+        expose(pk),
+        skB64,
+      );
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      deps.logger.error(
+        { tip_id: tip.id, err_name: err.name, err_message: err.message },
+        'tip-decrypt-failed',
+      );
+      return { kind: 'dead-letter', reason: 'decrypt-failure' };
+    }
+    const text = new TextDecoder().decode(plaintext);
 
-  // LLM paraphrase pass — Block-B A2 migration: routes through
-  // SafeLlmRouter so the doctrine system preamble + canary +
-  // call-record audit + prompt-version pin apply uniformly.
-  // The plaintext crosses ONE boundary here — the safe.call's
-  // sources[].text field — and that's by design (the closed-context
-  // boundary IS the intended exit from the council-quorum-decrypt
-  // domain). Privacy invariant: plaintext appears nowhere else.
-  try {
-    const outcome = await deps.safe.call<Paraphrase>({
-      findingId: null,
-      assessmentId: null,
-      promptName: 'tip-triage.paraphrase',
-      task: TIP_PARAPHRASE_TASK,
-      sources: [{ id: `tip:${tip.id}`, label: 'tip-body', text: paraphraseInput }],
-      responseSchema: zParaphrase,
-      modelId: deps.modelId,
-    });
-    deps.logger.info(
-      { tip_id: tip.id, severity: outcome.value.severity_hint, truncated },
-      'tip-paraphrased',
-    );
-    // Update disposition + paraphrase notes (encrypted at rest with the same operator-team key)
-    await deps.tipRepo.setDisposition(tip.id, 'IN_TRIAGE', 'worker-tip-triage');
-  } catch (e) {
-    const err = e instanceof Error ? e : new Error(String(e));
-    deps.logger.error(
-      { tip_id: tip.id, err_name: err.name, err_message: err.message },
-      'paraphrase-failed',
-    );
-    return { kind: 'retry', reason: 'llm-failure', delay_ms: 60_000 };
+    // The paraphrase prompt window is 4000 chars. Surface truncation so
+    // operators see "this tip was longer than the paraphrase budget" in
+    // the structured logs — silent slicing is a privacy/integrity issue
+    // (a citizen wrote 8000 chars; the operator should know their
+    // paraphrase covers only the first half).
+    const PARAPHRASE_BUDGET_CHARS = 4000;
+    const truncated = text.length > PARAPHRASE_BUDGET_CHARS;
+    const paraphraseInput = truncated ? text.slice(0, PARAPHRASE_BUDGET_CHARS) : text;
+    if (truncated) {
+      deps.logger.warn(
+        { tip_id: tip.id, full_length: text.length, paraphrase_length: paraphraseInput.length },
+        'tip-paraphrase-input-truncated',
+      );
+    }
+
+    // LLM paraphrase pass — Block-B A2 migration: routes through
+    // SafeLlmRouter so the doctrine system preamble + canary +
+    // call-record audit + prompt-version pin apply uniformly.
+    // The plaintext crosses ONE boundary here — the safe.call's
+    // sources[].text field — and that's by design (the closed-context
+    // boundary IS the intended exit from the council-quorum-decrypt
+    // domain). Privacy invariant: plaintext appears nowhere else.
+    try {
+      const outcome = await deps.safe.call<Paraphrase>({
+        findingId: null,
+        assessmentId: null,
+        promptName: 'tip-triage.paraphrase',
+        task: TIP_PARAPHRASE_TASK,
+        sources: [{ id: `tip:${tip.id}`, label: 'tip-body', text: paraphraseInput }],
+        responseSchema: zParaphrase,
+        modelId: deps.modelId,
+      });
+      deps.logger.info(
+        { tip_id: tip.id, severity: outcome.value.severity_hint, truncated },
+        'tip-paraphrased',
+      );
+      // Update disposition + paraphrase notes (encrypted at rest with the same operator-team key)
+      await deps.tipRepo.setDisposition(tip.id, 'IN_TRIAGE', 'worker-tip-triage');
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      deps.logger.error(
+        { tip_id: tip.id, err_name: err.name, err_message: err.message },
+        'paraphrase-failed',
+      );
+      return { kind: 'retry', reason: 'llm-failure', delay_ms: 60_000 };
+    }
+    return { kind: 'ack' };
+  } finally {
+    // Best-effort sensitive-memory hygiene. `wipe` is a no-op for
+    // ZERO_BYTES (length=0 short-circuit) so this is safe to call
+    // unconditionally on the never-decrypted path. Plaintext-derived
+    // JS strings (`text`, `paraphraseInput`) cannot be zeroed by the
+    // application (V8 strings are immutable); the Uint8Array source
+    // is the most defensible cleanup we can perform.
+    await wipe(plaintext);
+    await wipe(reconstructedSkBytes);
   }
-  return { kind: 'ack' };
 }

@@ -329,6 +329,7 @@ async function main(): Promise<void> {
     extractorVersion: EXTRACTOR_VERSION,
     llm: llmExtractor,
     now: () => new Date(),
+    logger,
   });
 
   const worker = new ExtractorWorker(sourceRepo, extractor, benchmarkRepo, queue);
@@ -341,7 +342,8 @@ async function main(): Promise<void> {
 
 if (require.main === module) {
   main().catch((e: unknown) => {
-    logger.error({ err: e }, 'fatal-startup');
+    const err = e instanceof Error ? e : new Error(String(e));
+    logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
     process.exit(1);
   });
 }
