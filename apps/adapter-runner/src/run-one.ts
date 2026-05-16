@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { DailyRateLimiter, RobotsChecker } from '@vigil/adapters';
 import {
   adapterRunsTotal,
+  isPublicHttpUrl,
   withCorrelation,
   type Logger,
 } from '@vigil/observability';
@@ -51,8 +52,21 @@ interface DocumentFetchExtraction {
   readonly dedupKey: string;
 }
 
-function extractDocumentFetchRequests(
+/**
+ * Extract candidate document URLs from an adapter event payload.
+ *
+ * Tier-14 audit closure: URLs here originate from adapter-scraped HTML
+ * (PDF link href, document_url payload field, …) and are therefore
+ * adversary-controlled. The previous gate accepted anything that matched
+ * `^https?://` — a malicious source could enqueue `http://169.254.169.254/`,
+ * `http://localhost:5432/`, or `http://[::1]/` and worker-document would
+ * dutifully fetch it. We now require `isPublicHttpUrl` to clear the URL
+ * against the SSRF deny-list before publication, and emit a `rejected`
+ * log line that worker-document's audit-trail can correlate.
+ */
+export function extractDocumentFetchRequests(
   ev: Schemas.SourceEvent,
+  logger?: Logger,
 ): readonly DocumentFetchExtraction[] {
   const payload = ev.payload as Record<string, unknown> | null | undefined;
   if (!payload) return [];
@@ -67,6 +81,20 @@ function extractDocumentFetchRequests(
     if (!/^https?:\/\//i.test(url)) continue;
     if (seen.has(url)) continue;
     seen.add(url);
+
+    const verdict = isPublicHttpUrl(url);
+    if (!verdict.ok) {
+      logger?.warn(
+        {
+          source_id: ev.source_id,
+          source_event_id: ev.id,
+          field,
+          reason: verdict.reason,
+        },
+        'document-url-rejected-ssrf',
+      );
+      continue;
+    }
 
     const urlHash = createHash('sha256').update(url).digest('hex').slice(0, 16);
     out.push({
@@ -208,7 +236,7 @@ export async function runOne(args: RunOneArgs): Promise<void> {
           // worker-document fetches the bytes, hashes, OCRs, and pins them.
           // This is the missing handoff identified by the audit (closes the
           // ADAPTER_OUT → DOCUMENT_FETCH gap).
-          for (const { request, dedupKey } of extractDocumentFetchRequests(ev)) {
+          for (const { request, dedupKey } of extractDocumentFetchRequests(ev, childLogger)) {
             await queue.publish(
               STREAMS.DOCUMENT_FETCH,
               newEnvelope('adapter-runner', request, dedupKey, correlationId),
@@ -262,8 +290,7 @@ export async function runOne(args: RunOneArgs): Promise<void> {
     }
 
     // Health snapshot
-    const consecutiveFailures =
-      outcome === 'green' ? 0 : (previous?.consecutive_failures ?? 0) + 1;
+    const consecutiveFailures = outcome === 'green' ? 0 : (previous?.consecutive_failures ?? 0) + 1;
     await sourceRepo.upsertHealth({
       source_id: src.id,
       status: outcome,

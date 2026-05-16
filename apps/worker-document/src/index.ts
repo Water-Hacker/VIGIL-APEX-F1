@@ -3,11 +3,14 @@ import { createHash } from 'node:crypto';
 import { HashChain } from '@vigil/audit-chain';
 import { SourceRepo, getDb, getPool } from '@vigil/db-postgres';
 import {
+  BOUNDED_BODY_MAX_BYTES,
   StartupGuard,
   auditFeatureFlagsAtBoot,
+  boundedRequest,
   createLogger,
   installShutdownHandler,
   initTracing,
+  isPublicHttpUrl,
   shutdownTracing,
   startMetricsServer,
   registerShutdown,
@@ -25,7 +28,6 @@ import {
 import { Ids, Schemas } from '@vigil/shared';
 import { fileTypeFromBuffer } from 'file-type';
 import { create as kuboCreate } from 'kubo-rpc-client';
-import { request } from 'undici';
 import { z } from 'zod';
 
 import { extractDocContent } from './content-extractor.js';
@@ -75,14 +77,59 @@ class DocumentWorker extends WorkerBase<DocPayload> {
   protected async handle(env: Envelope<DocPayload>): Promise<HandlerOutcome> {
     const { document_url, source_id } = env.payload;
     try {
-      const resp = await request(document_url, { method: 'GET', maxRedirections: 5 });
+      // Tier-14 audit closure: re-validate the SSRF deny-list at the
+      // fetch boundary. run-one filters URLs at publish time, but worker-
+      // document may also be triggered by manual replay (debug consoles,
+      // dead-letter re-queue) where that filter does not apply. We must
+      // refuse here too. `maxRedirections: 0` because a permitted public
+      // host can still 30x-redirect into the internal network — the only
+      // safe redirect policy is "no redirects, dead-letter and let an
+      // operator investigate".
+      const verdict = isPublicHttpUrl(document_url);
+      if (!verdict.ok) {
+        logger.warn(
+          { url: document_url, reason: verdict.reason, source_id },
+          'document-fetch-rejected-ssrf',
+        );
+        return { kind: 'dead-letter', reason: `ssrf-rejected: ${verdict.reason}` };
+      }
+      const resp = await boundedRequest(document_url, {
+        method: 'GET',
+        maxRedirections: 0,
+      });
+      if (resp.statusCode >= 300 && resp.statusCode < 400) {
+        return {
+          kind: 'dead-letter',
+          reason: `redirect-not-followed: ${resp.statusCode}`,
+        };
+      }
       if (resp.statusCode >= 500) {
         return { kind: 'retry', reason: `upstream ${resp.statusCode}`, delay_ms: 30_000 };
       }
       if (resp.statusCode >= 400) {
         return { kind: 'dead-letter', reason: `upstream ${resp.statusCode}` };
       }
-      const buf = Buffer.from(await resp.body.arrayBuffer());
+      // Bounded read — refuse to load >50 MB into memory regardless of
+      // what `Content-Length` claims. The cap is enforced byte-by-byte;
+      // a hostile chunked-encoding upstream cannot lie its way past.
+      const chunks: Buffer[] = [];
+      let total = 0;
+      for await (const chunk of resp.body) {
+        const c = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        total += c.length;
+        if (total > BOUNDED_BODY_MAX_BYTES) {
+          logger.warn(
+            { url: document_url, max_bytes: BOUNDED_BODY_MAX_BYTES, source_id },
+            'document-fetch-body-cap-exceeded',
+          );
+          return {
+            kind: 'dead-letter',
+            reason: `body-exceeds-max-bytes: ${BOUNDED_BODY_MAX_BYTES}`,
+          };
+        }
+        chunks.push(c);
+      }
+      const buf = Buffer.concat(chunks);
       const sha256 = createHash('sha256').update(buf).digest('hex');
 
       // Dedup: if we already have it, just emit the downstream event with the cid.
