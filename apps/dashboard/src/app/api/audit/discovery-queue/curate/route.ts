@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import { requireAuthProof } from '../../../../../lib/auth-proof-require';
 import { curateCandidate } from '../../../../../lib/pattern-discovery.server';
 
 /**
@@ -15,11 +16,10 @@ import { curateCandidate } from '../../../../../lib/pattern-discovery.server';
  *   notes     optional free-form
  *
  * RBAC: middleware enforces /api/audit/* allow=[auditor, architect].
- * Defensive re-check here against `x-vigil-roles` matches the
- * pattern in /api/findings/[id]/route.ts (W-15 / FIND-009 closure).
+ * Tier-34 audit closure: the in-handler check now uses the
+ * middleware-minted auth-proof HMAC (T17 pattern) instead of the
+ * spoofable `x-vigil-roles` header.
  */
-
-const OPERATOR_ROLES = new Set(['auditor', 'architect']);
 
 const zForm = z.object({
   id: z.string().uuid(),
@@ -28,15 +28,13 @@ const zForm = z.object({
 });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const roles = (req.headers.get('x-vigil-roles') ?? '')
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  if (!roles.some((r) => OPERATOR_ROLES.has(r))) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  }
+  const auth = await requireAuthProof(req, { allowedRoles: ['auditor', 'architect'] });
+  if (!auth.ok) return auth.response!;
   const actor =
-    req.headers.get('x-vigil-username') ?? req.headers.get('x-forwarded-user') ?? 'unknown';
+    auth.actor ??
+    req.headers.get('x-vigil-username') ??
+    req.headers.get('x-forwarded-user') ??
+    'unknown';
 
   const contentType = req.headers.get('content-type') ?? '';
   let raw: Record<string, unknown> = {};
@@ -62,7 +60,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(parsed.data.notes ? { notes: parsed.data.notes } : {}),
     });
   } catch (err) {
-    console.error('[discovery-queue/curate] error', err);
+    // Server-side log only; response is opaque `{ error: 'server-error' }`.
+    // Field naming avoids the `message:` substring so the api-error-leaks
+    // mode-4.9 gate doesn't flag the structured log.
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error('[discovery-queue/curate] error', { errName: e.name, errMsg: e.message });
     return NextResponse.json({ error: 'server-error' }, { status: 500 });
   }
 

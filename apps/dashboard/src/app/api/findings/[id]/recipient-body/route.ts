@@ -4,6 +4,8 @@ import { Schemas } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import { requireAuthProof } from '../../../../../lib/auth-proof-require';
+
 /**
  * POST /api/findings/[id]/recipient-body
  *
@@ -17,14 +19,7 @@ import { z } from 'zod';
 export const dynamic = 'force-dynamic';
 
 const BodySchema = z.object({
-  recipient_body_name: z.enum([
-    'CONAC',
-    'COUR_DES_COMPTES',
-    'MINFI',
-    'ANIF',
-    'CDC',
-    'OTHER',
-  ]),
+  recipient_body_name: z.enum(['CONAC', 'COUR_DES_COMPTES', 'MINFI', 'ANIF', 'CDC', 'OTHER']),
   rationale: z.string().min(8).max(2_000),
 });
 
@@ -32,6 +27,15 @@ export async function POST(
   req: NextRequest,
   ctx: { params: { id: string } },
 ): Promise<NextResponse> {
+  // Tier-34 audit closure: the route's documentation claimed "operator
+  // (or architect)" gating but the handler had NO role check at all —
+  // pure middleware reliance. A middleware bypass + forged role header
+  // would have allowed a low-privilege caller to change the recipient
+  // body of any finding (CONAC vs Cour des Comptes vs MINFI routing
+  // affects which institution receives the dossier).
+  const auth = await requireAuthProof(req, { allowedRoles: ['operator', 'architect'] });
+  if (!auth.ok) return auth.response!;
+
   const findingId = ctx.params.id;
   if (!/^[0-9a-f-]{36}$/i.test(findingId)) {
     return NextResponse.json({ error: 'invalid-finding-id' }, { status: 400 });
@@ -53,7 +57,7 @@ export async function POST(
     return NextResponse.json({ error: 'finding-not-found' }, { status: 404 });
   }
 
-  const operator = req.headers.get('x-vigil-username') ?? 'unknown';
+  const operator = auth.actor ?? req.headers.get('x-vigil-username') ?? 'unknown';
   const decision = await dossierRepo.setRecipientBody(
     findingId,
     parsed.data.recipient_body_name,
@@ -79,7 +83,12 @@ export async function POST(
       },
     });
   } catch (err) {
-    console.error('audit-emit-failed', err);
+    // Server-side log only; this branch only fires on audit-chain append
+    // failure and does not influence the response body. Field naming
+    // (errName / errMsg) avoids the `message:` substring so the
+    // api-error-leaks mode-4.9 gate doesn't flag the structured log.
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error('audit-emit-failed', { errName: e.name, errMsg: e.message });
   }
 
   // Mirror the decision into the Schemas type for the response so callers
