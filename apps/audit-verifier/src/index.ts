@@ -21,7 +21,7 @@ import {
   type FeatureFlagAuditEmit,
 } from '@vigil/observability';
 
-import { verifyCrossWitness } from './cross-witness.js';
+import { verifyCrossWitnessWindowed } from './cross-witness.js';
 
 const logger = createLogger({ service: 'audit-verifier' });
 
@@ -128,7 +128,12 @@ async function main(): Promise<void> {
         // matches each row against the audit-witness chaincode.
         if (bridge && tail.seq > 0) {
           try {
-            const report = await verifyCrossWitness(
+            // Tier-48 fix: window the sweep so the CT-03 check keeps
+            // running after the chain crosses CROSS_WITNESS_MAX_RANGE
+            // (~3 hours at 50 events/sec). Pre-fix the unwindowed
+            // call started throwing once tail.seq > 500_000 and the
+            // second cryptographic witness silently went dark.
+            const report = await verifyCrossWitnessWindowed(
               pool,
               bridge,
               { from: 1n, to: BigInt(tail.seq) },
