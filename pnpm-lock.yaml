@@ -730,6 +730,9 @@ importers:
 
   apps/worker-fabric-bridge:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
