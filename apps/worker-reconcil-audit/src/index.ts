@@ -168,9 +168,19 @@ async function tick(
   );
 
   // Divergence is fatal — surface a structured alert and stop the loop.
+  // Tier-19 audit closure: cap the inline `divergent` log payload at
+  // 50 entries. A wedged chain producing 10k+ divergences would
+  // otherwise blow up the log aggregator (Loki / Filebeat). The full
+  // count is preserved in `total_divergent`; the seq list is
+  // preserved in the audit-chain row below.
   if (plan.divergent.length > 0) {
+    const DIVERGENT_LOG_CAP = 50;
     logger.error(
-      { divergent: plan.divergent },
+      {
+        total_divergent: plan.divergent.length,
+        divergent_sample: plan.divergent.slice(0, DIVERGENT_LOG_CAP),
+        sample_truncated: plan.divergent.length > DIVERGENT_LOG_CAP,
+      },
       'reconcil-divergence-detected; non-recoverable; operator intervention required',
     );
     await chain.append({
@@ -308,6 +318,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  logger.error({ err }, 'fatal-startup');
+  const e = err instanceof Error ? err : new Error(String(err));
+  logger.error({ err_name: e.name, err_message: e.message }, 'fatal-startup');
   process.exit(1);
 });

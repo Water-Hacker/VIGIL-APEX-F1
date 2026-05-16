@@ -66,12 +66,20 @@ export interface ReconciliationPlan {
  *
  * Note on `missingFromPolygon`: anchor commitments cover seq RANGES
  * (`seq_from..seq_to`). A Postgres row is considered "covered" if any
- * anchor commitment's range contains its seq. This is intentionally
- * lenient — the Polygon anchor batches multiple seqs into one Merkle
- * root, so we only flag a seq if it falls outside EVERY recorded
- * commitment's range. The high-sig fast-lane anchor (each seq pinned
- * individually) is also represented as a single-row range
- * (seq_from == seq_to).
+ * anchor commitment's range contains its seq AND that commitment has
+ * actually been broadcast to Polygon (non-null `polygon_tx_hash`).
+ * The high-sig fast-lane anchor (each seq pinned individually) is also
+ * represented as a single-row range (seq_from == seq_to).
+ *
+ * Tier-19 audit closure: previously the coverage check ignored
+ * `polygon_tx_hash`. A row with the field set to NULL — i.e. a
+ * commitment row that worker-anchor created but never finished
+ * broadcasting to the chain — silently counted as "covered". A
+ * compromised or wedged anchor worker could leave thousands of seqs
+ * with pending-but-never-sent commitments, and the reconciler would
+ * report `missing_polygon: 0` while the Polygon mainnet had no
+ * record. The fix filters ranges to only those where the tx-hash is
+ * present.
  */
 export function computeReconciliationPlan(state: ReconciliationState): ReconciliationPlan {
   const fabricBySeq = new Map<string, string>();
@@ -94,11 +102,14 @@ export function computeReconciliationPlan(state: ReconciliationState): Reconcili
     }
   }
 
-  // Anchor coverage: parse ranges to BigInt once, then test each seq.
-  const ranges = state.anchorCommitments.map((c) => ({
-    from: BigInt(c.seq_from),
-    to: BigInt(c.seq_to),
-  }));
+  // Anchor coverage: only commitments with a non-null Polygon tx hash
+  // count as "covered". Parse ranges to BigInt once, then test each seq.
+  const ranges = state.anchorCommitments
+    .filter((c) => c.polygon_tx_hash !== null && c.polygon_tx_hash !== '')
+    .map((c) => ({
+      from: BigInt(c.seq_from),
+      to: BigInt(c.seq_to),
+    }));
   const isCovered = (seq: string): boolean => {
     const n = BigInt(seq);
     for (const r of ranges) {

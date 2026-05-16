@@ -151,4 +151,74 @@ describe('computeReconciliationPlan (FIND-005)', () => {
     const plan = computeReconciliationPlan(state);
     expect(plan.divergent).toEqual([]); // case-insensitive match
   });
+
+  // ---- Tier-19 audit closure: NULL/empty polygon_tx_hash filter ----
+  //
+  // Before T19: a commitment row with `polygon_tx_hash IS NULL` (i.e.
+  // worker-anchor created the row but never finished broadcasting to
+  // Polygon) silently counted as "covered". A wedged anchor worker
+  // could leave thousands of unanchored seqs while the reconciler
+  // reported `missing_polygon: 0`. T19 filters commitments to only
+  // those with a non-null tx hash.
+
+  it('treats commitment with NULL polygon_tx_hash as NOT covering its range', () => {
+    const state: ReconciliationState = {
+      actions: [
+        { seq: '1', body_hash: hash(1) },
+        { seq: '2', body_hash: hash(2) },
+        { seq: '3', body_hash: hash(3) },
+      ],
+      fabricWitnesses: [
+        { seq: '1', body_hash: hash(1) },
+        { seq: '2', body_hash: hash(2) },
+        { seq: '3', body_hash: hash(3) },
+      ],
+      anchorCommitments: [
+        // Pending commitment — created but never broadcast.
+        { seq_from: '1', seq_to: '3', root_hash: hash(0xff), polygon_tx_hash: null },
+      ],
+    };
+    const plan = computeReconciliationPlan(state);
+    expect(plan.missingFromPolygon.map((m) => m.seq)).toEqual(['1', '2', '3']);
+    expect(planSummary(plan).clean).toBe(false);
+  });
+
+  it('treats commitment with empty-string polygon_tx_hash as NOT covering', () => {
+    // Defensive: the DB column is nullable, but a future migration
+    // might land empty-string rows from a poisoned ingestor. Same
+    // semantic — anything that is not an actual tx hash means
+    // "not anchored on Polygon".
+    const state: ReconciliationState = {
+      actions: [{ seq: '5', body_hash: hash(5) }],
+      fabricWitnesses: [{ seq: '5', body_hash: hash(5) }],
+      anchorCommitments: [{ seq_from: '5', seq_to: '5', root_hash: hash(5), polygon_tx_hash: '' }],
+    };
+    const plan = computeReconciliationPlan(state);
+    expect(plan.missingFromPolygon.map((m) => m.seq)).toEqual(['5']);
+  });
+
+  it('mixed NULL + valid commitments — only valid ranges grant coverage', () => {
+    const state: ReconciliationState = {
+      actions: [
+        { seq: '1', body_hash: hash(1) },
+        { seq: '2', body_hash: hash(2) },
+        { seq: '3', body_hash: hash(3) },
+        { seq: '4', body_hash: hash(4) },
+      ],
+      fabricWitnesses: [
+        { seq: '1', body_hash: hash(1) },
+        { seq: '2', body_hash: hash(2) },
+        { seq: '3', body_hash: hash(3) },
+        { seq: '4', body_hash: hash(4) },
+      ],
+      anchorCommitments: [
+        // Real anchor — covers 1..2.
+        { seq_from: '1', seq_to: '2', root_hash: hash(0xa), polygon_tx_hash: '0xreal' },
+        // Pending — covers 3..4 only on paper.
+        { seq_from: '3', seq_to: '4', root_hash: hash(0xb), polygon_tx_hash: null },
+      ],
+    };
+    const plan = computeReconciliationPlan(state);
+    expect(plan.missingFromPolygon.map((m) => m.seq)).toEqual(['3', '4']);
+  });
 });
