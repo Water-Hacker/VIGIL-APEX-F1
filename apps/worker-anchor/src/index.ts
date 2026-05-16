@@ -83,8 +83,24 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const intervalMs = Number(process.env.AUDIT_ANCHOR_INTERVAL_MS ?? 3_600_000);
-  const highSigIntervalMs = Number(process.env.AUDIT_HIGH_SIG_INTERVAL_MS ?? 5_000);
+  // Tier-24 audit closure: validate the env-driven numeric configuration
+  // BEFORE the loop starts. Pre-fix `Number('foo')` returned NaN, which
+  // made `sleep(NaN)` return immediately and turned the loop into a
+  // busy-wait. The signer would then be hammered with anchor commits
+  // until the operator noticed via grafana. Validate at boot instead.
+  const parsePositiveIntEnv = (name: string, defaultMs: number, minMs: number): number => {
+    const raw = process.env[name];
+    if (raw === undefined || raw === '') return defaultMs;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < minMs) {
+      throw new Error(
+        `${name}=${JSON.stringify(raw)} must be an integer >= ${minMs}ms; refusing to start worker-anchor`,
+      );
+    }
+    return n;
+  };
+  const intervalMs = parsePositiveIntEnv('AUDIT_ANCHOR_INTERVAL_MS', 3_600_000, 1_000);
+  const highSigIntervalMs = parsePositiveIntEnv('AUDIT_HIGH_SIG_INTERVAL_MS', 5_000, 1_000);
   let stopping = false;
   registerShutdown('anchor-loop', () => {
     stopping = true;
@@ -101,7 +117,10 @@ async function main(): Promise<void> {
   void runHighSigAnchorLoop(
     { anchor, userActionRepo, publicAnchorRepo, logger, intervalMs: highSigIntervalMs },
     () => stopping,
-  ).catch((e: unknown) => logger.error({ err: e }, 'high-sig-loop-fatal'));
+  ).catch((e: unknown) => {
+    const err = e instanceof Error ? e : new Error(String(e));
+    logger.error({ err_name: err.name, err_message: err.message }, 'high-sig-loop-fatal');
+  });
 
   await guard.markBootSuccess();
   logger.info({ intervalMs, highSigIntervalMs, contract: polygonContract }, 'worker-anchor-ready');
@@ -132,7 +151,21 @@ async function main(): Promise<void> {
       }
 
       const fromSeq = lastAnchoredTo + 1;
-      const toSeq = tail.seq;
+      // Tier-24 audit closure: cap the per-tick anchor range so a long
+      // outage (signer down, network split) does not produce a single
+      // mega-batch that loads N×32 bytes of body_hashes + N nodes of
+      // the Merkle tree into the worker's heap. 100_000 seqs ≈ 3.2 MB
+      // of leaves + ~6.4 MB of tree memory — bounded regardless of
+      // chain length. If the unanchored range exceeds the cap, the
+      // next loop tick picks up the remainder.
+      const MAX_ANCHOR_BATCH_SEQS = 100_000;
+      const toSeq = Math.min(tail.seq, fromSeq + MAX_ANCHOR_BATCH_SEQS - 1);
+      if (toSeq < tail.seq) {
+        logger.info(
+          { fromSeq, toSeq, chainTail: tail.seq, capped: true },
+          'anchor-batch-capped; remainder will land on next tick',
+        );
+      }
       // Merkle root over the body_hash leaves in [fromSeq, toSeq].
       // The audit-chain is itself hash-linked (each row carries the previous
       // row's body_hash via prev_hash), so a Merkle commitment at the range
@@ -227,6 +260,7 @@ async function computeMerkleRootForRange(
 }
 
 main().catch((e: unknown) => {
-  logger.error({ err: e }, 'fatal-startup');
+  const err = e instanceof Error ? e : new Error(String(e));
+  logger.error({ err_name: err.name, err_message: err.message }, 'fatal-startup');
   process.exit(1);
 });
