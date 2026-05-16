@@ -125,6 +125,30 @@ describe('VIGILGovernanceV1 (upgradeable)', () => {
     const { c } = await deployBehindProxy();
     expect(await c.contractVersion()).to.equal('v1');
   });
+
+  // ---- Tier-15 audit closure mirrors ----
+
+  it('addMember rejects an account already active in another pillar (V1 mirror)', async () => {
+    const { c, admin, gov, outsider } = await deployBehindProxy();
+    await c.connect(admin).removeMember(1);
+    await expect(c.connect(admin).addMember(gov.address, 1)).to.be.revertedWithCustomError(
+      c,
+      'AccountAlreadyMember',
+    );
+    await expect(c.connect(admin).addMember(outsider.address, 1)).to.emit(c, 'MemberAdded');
+  });
+
+  it('vote past the window does NOT emit ProposalExpired (V1 mirror)', async () => {
+    const { c, gov, jud } = await deployBehindProxy();
+    const idx = await openWithCommitReveal(c, gov, FH, 'ipfs://expiry');
+    await time.increase(15 * 24 * 60 * 60);
+    await expect(c.connect(jud).vote(idx, 0, ethers.ZeroHash)).to.be.revertedWithCustomError(
+      c,
+      'WindowClosed',
+    );
+    const p = await c.getProposal(idx);
+    expect(p.state).to.equal(0); // State.Open — settleExpiredProposal is the only transition path
+  });
 });
 
 describe('VIGILGovernanceV1 → V2 upgrade path', () => {

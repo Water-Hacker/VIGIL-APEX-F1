@@ -81,4 +81,47 @@ describe('VIGILAnchor', () => {
       'CommitmentNotFound',
     );
   });
+
+  // ---- Tier-15 audit closure: first-commitment monotonicity ----
+  //
+  // The previous monotonicity check was `lastToSeq != 0 && ...`, which
+  // gated the constraint on a non-zero lastToSeq. That left the very
+  // first call to commit() free to set fromSeq to any value. A
+  // compromised committer could submit commit(MAX, MAX, x) as the
+  // first commit and permanently lock out the legitimate audit chain
+  // (which off-chain starts at seq=1). These tests pin that the first
+  // commit MUST start at fromSeq=1.
+
+  it('first commit must start at fromSeq=1 (anchor monotonicity)', async () => {
+    const { anchor, committer } = await deploy();
+    const root = ethers.keccak256(ethers.toUtf8Bytes('r'));
+    await expect(anchor.connect(committer).commit(2, 100, root)).to.be.revertedWithCustomError(
+      anchor,
+      'NonContiguous',
+    );
+    await expect(
+      anchor.connect(committer).commit(1_000_000, 1_000_000, root),
+    ).to.be.revertedWithCustomError(anchor, 'NonContiguous');
+    await expect(
+      anchor.connect(committer).commit(ethers.MaxUint256, ethers.MaxUint256, root),
+    ).to.be.revertedWithCustomError(anchor, 'NonContiguous');
+  });
+
+  it('first commit at fromSeq=1 still succeeds (no regression)', async () => {
+    const { anchor, committer } = await deploy();
+    const root = ethers.keccak256(ethers.toUtf8Bytes('r1'));
+    await expect(anchor.connect(committer).commit(1, 50, root)).to.emit(anchor, 'Anchored');
+  });
+
+  it('monotonicity continues to hold after the first valid commit', async () => {
+    const { anchor, committer } = await deploy();
+    const a = ethers.keccak256(ethers.toUtf8Bytes('a'));
+    const b = ethers.keccak256(ethers.toUtf8Bytes('b'));
+    await anchor.connect(committer).commit(1, 50, a);
+    await expect(anchor.connect(committer).commit(52, 100, b)).to.be.revertedWithCustomError(
+      anchor,
+      'NonContiguous',
+    );
+    await expect(anchor.connect(committer).commit(51, 100, b)).to.emit(anchor, 'Anchored');
+  });
 });

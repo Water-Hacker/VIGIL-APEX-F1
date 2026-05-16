@@ -133,6 +133,7 @@ contract VIGILGovernanceV1 is Initializable, AccessControl, ReentrancyGuard {
     error NotYetExpired();
     error CommitmentNotFound();
     error CommitmentTooEarly();
+    error AccountAlreadyMember();
 
     /// @dev Lock the implementation against direct initialisation. Only the
     /// proxy (with its own delegatecalled storage) may initialise.
@@ -151,6 +152,10 @@ contract VIGILGovernanceV1 is Initializable, AccessControl, ReentrancyGuard {
         if (account == address(0)) revert ZeroAddress();
         Member storage seat = memberByPillar[pillar];
         if (seat.active) revert PillarOccupied();
+        // Tier-15 audit closure (mirror of VIGILGovernance): refuse to
+        // re-add an account that is already active under a different
+        // pillar; the two mirror mappings would otherwise diverge.
+        if (memberByAccount[account].active) revert AccountAlreadyMember();
         memberByPillar[pillar] = Member({account: account, pillar: pillar, active: true});
         memberByAccount[account] = Member({account: account, pillar: pillar, active: true});
         emit MemberAdded(account, uint8(pillar));
@@ -228,11 +233,11 @@ contract VIGILGovernanceV1 is Initializable, AccessControl, ReentrancyGuard {
 
         Proposal storage p = _proposals[proposalIndex];
         if (p.state != State.Open) revert ProposalNotOpen();
-        if (block.timestamp > p.closesAt) {
-            p.state = State.Expired;
-            emit ProposalExpired(proposalIndex);
-            revert WindowClosed();
-        }
+        // Tier-15 audit closure (mirror): the previous "auto-expire on
+        // touch" path mutated state then reverted, which rolled the
+        // mutation back. Expiry transitions happen only via
+        // `settleExpiredProposal`.
+        if (block.timestamp > p.closesAt) revert WindowClosed();
         if (votedChoice[proposalIndex][msg.sender] != NOT_VOTED) revert AlreadyVoted();
 
         if (choice == uint8(Choice.Yes)) {

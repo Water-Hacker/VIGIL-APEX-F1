@@ -118,6 +118,7 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
     error EmptyCommitment();
     error EmptyFinding();
     error NotYetExpired();
+    error AccountAlreadyMember();
 
     constructor(address admin) {
         if (admin == address(0)) revert ZeroAddress();
@@ -130,6 +131,17 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
         if (account == address(0)) revert ZeroAddress();
         Member storage seat = memberByPillar[pillar];
         if (seat.active) revert PillarOccupied();
+        // Tier-15 audit closure: refuse to add an account that is already
+        // active under a different pillar. Without this check, the two
+        // mirror mappings (`memberByPillar` and `memberByAccount`) could
+        // diverge: an account would appear active in `memberByPillar[old]`
+        // (its previous seat is never cleared) while `memberByAccount`
+        // reflects only the new pillar. The contract would still vote
+        // correctly under the new pillar (vote() reads memberByAccount),
+        // but the inconsistency masks operator error and corrupts the
+        // off-chain index that walks `memberByPillar`. Force admins to
+        // call `removeMember(previousPillar)` first.
+        if (memberByAccount[account].active) revert AccountAlreadyMember();
         memberByPillar[pillar] = Member({account: account, pillar: pillar, active: true});
         memberByAccount[account] = Member({account: account, pillar: pillar, active: true});
         emit MemberAdded(account, uint8(pillar));
@@ -235,12 +247,13 @@ contract VIGILGovernance is AccessControl, ReentrancyGuard {
 
         Proposal storage p = _proposals[proposalIndex];
         if (p.state != State.Open) revert ProposalNotOpen();
-        if (block.timestamp > p.closesAt) {
-            // Auto-expire on touch
-            p.state = State.Expired;
-            emit ProposalExpired(proposalIndex);
-            revert WindowClosed();
-        }
+        // Tier-15 audit closure: previously the body of this `if` set
+        // `p.state = Expired` and emitted `ProposalExpired` before
+        // reverting with `WindowClosed`. The revert ROLLS BACK both the
+        // state mutation and the event — so the "auto-expire on touch"
+        // comment was dead code. Settlement now happens only via
+        // `settleExpiredProposal`, which mutates state without reverting.
+        if (block.timestamp > p.closesAt) revert WindowClosed();
         if (votedChoice[proposalIndex][msg.sender] != NOT_VOTED) revert AlreadyVoted();
 
         if (choice == uint8(Choice.Yes)) {
