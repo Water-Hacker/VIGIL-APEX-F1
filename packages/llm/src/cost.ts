@@ -40,6 +40,19 @@ export interface UsageRecord {
 export class CostTracker {
   private readonly history: UsageRecord[] = [];
   private readonly logger: Logger;
+  // Tier-41 audit closure: monthly accumulator that survives the
+  // 24h `history` trim. Pre-fix `spentThisMonth()` summed `history`
+  // — but `record()` trimmed entries older than 24h, so the monthly
+  // circuit could only ever see the last 24h of spend. The
+  // 80%-of-$2500 = $2000 threshold was effectively dead because we
+  // don't spend $2000/day; the monthly circuit never tripped.
+  //
+  // The accumulator is process-local: a restart resets it. That's a
+  // known tradeoff — Phase D6 deferred Redis persistence. The hard
+  // daily ceiling still caps a single-day blow-up; the monthly
+  // accumulator catches sustained over-spend across the month.
+  private monthlyCostUsd = 0;
+  private monthlyResetAtUtcMs = 0;
 
   constructor(
     private readonly ceilings: CostCeilings = {
@@ -53,17 +66,29 @@ export class CostTracker {
     logger?: Logger,
   ) {
     this.logger = logger ?? createLogger({ service: 'llm-cost' });
+    this.monthlyResetAtUtcMs = CostTracker.currentMonthStartUtcMs();
   }
 
-  /** Total USD spent in the calendar month-to-date (UTC). */
-  spentThisMonth(): number {
-    const now = new Date();
-    const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-    let total = 0;
-    for (const r of this.history) {
-      if (r.at >= monthStart) total += r.costUsd;
+  private static currentMonthStartUtcMs(now: Date = new Date()): number {
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  }
+
+  private rollMonthlyIfNeeded(): void {
+    const currentMonthStart = CostTracker.currentMonthStartUtcMs();
+    if (currentMonthStart > this.monthlyResetAtUtcMs) {
+      this.monthlyCostUsd = 0;
+      this.monthlyResetAtUtcMs = currentMonthStart;
     }
-    return total;
+  }
+
+  /**
+   * Total USD spent since the start of the current UTC calendar month.
+   * Reads the survivable accumulator (NOT the 24h-trimmed history);
+   * rolls over on the first call past a month boundary.
+   */
+  spentThisMonth(): number {
+    this.rollMonthlyIfNeeded();
+    return this.monthlyCostUsd;
   }
 
   /**
@@ -102,6 +127,11 @@ export class CostTracker {
 
   record(r: UsageRecord): void {
     this.history.push(r);
+    // Tier-41 audit closure: bump the survivable monthly accumulator
+    // BEFORE the 24h trim so the count is not lost when the history
+    // entry rotates out. Honour calendar-month boundaries.
+    this.rollMonthlyIfNeeded();
+    this.monthlyCostUsd += r.costUsd;
     // Trim to last 24h to bound memory
     const cutoff = Date.now() - 86_400_000;
     while (this.history.length > 0 && this.history[0]!.at < cutoff) {
