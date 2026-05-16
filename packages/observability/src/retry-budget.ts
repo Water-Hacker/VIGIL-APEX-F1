@@ -39,11 +39,19 @@ export interface RedisLike {
  * one for the LLM provider, one for cross-witness verification.
  */
 
+// Tier-29 audit closure: previously the EXPIRE was conditional on
+// `current == 1`. If a key existed without a TTL (manual SET via
+// redis-cli, Redis snapshot restored without TTL, version drift),
+// every subsequent INCR returned > 1, EXPIRE was never re-set, and
+// the counter accumulated forever — the budget would appear
+// permanently exhausted from the worker's perspective.
+// `EXPIRE … NX` only sets the TTL if there isn't one, so the
+// happy-path (key already has a TTL) is a no-op and the broken-state
+// path (key has no TTL) self-heals on the next call. Requires Redis
+// 7.0+ which is the deployed version per docker-compose.
 const RESERVE_LUA = `
   local current = redis.call('INCR', KEYS[1])
-  if current == 1 then
-    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
-  end
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]), 'NX')
   return current
 `;
 

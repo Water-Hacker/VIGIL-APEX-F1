@@ -59,6 +59,14 @@ export function createLogger(opts: VigilLoggerOptions): PinoLogger {
       env: process.env.NODE_ENV ?? 'development',
       ...opts.extraBindings,
     },
+    // Tier-29 audit closure: expand the redaction allowlist to cover
+    // the secret-shaped keys we know about across the codebase. The
+    // prior list missed several common shapes — `api_key` (bare),
+    // Shamir `share`s, OAuth `client_secret`, `unseal_key`, session
+    // `cookie`, `set-cookie` headers, and `webauthn_assertion`
+    // (challenge response) — any of which could land in a structured
+    // log line via a careless `{ ...event }` spread or a wrapper
+    // forwarding HTTP headers verbatim.
     redact: {
       paths: [
         'password',
@@ -68,12 +76,30 @@ export function createLogger(opts: VigilLoggerOptions): PinoLogger {
         'authorization',
         'headers.authorization',
         'headers["x-api-key"]',
+        'headers["set-cookie"]',
+        'headers.cookie',
+        'cookie',
+        '*.cookie',
+        'api_key',
+        '*.api_key',
+        'client_secret',
+        '*.client_secret',
         'pin',
         '*.pin',
         '*.private_key',
         '*.private_key_b64',
         'secret',
         '*.secret',
+        'share',
+        '*.share',
+        'shares',
+        '*.shares',
+        'unseal_key',
+        '*.unseal_key',
+        'webauthn_assertion',
+        '*.webauthn_assertion',
+        'root_token',
+        '*.root_token',
       ],
       censor: '[REDACTED]',
     },
