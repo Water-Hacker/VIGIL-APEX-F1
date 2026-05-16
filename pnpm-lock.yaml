@@ -328,6 +328,9 @@ importers:
 
   apps/worker-adapter-repair:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -457,6 +460,9 @@ importers:
 
   apps/worker-conac-sftp:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -503,6 +509,9 @@ importers:
 
   apps/worker-counter-evidence:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -540,6 +549,9 @@ importers:
 
   apps/worker-document:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -589,6 +601,9 @@ importers:
 
   apps/worker-dossier:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -626,6 +641,9 @@ importers:
 
   apps/worker-entity:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-neo4j':
         specifier: workspace:*
         version: link:../../packages/db-neo4j
@@ -666,6 +684,9 @@ importers:
 
   apps/worker-extractor:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -866,6 +887,9 @@ importers:
       '@fastify/rate-limit':
         specifier: ^10.1.1
         version: 10.3.0
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -952,6 +976,9 @@ importers:
 
   apps/worker-pattern:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-neo4j':
         specifier: workspace:*
         version: link:../../packages/db-neo4j
@@ -1081,6 +1108,9 @@ importers:
 
   apps/worker-score:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/certainty-engine':
         specifier: workspace:*
         version: link:../../packages/certainty-engine
@@ -1167,6 +1197,9 @@ importers:
 
   apps/worker-tip-triage:
     dependencies:
+      '@vigil/audit-chain':
+        specifier: workspace:*
+        version: link:../../packages/audit-chain
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
