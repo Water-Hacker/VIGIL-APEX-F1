@@ -6,11 +6,7 @@ import {
 } from '@simplewebauthn/server';
 import { Errors } from '@vigil/shared';
 
-import type {
-  AuthenticationResponseJSON,
-  RegistrationResponseJSON,
-} from '@simplewebauthn/types';
-
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/types';
 
 /**
  * FIDO2 / WebAuthn server helpers.
@@ -40,7 +36,14 @@ export interface RegisteredCredential {
   readonly aaguid?: string;
 }
 
-type AuthenticatorTransportFuture = 'ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb';
+type AuthenticatorTransportFuture =
+  | 'ble'
+  | 'cable'
+  | 'hybrid'
+  | 'internal'
+  | 'nfc'
+  | 'smart-card'
+  | 'usb';
 
 /* =============================================================================
  * Registration
@@ -82,7 +85,9 @@ export interface VerifyRegistrationOptions {
   readonly aaguidAllowlist?: readonly string[];
 }
 
-export async function verifyRegistration(o: VerifyRegistrationOptions): Promise<RegisteredCredential> {
+export async function verifyRegistration(
+  o: VerifyRegistrationOptions,
+): Promise<RegisteredCredential> {
   const v = await verifyRegistrationResponse({
     response: o.response,
     expectedChallenge: o.expectedChallenge,
@@ -152,5 +157,33 @@ export async function verifyAuthentication(o: VerifyAuthenticationOptions): Prom
     requireUserVerification: true,
   });
   if (!v.verified) throw new Errors.FidoVerificationError('authentication not verified');
-  return { verified: true, newCounter: v.authenticationInfo.newCounter };
+
+  // Tier-52 audit closure — WebAuthn §6.1.1 clone-detection contract.
+  //
+  // The W3C spec requires the relying party to compare the asserted
+  // signature counter against the stored counter and reject if the
+  // counter has gone BACKWARDS or stayed equal (when both are
+  // non-zero) — that signals a cloned authenticator. @simplewebauthn/
+  // server returns the new counter but does NOT enforce monotonicity;
+  // it's the caller's responsibility.
+  //
+  // Pre-fix, every caller (the dashboard's /api/council/vote route,
+  // any future operator/admin auth path) had to remember to do this
+  // check themselves. The webauthn-fallback-e2e test already exercises
+  // the route-level check, but enforcing here makes the library
+  // safe-by-default — a future caller that forgets the check still
+  // gets clone protection.
+  //
+  // Spec exemption: many authenticators (Apple, batched FIDO2) never
+  // bump the counter — both stored and new will be 0. That's allowed:
+  // we only reject when the stored counter is non-zero AND the new
+  // counter is <= stored.
+  const newCounter = v.authenticationInfo.newCounter;
+  if (o.credential.counter > 0 && newCounter <= o.credential.counter) {
+    throw new Errors.FidoVerificationError(
+      `signature counter went backwards or stayed equal (stored=${o.credential.counter}, asserted=${newCounter}); ` +
+        `possible authenticator clone per WebAuthn §6.1.1`,
+    );
+  }
+  return { verified: true, newCounter };
 }

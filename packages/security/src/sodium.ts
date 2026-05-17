@@ -62,8 +62,21 @@ export async function sealedBoxDecrypt(
   await ready();
   const c = sodium.from_base64(ciphertextB64, sodium.base64_variants.ORIGINAL);
   const pk = sodium.from_base64(recipientPubKeyB64, sodium.base64_variants.ORIGINAL);
+  // Tier-52 audit closure — wipe the decoded private-key byte buffer
+  // before returning. Pre-fix, the Uint8Array produced by from_base64
+  // sat in heap until V8 GC, even though sodium had already finished
+  // using it. The Secret<string> input still holds the base64 form
+  // (the caller's responsibility to wipe); this only narrows the
+  // BINARY-bytes exposure window, but that's the form an attacker
+  // with a heap dump would search for since it's directly usable as
+  // a libsodium private key. memzero is best-effort per the sodium.ts
+  // wipe() doc but reliably zeroes the live buffer.
   const sk = sodium.from_base64(expose(recipientPrivKey), sodium.base64_variants.ORIGINAL);
-  return sodium.crypto_box_seal_open(c, pk, sk);
+  try {
+    return sodium.crypto_box_seal_open(c, pk, sk);
+  } finally {
+    sodium.memzero(sk);
+  }
 }
 
 /* =============================================================================
