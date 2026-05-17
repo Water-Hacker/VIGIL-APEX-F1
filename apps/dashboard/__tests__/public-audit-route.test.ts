@@ -91,6 +91,12 @@ vi.mock('@vigil/db-postgres', async () => {
   };
 });
 
+// Tier-55: tests intentionally rotate x-forwarded-for to dodge the
+// per-IP limit. The trusted-client-ip helper now gates on
+// TRUST_PROXY_HEADERS / NODE_ENV=production; set it for the test
+// process so the route honours the spoofed-for-test-purposes headers.
+process.env.TRUST_PROXY_HEADERS = 'true';
+
 let reqCounter = 0;
 function makeReq(url: string) {
   // The route uses `req.nextUrl.searchParams`; the Node-side NextRequest
