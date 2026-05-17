@@ -8,6 +8,50 @@ The PPTX architecture (`docs/archive/RTPFC_Governance_Intelligence_Platform.pptx
 defines the rings; the SRD/Build Companions define the implementation. We
 honour both.
 
+## Status note — 2026-05-17
+
+**This plan was authored at the scaffold stage; most of the unchecked
+`[ ]` boxes below have actually shipped and are visible in `git log`,
+`apps/`, `packages/`, and `infra/`.** The boxes are deliberately kept
+intact for historical fidelity rather than retro-ticked — the
+authoritative ledger of what is shipped is the **decision log**
+(`docs/decisions/log.md`) plus the **weakness index**
+(`docs/weaknesses/INDEX.md`). Track-F institutional items
+(council enrolment, CONAC engagement letter, Polygon-signer YubiKey
+mainnet funding) remain out-of-agent-scope and surface in the work
+program (`docs/work-program/PHASE-1-COMPLETION.md`).
+
+Items that landed in the R3 heatmap + alerts + W-10 build
+(2026-05-17, branch `implementation/r3-heatmap-alerts-w10-native`):
+
+- `apps/dashboard/(operator)/regions` — server-rendered SVG
+  national choropleth (R3.A heatmap), commit `58bf15d`.
+- `apps/dashboard/(operator)/alerts` — SSE-driven anomaly-alert
+  table with operator acknowledge / dismiss / promote actions
+  wrapped in TAL-PA audit, commit `c4e1430`.
+- DECISION-021 — SSE is canonical for every server→client real-
+  time channel; supersedes the historical "Socket.io" mention
+  below, commit `7853635`.
+- `tools/vigil-council-signer/` + `packages/security/src/council-
+signer.ts` — Rust PKCS#11 P-256 helper + Python NDJSON service
+  - Node bridge with 17-test coverage. W-10 status flipped from
+    "fix proposed" to "fix shipped (cryptographic core); desktop
+    wrapper deferred M3-M4". Commit `7ebc952`.
+
+The remaining honest gaps that cannot be closed by the build
+agent:
+
+- **W-16 (calibration seed)** — deferred by spec to M2 exit;
+  needs real architect-graded historical cases in
+  `personal/calibration-seed/seed.csv`.
+- **Track F institutional items** — council enrolment ceremony
+  with delivered YubiKeys, CONAC engagement letter, mainnet
+  Polygon wallet funding, regulator first-contact protocol.
+  These are gated on architect external action per EXEC §43.2.
+- **W-10 desktop wrapper** — the cryptographic core is shipped;
+  the Tauri/Electron wrapper with EV-signed reproducible build is
+  the M3-M4 follow-on.
+
 ## Self-critique gate (applied after each component)
 
 Before marking any component done, the agent answers:
@@ -35,6 +79,7 @@ configured to production-grade standards, with API placeholders only (no
 secret values). Spinnable via `docker compose up` in development.
 
 ### R0.A — Repository Foundation
+
 - [ ] `package.json` (root, pnpm workspaces, scripts)
 - [ ] `pnpm-workspace.yaml`
 - [ ] `turbo.json` with build/dev/lint/test/typecheck pipelines
@@ -48,6 +93,7 @@ secret values). Spinnable via `docker compose up` in development.
 - [ ] `.github/workflows/ci.yml`, `phase-gate.yml`, `secret-scan.yml`, `contract-test.yml`
 
 ### R0.B — Foundation Packages
+
 - [ ] `packages/shared` — types, Zod schemas, IDs, time, currency, errors
 - [ ] `packages/db-postgres` — Drizzle schema (all 7 schemas), migrations, repos
 - [ ] `packages/db-neo4j` — Bolt client, custom GDS (PageRank, Louvain, NodeSim)
@@ -62,6 +108,7 @@ secret values). Spinnable via `docker compose up` in development.
 - [ ] `packages/adapters` — adapter base class, registry, scheduling, proxy rotation
 
 ### R0.C — Smart Contracts
+
 - [ ] `contracts/hardhat.config.ts` — Polygon mainnet + Mumbai testnet + local hardhat
 - [ ] `contracts/contracts/VIGILAnchor.sol` — append-only hash registry
 - [ ] `contracts/contracts/VIGILGovernance.sol` — 5-pillar 3-of-5 quorum
@@ -70,6 +117,7 @@ secret values). Spinnable via `docker compose up` in development.
 - [ ] `contracts/scripts/deploy.ts` + `verify.ts` (block explorer)
 
 ### R0.D — Container Fabric
+
 - [ ] `infra/docker/docker-compose.yaml` — full 16-container stack
 - [ ] `infra/docker/dockerfiles/Dashboard.Dockerfile` (multi-stage, distroless)
 - [ ] `infra/docker/dockerfiles/Worker.Dockerfile`
@@ -86,6 +134,7 @@ secret values). Spinnable via `docker compose up` in development.
 - [ ] `infra/docker/.env.compose.example`
 
 ### R0.E — Host Bootstrap & Systemd
+
 - [ ] `infra/host-bootstrap/01-system-prep.sh`
 - [ ] `infra/host-bootstrap/02-yubikey-enrol.sh`
 - [ ] `infra/host-bootstrap/03-vault-shamir-init.sh`
@@ -99,6 +148,7 @@ secret values). Spinnable via `docker compose up` in development.
 - [ ] `infra/wireguard/wg0.conf.template`
 
 ### R0.F — Sources Registry
+
 - [ ] `infra/sources.json` — all 26 sources with URL, cron, owner, rate limit, fallback
 
 ---
@@ -106,6 +156,7 @@ secret values). Spinnable via `docker compose up` in development.
 ## Ring 1 — Omnivore Data Ingestion
 
 ### R1.A — Adapter Framework
+
 - [ ] `apps/adapter-runner` — runs on Hetzner N02; loads `sources.json`; schedules
 - [ ] Proxy pool manager (Hetzner DC → Bright Data residential → Tor over Bright Data, per W-13)
 - [ ] User-Agent + fingerprint discipline
@@ -115,13 +166,16 @@ secret values). Spinnable via `docker compose up` in development.
 - [ ] `worker-adapter-repair` (W-19): LLM selector regeneration with PR proposal
 
 ### R1.B — Adapters (one file per source, all 26)
+
 Cameroonian core (procurement + finance + sectoral):
+
 - [ ] `armp`, `minmap-portal`, `coleps-tenders`, `minfi-portal`, `dgb-budget`,
 - [ ] `dgtcfm-treasury`, `dgtcfm-bons`, `dgi-attestations`, `minepat-bip`,
 - [ ] `mintp`, `minee`, `minsante`, `minedub`, `minesec`, `minhdu`,
 - [ ] `rccm-search`, `cour-des-comptes`, `journal-officiel`, `anif-pep`
 
 International corroboration:
+
 - [ ] `worldbank-sanctions`, `afdb-sanctions`, `eu-sanctions`, `ofac-sdn`,
 - [ ] `un-sanctions`, `opensanctions`, `opencorporates`
 
@@ -129,6 +183,7 @@ Reference adapters (full implementation, hand-written): ARMP, RCCM, OFAC SDN.
 Other 23 follow the same template with parameter substitution per BUILD-V2.
 
 ### R1.C — Document Pipeline
+
 - [ ] `apps/worker-document` — fetch → SHA-256 → MIME detect → language detect → OCR (Tesseract local + Textract fallback) → IPFS pin → DB persist
 
 ---
@@ -136,6 +191,7 @@ Other 23 follow the same template with parameter substitution per BUILD-V2.
 ## Ring 2 — AI Brain
 
 ### R2.A — Pattern Engine
+
 - [ ] `packages/patterns` — registry, base `PatternDef`, signal types, prior schema
 - [ ] All 43 patterns across 8 categories (Reference: P-A-001 from BUILD-V1; rest follow template):
   - Category A (procurement): 9 patterns
@@ -149,6 +205,7 @@ Other 23 follow the same template with parameter substitution per BUILD-V2.
 - [ ] Pattern unit-test fixtures (positive + negative per pattern)
 
 ### R2.B — Workers
+
 - [ ] `apps/worker-entity` — LLM-assisted entity resolution; ER ≥ 90% target; review-band queue
 - [ ] `apps/worker-pattern` — applies registry, emits signals
 - [ ] `apps/worker-bayesian` — combines signals, computes posterior, calibration tracking
@@ -156,6 +213,7 @@ Other 23 follow the same template with parameter substitution per BUILD-V2.
 - [ ] `apps/worker-extract` — typed extraction with `{cid, page, char_span}` citations
 
 ### R2.C — LLM Infrastructure
+
 - [ ] Tier router (Opus / Sonnet / Haiku selection by task class)
 - [ ] Bedrock failover (circuit breaker on 3 failures / 60s)
 - [ ] Local Qwen 3.5 / DeepSeek R1 sovereign tier (DEGRADED mode)
@@ -168,20 +226,23 @@ Other 23 follow the same template with parameter substitution per BUILD-V2.
 ## Ring 3 — Intelligence Products
 
 ### R3.A — Operator Dashboard (Next.js 14)
-- [ ] `apps/dashboard/(operator)/findings` list + detail
-- [ ] `apps/dashboard/(operator)/dead-letter`
-- [ ] `apps/dashboard/(operator)/calibration`
-- [ ] `apps/dashboard/(operator)/alerts`
-- [ ] `apps/dashboard/(operator)/triage/tips`
-- [ ] Real-time updates via Socket.io
-- [ ] Live heatmap (Mapbox GL + D3)
+
+- [x] `apps/dashboard/(operator)/findings` list + detail
+- [x] `apps/dashboard/(operator)/dead-letter`
+- [x] `apps/dashboard/(operator)/calibration`
+- [x] `apps/dashboard/(operator)/alerts` (R3 build 2026-05-17, commit c4e1430)
+- [x] `apps/dashboard/(operator)/triage/tips`
+- [x] Real-time updates via **Server-Sent Events** (NOT Socket.io — see DECISION-021; the historical line "Socket.io" was scaffold-era drift, never coded)
+- [x] National choropleth heatmap — server-rendered SVG, NOT Mapbox GL (no client JS / WebGL / token; R3 build 2026-05-17, commit 58bf15d)
 
 ### R3.B — Council Portal
-- [ ] `apps/dashboard/(council)/proposals` list
-- [ ] `apps/dashboard/(council)/proposals/[id]` vote ceremony
-- [ ] WebAuthn integration with native helper fallback (W-10)
+
+- [x] `apps/dashboard/(council)/proposals` list
+- [x] `apps/dashboard/(council)/proposals/[id]` vote ceremony
+- [x] WebAuthn integration with native helper fallback (W-10) — native helper cryptographic core landed 2026-05-17 (commit 7ebc952); WebAuthn now the fallback rather than the default. Tauri/Electron desktop wrapper for the helper remains M3-M4.
 
 ### R3.C — Public Surfaces
+
 - [ ] `apps/dashboard/(public)/verify` — audit-root + escalation metadata only (W-15)
 - [ ] `apps/dashboard/(public)/verify/[ref]` — per-dossier verification
 - [ ] `apps/dashboard/(public)/ledger` — public audit-chain checkpoints
@@ -189,6 +250,7 @@ Other 23 follow the same template with parameter substitution per BUILD-V2.
 - [ ] `.onion` v3 hidden service config (W-09)
 
 ### R3.D — Auto-Dossier
+
 - [ ] `apps/worker-dossier` — deterministic PDF render (FR + EN), QR, signing, IPFS pin
 
 ---
@@ -215,6 +277,7 @@ Other 23 follow the same template with parameter substitution per BUILD-V2.
 ## Verification per Ring
 
 After each ring closes:
+
 - All packages build with `pnpm build` (no errors, no warnings)
 - All unit tests pass with `pnpm test` (≥ 80% coverage on critical packages)
 - All linters green
