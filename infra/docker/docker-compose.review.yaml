@@ -1,0 +1,95 @@
+# =============================================================================
+# VIGIL APEX — review-mode compose
+# =============================================================================
+#
+# Purpose: bring up the minimum substrate a code reviewer needs to exercise
+# the audit-chain + dossier paths WITHOUT requiring the full production
+# stack (Vault Shamir ceremony, YubiKey enrolment, Tor onion provisioning,
+# IPFS Cluster, Hyperledger Fabric peer, Polygon mainnet signer).
+#
+# Brings up: postgres (with audit.actions schema migrated) + redis.
+# Does NOT bring up: Vault, Keycloak, Tor, IPFS, Fabric, Caddy, dashboard,
+# workers. Those require external secrets / ceremonies the reviewer
+# cannot perform.
+#
+# Usage:
+#   cd /home/kali/Documents/vigil-apex
+#   docker compose -f infra/docker/docker-compose.review.yaml up -d
+#   # … run scripts/review-demo.sh which seeds + exercises the chain …
+#   docker compose -f infra/docker/docker-compose.review.yaml down -v
+#
+# Standalone — does NOT extend the production docker-compose.yaml. The
+# review-mode network is `vigil-review` (not `vigil-internal`) so there
+# is no chance of accidental cross-talk with a running production stack.
+#
+# Reviewer-friendliness:
+#   - postgres uses an ephemeral named volume (deleted on `down -v`); no
+#     /srv/vigil bind mount required
+#   - postgres password is the literal string "review" — this is dev-only
+#     credentials, scoped to this compose file, never re-used elsewhere
+#   - ports 5432 (postgres) and 6379 (redis) are bound to 127.0.0.1 only
+#     so the reviewer can connect from the host but the services are not
+#     exposed beyond it
+#   - Tier-1 secret guards (VIGIL_PHASE, GPG_FINGERPRINT, etc.) are NOT
+#     populated — workers refuse to boot under those guards by design.
+#     This file deliberately does NOT bring up workers; the reviewer
+#     exercises packages directly via scripts/review-demo.sh.
+
+networks:
+  vigil-review:
+    driver: bridge
+
+volumes:
+  pg-review-data:
+  redis-review-data:
+
+services:
+  vigil-review-postgres:
+    image: postgres:16.4-alpine
+    container_name: vigil-review-postgres
+    restart: 'no'
+    networks: [vigil-review]
+    ports:
+      - '127.0.0.1:5432:5432'
+    environment:
+      POSTGRES_DB: vigil
+      POSTGRES_USER: vigil
+      POSTGRES_PASSWORD: review
+      POSTGRES_INITDB_ARGS: '--encoding=UTF-8 --auth=scram-sha-256'
+      TZ: Africa/Douala
+    volumes:
+      - pg-review-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vigil -d vigil']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  vigil-review-redis:
+    image: redis:7.4-alpine
+    container_name: vigil-review-redis
+    restart: 'no'
+    networks: [vigil-review]
+    ports:
+      - '127.0.0.1:6379:6379'
+    command:
+      [
+        'redis-server',
+        '--maxmemory',
+        '256mb',
+        '--maxmemory-policy',
+        'allkeys-lru',
+        '--appendonly',
+        'no',
+        '--save',
+        '',
+      ]
+    volumes:
+      - redis-review-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
