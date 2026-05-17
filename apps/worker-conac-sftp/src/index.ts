@@ -134,7 +134,12 @@ class ConacSftpWorker extends WorkerBase<Payload> {
     try {
       target = resolveDeliveryTarget(body);
     } catch (err) {
-      logger.error({ err, body }, 'delivery-target-misconfigured');
+      // Tier-63: err_name/err_message convention.
+      const e = err instanceof Error ? err : new Error(String(err));
+      logger.error(
+        { err_name: e.name, err_message: e.message, body },
+        'delivery-target-misconfigured',
+      );
       return { kind: 'retry', reason: 'delivery-target-misconfigured', delay_ms: 60 * 60_000 };
     }
 
@@ -168,7 +173,12 @@ class ConacSftpWorker extends WorkerBase<Payload> {
         this.fetchAndVerify(en.pdf_cid, en.pdf_sha256),
       ]);
     } catch (err) {
-      logger.error({ err, ref: env.payload.dossier_ref }, 'ipfs-fetch-failed');
+      // Tier-63: err_name/err_message convention.
+      const e = err instanceof Error ? err : new Error(String(err));
+      logger.error(
+        { err_name: e.name, err_message: e.message, ref: env.payload.dossier_ref },
+        'ipfs-fetch-failed',
+      );
       return { kind: 'retry', reason: 'ipfs-fetch-failed', delay_ms: 60_000 };
     }
 
