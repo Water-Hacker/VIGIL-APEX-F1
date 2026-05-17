@@ -1,0 +1,53 @@
+[package]
+name = "yk-council-signer"
+version = "0.1.0"
+edition = "2021"
+description = "VIGIL APEX council-vote signer — YubiKey PIV ECDSA-P256 over PKCS#11. Replaces WebAuthn as the primary path per W-10 (fix proposed; native helper)."
+license = "UNLICENSED"
+publish = false
+
+# Single binary. Invoked from main.py (the NDJSON socket wrapper)
+# OR directly as a CLI for unit testing. Stdin/stdout protocol mirrors
+# tools/vigil-polygon-signer/rust-helper/ so a reviewer sees one
+# shape and not two.
+[[bin]]
+name = "yk-council-signer"
+path = "src/main.rs"
+
+[dependencies]
+# PKCS#11 token access. cryptoki is the maintained, audited binding.
+# Pinned to the same version vigil-polygon-signer uses so a single
+# release of cryptoki carries both helpers.
+cryptoki = "0.7"
+
+# P-256 / NIST P-256 (also called secp256r1 / prime256v1). The
+# WebAuthn default curve, and what a YubiKey PIV slot 9C holds when
+# generated with `ykman piv keys generate --algorithm ECCP256 9c -`.
+p256 = { version = "0.13", features = ["ecdsa", "pem"] }
+
+# SHA-256 for the WebAuthn-style assertion. The dashboard passes the
+# challenge already as a SHA-256 digest; this stays here for an
+# integrity-check on the input length only.
+sha2 = "0.10"
+
+# Hex encode/decode for the wire format.
+hex = "0.4"
+
+# Error handling.
+anyhow = "1.0"
+
+# Logging — write structured info to stderr; stdout reserved for the
+# signature output.
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+# Property-style fuzzing for the pure helpers (DER decode + low-S
+# normalisation). Mirrors the proptest dep on vigil-polygon-signer.
+proptest = "1.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

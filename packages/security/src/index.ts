@@ -10,5 +10,6 @@ export * from './secrets.js';
 export * from './sodium.js';
 export * from './shamir.js';
 export * from './fido.js';
+export * from './council-signer.js';
 export * from './mtls.js';
 export * from './roles.js';
