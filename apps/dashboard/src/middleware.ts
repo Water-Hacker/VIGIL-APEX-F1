@@ -94,6 +94,7 @@ export const ROUTE_RULES: ReadonlyArray<RouteRule> = [
   // Civil-society read-only portal (Tier 5 / W-15). Read-only by middleware:
   // POSTs and PATCHes against /civil-society/* are not allowed at this layer.
   { prefix: '/civil-society', allow: ['civil_society', 'auditor', 'architect'] },
+  { prefix: '/api/alerts', allow: ['operator', 'auditor', 'architect'] },
   { prefix: '/api/findings', allow: ['operator', 'auditor', 'architect'] },
   { prefix: '/api/dead-letter', allow: ['operator', 'architect'] },
   { prefix: '/api/calibration', allow: ['operator', 'architect'] },
