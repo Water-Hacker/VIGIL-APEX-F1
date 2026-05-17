@@ -1,0 +1,79 @@
+{
+  "$comment": "SYNTHETIC sample — values are illustrative, not real. The shape is what worker-conac-sftp uploads alongside the bilingual PDFs per format-adapter (CONAC recipient body). See packages/dossier/src/types.ts + apps/worker-conac-sftp/src/format-adapter.ts for the schema source of truth.",
+  "schema_version": "1.0.0",
+  "recipient_body": "CONAC",
+  "dossier": {
+    "ref": "VA-2026-0001",
+    "finding_id": "f-review-001",
+    "language": "fr",
+    "rendered_at": "2026-05-17T14:15:00.000Z",
+    "classification": "restreint",
+    "pdf_sha256_fr": "0000000000000000000000000000000000000000000000000000000000000000",
+    "pdf_sha256_en": "1111111111111111111111111111111111111111111111111111111111111111",
+    "pdf_cid_fr": "bafybeih2gqu3xrqpzpr5vyi2pfqu4kxyhppkkxr2dgkbsupgkwslpz4hsy",
+    "pdf_cid_en": "bafybeih3qqxu3xrqpzpr5vyi2pfqu4kxyhppkkxr2dgkbsupgkwslpz4xxx"
+  },
+  "finding": {
+    "id": "f-review-001",
+    "title_fr": "Fractionnement présumé — trois attributaires liés",
+    "title_en": "Alleged splitting — three linked contracting parties",
+    "severity": "high",
+    "posterior": 0.87,
+    "amount_xaf": 287450000,
+    "region": "CE",
+    "pattern_categories": ["A", "B"],
+    "signal_count": 6,
+    "detected_at": "2026-05-15T08:30:14.000Z",
+    "council_voted_at": "2026-05-17T14:07:55.000Z"
+  },
+  "signer": {
+    "name": "Junior Thuram Nana",
+    "pgp_fingerprint": "0000000000000000000000000000000000000000",
+    "signed_at": "2026-05-17T14:15:00.000Z"
+  },
+  "audit_anchor": {
+    "$comment": "Three-witness chain-of-custody — see docs/audit/08-audit-chain.md",
+    "audit_event_id": "11111111-1111-1111-1111-111111111111",
+    "seq": 12,
+    "body_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "polygon_tx_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "polygon_network": "testnet",
+    "fabric_witness_checkpoint_id": "vigil-audit-channel-checkpoint-2026-05-17T14",
+    "public_verify_url": "https://verify.vigilapex.cm/verify/VA-2026-0001"
+  },
+  "governance": {
+    "$comment": "DECISION-008 § C.5.b — 3-of-5 council quorum",
+    "proposal_index": 17,
+    "yes_votes": 3,
+    "no_votes": 0,
+    "abstain_votes": 0,
+    "recused_addresses": [],
+    "voters": [
+      {
+        "pillar": "governance",
+        "address": "0xpillar-a",
+        "choice": "YES",
+        "voted_at": "2026-05-17T14:02:31Z"
+      },
+      {
+        "pillar": "judicial",
+        "address": "0xpillar-b",
+        "choice": "YES",
+        "voted_at": "2026-05-17T14:04:18Z"
+      },
+      {
+        "pillar": "civil_society",
+        "address": "0xpillar-c",
+        "choice": "YES",
+        "voted_at": "2026-05-17T14:07:55Z"
+      }
+    ],
+    "result": "APPROVED"
+  },
+  "delivery": {
+    "$comment": "worker-conac-sftp uploads PDFs first then this manifest LAST (SRD §25.3); manifest presence is the recipient's ready-to-ingest trigger",
+    "sftp_inbox": "/inbox/conac/VA-2026-0001/",
+    "uploaded_at": "2026-05-17T14:16:42.000Z",
+    "ack_polled_until": "2026-05-24T14:16:42.000Z"
+  }
+}
