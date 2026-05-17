@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -30,6 +29,13 @@ import {
 import { Ids, Schemas } from '@vigil/shared';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import { z } from 'zod';
+
+import {
+  assertPdfWithinCap,
+  computeDevUnsignedFingerprint,
+  devUnsignedAllowed,
+  runLibreOffice,
+} from './libreoffice.js';
 
 const logger = createLogger({ service: 'worker-dossier' });
 
@@ -180,16 +186,10 @@ class DossierWorker extends WorkerBase<Payload> {
       await runLibreOffice(docxPath, dir);
       const pdfPath = docxPath.replace(/\.docx$/, '.pdf');
       const pdfBytes = await readFile(pdfPath);
-      // Tier-58 audit closure — hard cap on PDF size. LibreOffice can produce
-      // pathologically large PDFs under font-fallback or embedded-image bugs;
-      // a 100 MB PDF would OOM the worker and stall the IPFS pin. 50 MiB is
-      // generous for a real bilingual dossier (typical: 200-500 KiB).
-      const MAX_PDF_BYTES = 50 * 1024 * 1024;
-      if (pdfBytes.byteLength > MAX_PDF_BYTES) {
-        throw new Error(
-          `LibreOffice produced an oversized PDF: ${pdfBytes.byteLength} bytes > cap ${MAX_PDF_BYTES}`,
-        );
-      }
+      // Tier-58 audit closure — hard cap on PDF size. Logic extracted to
+      // ./libreoffice.ts so the cap is testable without spinning up the
+      // worker. The thrown message names actual bytes + cap.
+      assertPdfWithinCap(pdfBytes.byteLength);
       const pdfSha256 = createHash('sha256').update(pdfBytes).digest('hex');
 
       // GPG sign — YubiKey-backed; gpg-agent prompts for touch.
@@ -204,11 +204,7 @@ class DossierWorker extends WorkerBase<Payload> {
         signatureFingerprint = this.gpgFingerprint;
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
-        const devUnsignedAllowed =
-          process.env.VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER === 'true' &&
-          process.env.NODE_ENV !== 'production' &&
-          Number(process.env.VIGIL_PHASE ?? '0') < 1;
-        if (!devUnsignedAllowed) {
+        if (!devUnsignedAllowed()) {
           logger.error(
             { err_name: err.name, err_message: err.message },
             'gpg-sign-failed; refusing to write unsigned dossier',
@@ -220,7 +216,7 @@ class DossierWorker extends WorkerBase<Payload> {
           'gpg-sign-failed; continuing UNSIGNED — VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER opt-in',
         );
         signature = Buffer.alloc(0);
-        signatureFingerprint = `DEV-UNSIGNED-${this.gpgFingerprint}`;
+        signatureFingerprint = computeDevUnsignedFingerprint(this.gpgFingerprint);
       }
 
       // IPFS pin
@@ -295,72 +291,6 @@ class DossierWorker extends WorkerBase<Payload> {
       }
     }
   }
-}
-
-/**
- * Tier-12 council-dossier audit closure: hard wall-clock cap on the
- * LibreOffice headless convert. Pre-fix the spawn had no timeout — a
- * hung soffice (font fallback loop, X server vestige, libreoffice
- * background sync) would block the dossier worker indefinitely. With
- * `concurrency: 2`, two hung renders would stall the entire dossier
- * pipeline.
- *
- * 90 s is generous for any realistic dossier (typical render: 3–8 s,
- * 95th percentile on heavily-formatted bilingual docs: ~20 s). Anything
- * above that cap is presumed pathological; kill the child + reject so
- * the worker retries on the queue with a fresh process.
- */
-const LIBREOFFICE_TIMEOUT_MS = Number(process.env.LIBREOFFICE_TIMEOUT_MS ?? 90_000);
-
-function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('soffice', [
-      '--headless',
-      '--convert-to',
-      'pdf:writer_pdf_Export:UseTaggedPDF=false;ExportFormFields=false;ReduceImageResolution=false',
-      '--outdir',
-      outDir,
-      docxPath,
-    ]);
-    // Tier-58 audit closure — capture stderr so non-zero exit codes
-    // carry the soffice diagnostic message into the operator log.
-    // Pre-fix, the reject error was just "soffice exited N" with no
-    // signal about WHY (missing font, corrupt docx, fontconfig misuse).
-    // Bound the capture at 4 KB so a verbose-mode soffice can't blow
-    // up worker memory.
-    const STDERR_CAP_BYTES = 4096;
-    const stderrChunks: Buffer[] = [];
-    let stderrBytes = 0;
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderrBytes < STDERR_CAP_BYTES) {
-        stderrChunks.push(chunk);
-        stderrBytes += chunk.length;
-      }
-    });
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, LIBREOFFICE_TIMEOUT_MS);
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      const stderrPreview = Buffer.concat(stderrChunks).toString('utf8').slice(0, STDERR_CAP_BYTES);
-      if (timedOut) {
-        reject(
-          new Error(
-            `soffice exceeded ${LIBREOFFICE_TIMEOUT_MS}ms timeout (SIGKILLed); stderr: ${stderrPreview || '<empty>'}`,
-          ),
-        );
-        return;
-      }
-      if (code === 0) resolve();
-      else reject(new Error(`soffice exited ${code}; stderr: ${stderrPreview || '<empty>'}`));
-    });
-  });
 }
 
 async function main(): Promise<void> {

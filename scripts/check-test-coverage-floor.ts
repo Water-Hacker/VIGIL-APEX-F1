@@ -11,8 +11,7 @@
  * regress. Removing an app from the allowlist is a one-line PR.
  *
  * Currently allow-listed (zero-test apps as of 2026-05-17):
- *   - worker-counter-evidence  (graduates with T2 of TODO.md)
- *   - worker-dossier            (graduates with T3 of TODO.md)
+ *   (none — the allowlist is empty)
  *
  * Graduation log:
  *   - 2026-05-01: worker-score graduated (HARDEN-#3 / T1.12).
@@ -23,6 +22,13 @@
  *     worker-minfi-api (1), worker-tip-triage (3). The allowlist's
  *     contract is monotonic-shrink: any worker that has tests must NOT
  *     remain allowlisted, so that test-deletion regressions trip CI.
+ *   - 2026-05-17 (T2 of TODO.md): worker-counter-evidence graduated —
+ *     apps/worker-counter-evidence/__tests__/devils-advocate.test.ts
+ *     pins handle()'s early-exit + SafeLlmRouter contract.
+ *   - 2026-05-17 (T3 of TODO.md): worker-dossier graduated —
+ *     apps/worker-dossier/__tests__/libreoffice.test.ts pins the
+ *     Tier-58 audit closures (PDF cap, timeout, stderr capture,
+ *     dev-unsigned-fingerprint gate).
  *
  * Mirrors the existing scripts/check-migration-pairs.ts pattern.
  *
@@ -38,7 +44,7 @@ import process from 'node:process';
 const REPO_ROOT = process.cwd();
 const APPS_DIR = join(REPO_ROOT, 'apps');
 
-const LEGACY_ZERO_TEST = new Set(['worker-counter-evidence', 'worker-dossier']);
+const LEGACY_ZERO_TEST = new Set<string>([]);
 
 function listAppDirs(): string[] {
   if (!existsSync(APPS_DIR)) return [];
