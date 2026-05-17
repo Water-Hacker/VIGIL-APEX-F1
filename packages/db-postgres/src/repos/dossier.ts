@@ -2,17 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as dossierSchema from '../schema/dossier.js';
 
 import type { Db } from '../client.js';
 
-export type RecipientBodyName =
-  | 'CONAC'
-  | 'COUR_DES_COMPTES'
-  | 'MINFI'
-  | 'ANIF'
-  | 'CDC'
-  | 'OTHER';
+export type RecipientBodyName = 'CONAC' | 'COUR_DES_COMPTES' | 'MINFI' | 'ANIF' | 'CDC' | 'OTHER';
 
 export type RoutingDecisionSource = 'auto' | 'operator' | 'council';
 
@@ -56,12 +51,7 @@ export class DossierRepo {
     const rows = await this.db
       .select()
       .from(dossierSchema.dossier)
-      .where(
-        and(
-          eq(dossierSchema.dossier.ref, ref),
-          eq(dossierSchema.dossier.language, language),
-        ),
-      )
+      .where(and(eq(dossierSchema.dossier.ref, ref), eq(dossierSchema.dossier.language, language)))
       .limit(1);
     return rows[0] ?? null;
   }
@@ -82,10 +72,7 @@ export class DossierRepo {
       .where(eq(dossierSchema.dossier.id, id));
   }
 
-  async markAcknowledged(
-    id: string,
-    recipient_case_reference: string,
-  ): Promise<void> {
+  async markAcknowledged(id: string, recipient_case_reference: string): Promise<void> {
     await this.db
       .update(dossierSchema.dossier)
       .set({
@@ -114,10 +101,7 @@ export class DossierRepo {
       decided_at: decidedAt,
       rationale,
     };
-    const [persisted] = await this.db
-      .insert(dossierSchema.routingDecision)
-      .values(row)
-      .returning();
+    const [persisted] = await this.db.insert(dossierSchema.routingDecision).values(row).returning();
     if (!persisted) {
       throw new Error('routing_decision: insert returned no row');
     }
@@ -186,10 +170,7 @@ export class SatelliteRequestRepo {
             dossierSchema.satelliteRequest.contract_start,
             contractStart.toISOString().slice(0, 10),
           ),
-          eq(
-            dossierSchema.satelliteRequest.contract_end,
-            contractEnd.toISOString().slice(0, 10),
-          ),
+          eq(dossierSchema.satelliteRequest.contract_end, contractEnd.toISOString().slice(0, 10)),
         ),
       )
       .limit(1);
@@ -208,14 +189,11 @@ export class SatelliteRequestRepo {
     // Conflict — return the existing row.
     const existing = await this.findByProjectWindow(
       row.project_id,
-      typeof row.contract_start === 'string'
-        ? new Date(row.contract_start)
-        : row.contract_start,
-      typeof row.contract_end === 'string'
-        ? new Date(row.contract_end)
-        : row.contract_end,
+      typeof row.contract_start === 'string' ? new Date(row.contract_start) : row.contract_start,
+      typeof row.contract_end === 'string' ? new Date(row.contract_end) : row.contract_end,
     );
-    if (!existing) throw new Error('satellite_request: insert returned no row and conflict lookup failed');
+    if (!existing)
+      throw new Error('satellite_request: insert returned no row and conflict lookup failed');
     return existing;
   }
 
@@ -226,6 +204,6 @@ export class SatelliteRequestRepo {
       .select()
       .from(dossierSchema.satelliteRequest)
       .where(eq(dossierSchema.satelliteRequest.status, 'queued'))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 }

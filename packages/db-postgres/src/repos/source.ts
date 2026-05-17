@@ -1,5 +1,6 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as sourceSchema from '../schema/source.js';
 
 import type { Db } from '../client.js';
@@ -109,7 +110,7 @@ export class SourceRepo {
       .from(sourceSchema.events)
       .where(inArray(sourceSchema.events.source_id, sourceIds as string[]))
       .orderBy(sql`${sourceSchema.events.observed_at} DESC`)
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   /**

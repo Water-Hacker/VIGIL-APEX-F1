@@ -2,6 +2,7 @@ import { repoCasConflictTotal } from '@vigil/observability';
 import { Constants } from '@vigil/shared';
 import { and, desc, eq, gte, ne, or, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as findingSchema from '../schema/finding.js';
 
 import type { Db } from '../client.js';
@@ -74,17 +75,24 @@ export class FindingRepo {
         ),
       )
       .orderBy(desc(findingSchema.finding.posterior))
-      .limit(limit);
+      .limit(clampRepoLimit(limit, 50));
   }
 
   async getSignals(
     findingId: string,
+    limit?: number,
   ): Promise<readonly (typeof findingSchema.signal.$inferSelect)[]> {
+    // Tier-56 audit closure — bound the result set. A long-running
+    // finding accumulates signals over months; an unbounded select
+    // would load the whole history. Default 1000 covers any realistic
+    // finding; clampRepoLimit pins the outer ceiling at MAX_REPO_LIMIT
+    // (10_000) so a buggy caller can't OOM the worker.
     return this.db
       .select()
       .from(findingSchema.signal)
       .where(eq(findingSchema.signal.finding_id, findingId))
-      .orderBy(desc(findingSchema.signal.contributed_at));
+      .orderBy(desc(findingSchema.signal.contributed_at))
+      .limit(clampRepoLimit(limit, 1000));
   }
 
   async addSignal(row: typeof findingSchema.signal.$inferInsert): Promise<void> {
@@ -219,6 +227,6 @@ export class FindingRepo {
       .from(findingSchema.finding)
       .where(where)
       .orderBy(desc(findingSchema.finding.detected_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit, 100));
   }
 }
