@@ -1,5 +1,5 @@
 import { createSign, createVerify } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -23,38 +23,9 @@ import Fastify from 'fastify';
 import IORedis from 'ioredis';
 
 import { canonicalJson } from './canonical-json.js';
+import { loadMinfiMtls } from './mtls-loader.js';
 
 const logger = createLogger({ service: 'worker-minfi-api' });
-
-function loadMinfiMtls(): {
-  cert: Buffer;
-  key: Buffer;
-  ca: Buffer;
-  requestCert: true;
-  rejectUnauthorized: true;
-} {
-  const certPath = process.env.MINFI_API_TLS_CERT ?? '/run/secrets/minfi_tls_cert';
-  const keyPath = process.env.MINFI_API_TLS_KEY ?? '/run/secrets/minfi_tls_key';
-  const caPath = process.env.MINFI_API_TLS_CA ?? '/run/secrets/minfi_tls_ca';
-  for (const [name, path] of [
-    ['MINFI_API_TLS_CERT', certPath],
-    ['MINFI_API_TLS_KEY', keyPath],
-    ['MINFI_API_TLS_CA', caPath],
-  ] as const) {
-    if (!existsSync(path)) {
-      throw new Error(
-        `MINFI_API_MTLS=1 but ${name} (${path}) does not exist or is unreadable; refusing to start worker-minfi-api`,
-      );
-    }
-  }
-  return {
-    cert: readFileSync(certPath),
-    key: readFileSync(keyPath),
-    ca: readFileSync(caPath),
-    requestCert: true,
-    rejectUnauthorized: true,
-  };
-}
 
 /**
  * MINFI scoring API (SRD §26).

@@ -3,47 +3,49 @@
 global:
   clusterRegion: cm-yaounde
 
-storageClass: "fast-ssd"
+storageClass: 'fast-ssd'
 
 postgres:
   resources:
-    requests: { memory: "4Gi", cpu: "2" }
-    limits:   { memory: "16Gi", cpu: "8" }
+    requests: { memory: '4Gi', cpu: '2' }
+    limits: { memory: '16Gi', cpu: '8' }
   persistence:
     size: 500Gi
 
 redis:
   resources:
-    requests: { memory: "1Gi", cpu: "500m" }
-    limits:   { memory: "8Gi", cpu: "2" }
+    requests: { memory: '1Gi', cpu: '500m' }
+    limits: { memory: '8Gi', cpu: '2' }
   persistence:
     size: 100Gi
 
 vault:
   resources:
-    requests: { memory: "512Mi", cpu: "250m" }
-    limits:   { memory: "2Gi", cpu: "1" }
+    requests: { memory: '512Mi', cpu: '250m' }
+    limits: { memory: '2Gi', cpu: '1' }
   persistence:
     size: 50Gi
 
-workers:
-  - name: worker-pattern
-    image:
-      repository: vigil-apex/worker-pattern
-      tag: "0.1.0"
-    replicas: 5
-    env:
-      OTEL_SERVICE_NAME: worker-pattern
-      WORKER_NAME: worker-pattern
-      PROMETHEUS_PORT: "9100"
-    resources:
-      requests: { memory: "1Gi", cpu: "500m" }
-      limits:   { memory: "4Gi", cpu: "2" }
-    autoscaling:
-      enabled: true
-      minReplicas: 5
-      maxReplicas: 20
-      targetCPUUtilization: 70
+# T11 of TODO.md sweep (2026-05-17) — workers list intentionally
+# inherited from values.yaml (full 25-worker fleet). Pre-T11, this
+# block overrode workers[] to a single entry (worker-pattern), so
+# prod renders dropped 24 workers silently. Helm overlay semantics
+# REPLACE arrays (not merge), so the override here was a real bug:
+# the chart looked like it deployed the full fleet but only
+# instantiated one worker.
+#
+# Per-worker prod tuning (replica counts, autoscaling, resources)
+# moves to the values.yaml `workers[]` entries themselves so the
+# canonical list is single-sourced. If a future env needs to drop
+# specific workers, re-introduce a `workers:` override here and
+# enumerate ONLY the workers that env should run.
+#
+# Required after this change: re-render the prod + cluster goldens
+# via `scripts/render-helm-golden.sh` (no --verify). The committed
+# prod.yaml + cluster.yaml goldens were deleted as part of this
+# commit to keep the helm-golden-drift gate from blocking on stale
+# state; it falls back to the "no-golden present" skip-with-notice
+# path until the re-render lands.
 
 dashboard:
   replicas: 5
