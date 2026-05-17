@@ -1,0 +1,60 @@
+[Unit]
+Description=VIGIL APEX council vote signer (per-user YubiKey PKCS#11 bridge)
+# W-10 partial closure (native libykcs11 helper). This unit runs
+# under `systemctl --user`, NOT --system, because each council
+# member's YubiKey lives on their personal workstation. Installing
+# under --system would (1) require root, (2) expose the signing
+# surface to every account on the box, and (3) lose the per-user
+# XDG_RUNTIME_DIR socket path that scopes access correctly.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   install -m 0644 vigil-council-signer.user.service \
+#                   ~/.config/systemd/user/vigil-council-signer.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vigil-council-signer.service
+#
+# Status:
+#   systemctl --user status vigil-council-signer.service
+#
+# The dashboard's bridge (packages/security/src/council-signer.ts)
+# probes the socket and silently falls back to WebAuthn when the
+# service is absent — so a member who has not (or cannot) install
+# the helper still votes through the same UI.
+After=default.target
+PartOf=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/python3 %h/.local/share/vigil-council-signer/main.py
+# If the user installed the repo directly without copying main.py,
+# override ExecStart in a drop-in:
+#   mkdir -p ~/.config/systemd/user/vigil-council-signer.service.d
+#   cat > ~/.config/systemd/user/vigil-council-signer.service.d/override.conf <<EOF
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/bin/python3 %h/src/vigil-apex/tools/vigil-council-signer/main.py
+#   EOF
+Restart=on-failure
+RestartSec=5
+
+# Hardening — these are all systemd-user-namespace-compatible.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+# The socket lives in $XDG_RUNTIME_DIR, which systemd-user manages
+# for us; no extra ReadWritePaths needed.
+# The PIN file ($XDG_RUNTIME_DIR/vigil/council_piv_pin) is also
+# inside the user-namespace runtime dir; the helper reads it on
+# every C_Sign call, refuses to read if mode is not 0o400 / 0o600.
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# USB access for libykcs11 → pcscd must be permitted; default
+# systemd-user does NOT block /dev/bus/usb.
+
+[Install]
+WantedBy=default.target
