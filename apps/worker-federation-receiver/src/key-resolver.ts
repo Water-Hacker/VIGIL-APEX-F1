@@ -42,7 +42,12 @@ export class DirectoryKeyResolver implements KeyResolver {
     // running with zero peer keys. The previous swallow-and-continue
     // path silently rejected every federation message.
     const entries = await readdir(this.directory).catch((err: unknown) => {
-      this.logger.warn({ err, directory: this.directory }, 'federation-key-directory-unreadable');
+      // Tier-64 log-convention sweep: err_name/err_message.
+      const e = err instanceof Error ? err : new Error(String(err));
+      this.logger.warn(
+        { err_name: e.name, err_message: e.message, directory: this.directory },
+        'federation-key-directory-unreadable',
+      );
       return [] as string[];
     });
     let loaded = 0;

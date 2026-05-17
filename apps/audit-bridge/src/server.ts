@@ -119,8 +119,10 @@ export async function createAuditBridgeServer(
         // Non-fatal — if chmod fails (e.g. tmpfs that ignores mode),
         // surface a warn so operators can chase it. The socket is
         // still gated by the parent directory's 0o770 mode set above.
+        // Tier-64: err_name/err_message convention.
+        const e = err instanceof Error ? err : new Error(String(err));
         opts.logger.warn(
-          { err, socketPath: opts.socketPath },
+          { err_name: e.name, err_message: e.message, socketPath: opts.socketPath },
           'audit-bridge-socket-chmod-failed; relying on parent-dir perms',
         );
       }
@@ -136,7 +138,12 @@ export async function createAuditBridgeServer(
       try {
         if (existsSync(opts.socketPath)) await unlink(opts.socketPath);
       } catch (err) {
-        opts.logger.info({ err, socketPath: opts.socketPath }, 'audit-bridge-socket-unlink-failed');
+        // Tier-64: err_name/err_message convention.
+        const e = err instanceof Error ? err : new Error(String(err));
+        opts.logger.info(
+          { err_name: e.name, err_message: e.message, socketPath: opts.socketPath },
+          'audit-bridge-socket-unlink-failed',
+        );
       }
     },
   };
