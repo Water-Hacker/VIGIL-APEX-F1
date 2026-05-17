@@ -515,6 +515,9 @@ importers:
       '@vigil/audit-chain':
         specifier: workspace:*
         version: link:../../packages/audit-chain
+      '@vigil/certainty-engine':
+        specifier: workspace:*
+        version: link:../../packages/certainty-engine
       '@vigil/db-postgres':
         specifier: workspace:*
         version: link:../../packages/db-postgres
@@ -549,6 +552,9 @@ importers:
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@types/node@20.19.39)(terser@5.46.2)
 
   apps/worker-document:
     dependencies:
