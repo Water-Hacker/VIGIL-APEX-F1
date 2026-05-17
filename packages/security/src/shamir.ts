@@ -72,13 +72,45 @@ function gfDiv(a: number, b: number): number {
  * PR adds in-combiner integrity, that test will fail and force the
  * change to be coordinated with the age-plugin-yubikey path.
  */
+/**
+ * Tier-52 audit closure — bounds on share count and per-share size.
+ *
+ * SHAMIR_MAX_SHARES: GF(256) has 255 non-zero X coordinates, so 255 is
+ * the absolute upper bound. A pathological caller passing 1000 shares
+ * would do 1000² interpolation work in the Lagrange loop AND would
+ * always trip the duplicate-X check (since only 255 X values exist),
+ * but we should reject loud, fast, and with a clear error rather than
+ * compute the whole O(N²) loop just to discover the collision.
+ *
+ * SHAMIR_MAX_SHARE_BYTES: caps individual share size to 64 KiB. The
+ * Vault Shamir scheme splits the 32-byte master key (or up to
+ * libsodium's 64-byte private key, plus 1-byte X prefix = 65 bytes);
+ * 64 KiB is 1000x headroom. A malformed share claiming to be 1 GB
+ * would otherwise drive the per-byte interpolation loop into a
+ * many-minute runaway.
+ */
+export const SHAMIR_MAX_SHARES = 255;
+export const SHAMIR_MAX_SHARE_BYTES = 64 * 1024;
+
 export function shamirCombine(shares: ReadonlyArray<Uint8Array>): Uint8Array {
   if (shares.length < 2) {
     throw new Error('shamir: need at least 2 shares to combine');
   }
+  if (shares.length > SHAMIR_MAX_SHARES) {
+    // Tier-52: GF(256) has only 255 non-zero X coordinates anyway, but
+    // reject before the O(N²) interpolation runs.
+    throw new Error(
+      `shamir: ${shares.length} shares exceeds max ${SHAMIR_MAX_SHARES} (GF(256) X-coord ceiling)`,
+    );
+  }
   const len = shares[0]!.length;
   if (len < 2) {
     throw new Error('shamir: malformed share (too short)');
+  }
+  if (len > SHAMIR_MAX_SHARE_BYTES) {
+    throw new Error(
+      `shamir: share length ${len} exceeds max ${SHAMIR_MAX_SHARE_BYTES} (1000x headroom over libsodium SK)`,
+    );
   }
   const xs = new Set<number>();
   for (const s of shares) {
@@ -124,11 +156,37 @@ export function shamirCombineFromBase64(sharesB64: ReadonlyArray<string>): Secre
   return wrapSecret(combined);
 }
 
+// Tier-52: strict base64 (standard alphabet, optional padding). Reject
+// at the boundary so an upstream caller submitting malformed shares
+// sees a clear "shamir: malformed base64 share" instead of a generic
+// `InvalidCharacterError` from atob (which then gets caught further up
+// as "shamir-combine-failure", masking the actual defect).
+const BASE64_STRICT = /^[A-Za-z0-9+/]*={0,2}$/;
+
 function decodeBase64(s: string): Uint8Array {
+  if (typeof s !== 'string' || s.length === 0) {
+    throw new Error('shamir: empty or non-string base64 share');
+  }
+  if (!BASE64_STRICT.test(s)) {
+    throw new Error('shamir: malformed base64 share (non-standard characters)');
+  }
+  if (s.length % 4 !== 0) {
+    throw new Error('shamir: malformed base64 share (length not multiple of 4)');
+  }
   // Avoid coupling to Node's Buffer; works in any modern runtime.
   const g = globalThis as { atob?: (s: string) => string };
   if (typeof g.atob === 'function') {
-    const bin = g.atob(s);
+    let bin: string;
+    try {
+      bin = g.atob(s);
+    } catch (e) {
+      // Defence-in-depth: atob can still throw on edge cases the regex
+      // misses (e.g. internal padding). Re-wrap with the canonical
+      // shamir error message.
+      throw new Error(
+        `shamir: malformed base64 share (decode failed: ${e instanceof Error ? e.message : 'unknown'})`,
+      );
+    }
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;

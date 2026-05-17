@@ -81,10 +81,25 @@ export function bayesianPosterior(
   const basePrior = Math.max(...cleanSignals.map((s) => s.prior));
   let lo = logOdds(basePrior);
 
-  // Build a quick lookup for damping
-  const damping = opts.correlationDamping ?? 0.5;
+  // Tier-59 audit closure — clamp damping to [0, 1]. Pre-fix, a
+  // caller passing `correlationDamping: 1.5` produced `1 - damping =
+  // -0.5`; `lr ** -0.5` INVERTS each redundant-pair's evidence
+  // contribution (a strong positive signal becomes a strong
+  // negative signal). Damping < 0 amplifies redundant signals
+  // instead of dampening them. Both modes silently corrupt the
+  // posterior. Clamp to the documented `[0, 1]` contract.
+  const dampingRaw = opts.correlationDamping ?? 0.5;
+  const damping = Number.isFinite(dampingRaw) ? Math.min(1, Math.max(0, dampingRaw)) : 0.5;
   const correlated = new Set<string>();
-  for (const [a, b] of opts.correlatedPairs ?? []) correlated.add(`${a}|${b}`);
+  for (const [a, b] of opts.correlatedPairs ?? []) {
+    // Tier-59: also defend against tuple-shape drift (TS narrowing
+    // lost at runtime). A pair where either side is non-string
+    // would produce `${a}|${b}` with literal "undefined" — silently
+    // matching the empty correlated set + no-op dampening.
+    if (typeof a === 'string' && typeof b === 'string' && a.length > 0 && b.length > 0) {
+      correlated.add(`${a}|${b}`);
+    }
+  }
 
   const seen = new Set<string>();
   for (const s of cleanSignals) {

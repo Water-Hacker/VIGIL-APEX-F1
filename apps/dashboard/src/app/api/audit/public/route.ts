@@ -4,18 +4,19 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { AUDIT_PUBLIC_RATE_LIMIT, createPerKeyRateLimiter } from '../../../../lib/rate-limit';
+import { getTrustedClientIp } from '../../../../lib/trusted-client-ip';
 
 // AUDIT-037: in-process per-IP rate limit. The Caddy edge also limits;
 // this is defence-in-depth + a sane default before the operator-facing
 // audit query route lands. 60 s / 200 burst per key.
 const limiter = createPerKeyRateLimiter(AUDIT_PUBLIC_RATE_LIMIT);
 
+// Tier-55 audit closure: trust the IP claim only when the deployment
+// is explicitly configured to be behind a stripping proxy. In dev or a
+// misconfigured prod, fall back to a single anonymous bucket so an
+// adversary cannot rotate spoofed IP headers to bypass the per-IP limit.
 function clientKey(req: NextRequest): string {
-  return (
-    req.headers.get('cf-connecting-ip') ??
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return getTrustedClientIp(req) ?? 'unknown';
 }
 
 // AUDIT-034: strict RFC-3339 ISO-8601 at the route boundary. Date.parse

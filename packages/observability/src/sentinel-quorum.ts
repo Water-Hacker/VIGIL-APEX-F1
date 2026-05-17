@@ -193,11 +193,31 @@ export async function probeSentinel(
   }
 }
 
+/**
+ * Tier-54 audit closure — emit result is now structured.
+ *
+ * Pre-fix, `emitOutageAuditRow` swallowed audit-bridge errors silently
+ * (console.error only) and returned `void`. The caller had no way to
+ * tell whether the outage was durably recorded. This is the "watcher
+ * is watched" doctrine being undermined: an outage detected but never
+ * audited is operationally indistinguishable from no outage.
+ *
+ * Post-fix, return `{ ok: boolean, status?: number, error?: string }`
+ * and let the orchestrator (runSentinelQuorum) propagate the result
+ * to its caller, which can decide the escalation policy (page
+ * on-call, retry, fall through to a secondary sink).
+ */
+export interface EmitOutageResult {
+  readonly ok: boolean;
+  readonly status?: number;
+  readonly error?: string;
+}
+
 export async function emitOutageAuditRow(
   decision: QuorumDecision,
   target: string,
   socketPath: string = process.env.AUDIT_BRIDGE_SOCKET ?? '/run/vigil/audit-bridge.sock',
-): Promise<void> {
+): Promise<EmitOutageResult> {
   const payload = JSON.stringify({
     action: 'sentinel.quorum_outage',
     actor: 'system:sentinel-quorum',
@@ -227,10 +247,14 @@ export async function emitOutageAuditRow(
     if (status >= 400) {
       // eslint-disable-next-line no-console
       console.error(`audit-bridge POST returned ${status}`);
+      return { ok: false, status };
     }
+    return { ok: true, status };
   } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
     // eslint-disable-next-line no-console
-    console.error('audit-bridge unreachable:', e);
+    console.error('audit-bridge unreachable:', err.message);
+    return { ok: false, error: `${err.name}: ${err.message}` };
   }
 }
 
@@ -239,13 +263,24 @@ export interface RunSentinelQuorumOptions {
   readonly target: string;
   readonly auditSocketPath?: string;
   readonly probe?: (e: SentinelEndpoint, t: string) => Promise<SentinelReport>;
-  readonly emit?: (d: QuorumDecision, t: string, sock: string) => Promise<void>;
+  readonly emit?: (d: QuorumDecision, t: string, sock: string) => Promise<EmitOutageResult | void>;
 }
 
 export interface RunSentinelQuorumResult {
   readonly target: string;
   readonly decision: QuorumDecision;
+  /** True iff the orchestrator attempted to emit the audit row. */
   readonly emitted: boolean;
+  /**
+   * Tier-54 audit closure — true ONLY if the emit succeeded. Pre-fix,
+   * `emitted` was set true regardless of whether the audit-bridge
+   * actually accepted the row. Callers had no way to tell whether the
+   * outage was durably recorded. Post-fix, `emitOk` reflects the
+   * actual write outcome; older callers reading only `emitted` keep
+   * working (it still indicates "we tried to emit").
+   */
+  readonly emitOk?: boolean;
+  readonly emitError?: string;
 }
 
 /**
@@ -265,9 +300,26 @@ export async function runSentinelQuorum(
   const reports = await Promise.all(opts.endpoints.map((e) => probe(e, opts.target)));
   const decision = quorumDecide(reports);
   let emitted = false;
+  let emitOk: boolean | undefined;
+  let emitError: string | undefined;
   if (decision.decision === 'down') {
-    await emit(decision, opts.target, sock);
+    const r = await emit(decision, opts.target, sock);
     emitted = true;
+    // emit may be the new structured form OR a legacy void-returning
+    // injection. Default to ok=true when undefined (preserves old
+    // contract); honour the structured shape when present.
+    if (r && typeof r === 'object') {
+      emitOk = r.ok;
+      if (!r.ok) emitError = r.error ?? `audit-bridge status=${r.status ?? 'unknown'}`;
+    } else {
+      emitOk = true;
+    }
   }
-  return { target: opts.target, decision, emitted };
+  return {
+    target: opts.target,
+    decision,
+    emitted,
+    ...(emitOk !== undefined && { emitOk }),
+    ...(emitError !== undefined && { emitError }),
+  };
 }

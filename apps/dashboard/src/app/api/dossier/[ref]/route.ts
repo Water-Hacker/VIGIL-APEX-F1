@@ -87,7 +87,12 @@ export async function GET(
           // version) leaks via the stack trace and aids reconnaissance.
           // Log the full error server-side so operators can diagnose;
           // return only a generic message to the caller.
-          logger.error({ err, ref, lang, cid: row.pdf_cid }, 'ipfs-fetch-failed');
+          // Tier-64 log-convention sweep: structured errName/errMsg.
+          const e = err instanceof Error ? err : new Error(String(err));
+          logger.error(
+            { errName: e.name, errMsg: e.message, ref, lang, cid: row.pdf_cid },
+            'ipfs-fetch-failed',
+          );
           return NextResponse.json({ error: 'ipfs-fetch-failed' }, { status: 503 });
         }
         return new Response(new Uint8Array(bytes), {
@@ -108,7 +113,11 @@ export async function GET(
     if (err instanceof AuditEmitterUnavailableError) {
       // Mode 4.9: log server-side, return opaque code. The audit
       // emitter's message may contain internal Postgres / Vault state.
-      logger.error({ err, ref, lang }, 'audit-emitter-unavailable');
+      // Tier-64 log-convention sweep: structured errName/errMsg.
+      logger.error(
+        { errName: err.name, errMsg: err.message, ref, lang },
+        'audit-emitter-unavailable',
+      );
       return NextResponse.json({ error: 'audit-emitter-unavailable' }, { status: 503 });
     }
     throw err;

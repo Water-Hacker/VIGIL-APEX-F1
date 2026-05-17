@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as govSchema from '../schema/governance.js';
 
 import type { Db } from '../client.js';
@@ -80,7 +81,7 @@ export class GovernanceRepo {
       .from(govSchema.proposal)
       .where(eq(govSchema.proposal.state, 'open'))
       .orderBy(desc(govSchema.proposal.opened_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   async getProposalById(id: string) {

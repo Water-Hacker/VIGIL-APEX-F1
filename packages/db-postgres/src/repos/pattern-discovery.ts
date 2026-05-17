@@ -1,5 +1,6 @@
 import { desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as pdSchema from '../schema/pattern-discovery.js';
 
 import type { Db } from '../client.js';
@@ -52,7 +53,7 @@ export class PatternDiscoveryRepo {
       .from(pdSchema.patternDiscoveryCandidate)
       .where(eq(pdSchema.patternDiscoveryCandidate.status, 'awaiting_curation'))
       .orderBy(desc(pdSchema.patternDiscoveryCandidate.last_seen_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   async setCuration(input: {

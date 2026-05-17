@@ -68,6 +68,20 @@ export function computePosterior(input: ComputePosteriorInput): ComputePosterior
   const priorOdds = priorToOdds(input.prior);
   let odds = priorOdds;
   for (const c of input.components) {
+    // Tier-60 audit closure — validate finite numbers per-component.
+    // Pre-fix, a NaN `likelihood_ratio` or `effective_weight` slipped
+    // through (`NaN < 0` is false, `NaN > 1` is false; both bounds
+    // checks passed). NaN then propagated through the odds product
+    // until `oddsToProbability` threw with a generic "got NaN" message
+    // — operators couldn't trace which component originated the
+    // poisoning. Named-error with the offending evidence_id makes
+    // upstream bug-hunting tractable.
+    if (!Number.isFinite(c.likelihood_ratio)) {
+      throw new Error(`likelihood_ratio must be a finite number for ${c.evidence_id}`);
+    }
+    if (!Number.isFinite(c.effective_weight)) {
+      throw new Error(`effective_weight must be a finite number for ${c.evidence_id}`);
+    }
     if (c.likelihood_ratio <= 0) {
       throw new Error(`likelihood_ratio must be > 0 for ${c.evidence_id}`);
     }
@@ -110,18 +124,29 @@ export function effectiveWeights(opts: {
   }>;
   readonly independence: (a: string, b: string) => number;
 }): ReadonlyArray<number> {
+  // Tier-60 audit closure — defensive clamp helper. Math.max/min do
+  // NOT collapse NaN (they propagate it), so a NaN strength leaks
+  // straight through without the [0, 1] guard catching it. clampUnit
+  // explicitly maps non-finite inputs to 0 (no contribution), matching
+  // the "buggy component contributes nothing" posture of the
+  // bayesianPosterior cleanSignal filter at packages/patterns.
+  const clampUnit = (n: number): number => {
+    if (!Number.isFinite(n)) return 0;
+    if (n < 0) return 0;
+    if (n > 1) return 1;
+    return n;
+  };
   return opts.components.map((c, idx) => {
-    if (c.source_id === null) return Math.max(0, Math.min(1, c.strength));
+    if (c.source_id === null) return clampUnit(c.strength);
     let minIndep = 1;
     for (let j = 0; j < opts.components.length; j++) {
       if (j === idx) continue;
       const other = opts.components[j]!;
       if (other.source_id === null) continue;
       const w = opts.independence(c.source_id, other.source_id);
-      if (w < minIndep) minIndep = w;
+      if (Number.isFinite(w) && w < minIndep) minIndep = w;
     }
-    const eff = Math.max(0, Math.min(1, c.strength * minIndep));
-    return eff;
+    return clampUnit(c.strength * minIndep);
   });
 }
 

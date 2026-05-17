@@ -86,21 +86,25 @@ export async function runSatelliteTrigger(
 ): Promise<{ enqueued: number; skipped: number; failed: number }> {
   const cap = deps.perTickCap ?? DEFAULT_PER_TICK_CAP;
   const r = await deps.db.execute(CANDIDATES_SQL);
-  const candidates = (r.rows as Array<{
-    project_id: string;
-    lat: string | number;
-    lon: string | number;
-    contract_start: string | Date;
-    contract_end: string | Date;
-  }>).map((row): ProjectCandidate => ({
-    project_id: row.project_id,
-    lat: typeof row.lat === 'string' ? Number.parseFloat(row.lat) : row.lat,
-    lon: typeof row.lon === 'string' ? Number.parseFloat(row.lon) : row.lon,
-    contract_start:
-      row.contract_start instanceof Date ? row.contract_start : new Date(row.contract_start),
-    contract_end:
-      row.contract_end instanceof Date ? row.contract_end : new Date(row.contract_end),
-  }));
+  const candidates = (
+    r.rows as Array<{
+      project_id: string;
+      lat: string | number;
+      lon: string | number;
+      contract_start: string | Date;
+      contract_end: string | Date;
+    }>
+  ).map(
+    (row): ProjectCandidate => ({
+      project_id: row.project_id,
+      lat: typeof row.lat === 'string' ? Number.parseFloat(row.lat) : row.lat,
+      lon: typeof row.lon === 'string' ? Number.parseFloat(row.lon) : row.lon,
+      contract_start:
+        row.contract_start instanceof Date ? row.contract_start : new Date(row.contract_start),
+      contract_end:
+        row.contract_end instanceof Date ? row.contract_end : new Date(row.contract_end),
+    }),
+  );
 
   let enqueued = 0;
   let skipped = 0;
@@ -108,7 +112,10 @@ export async function runSatelliteTrigger(
 
   for (const c of candidates) {
     if (enqueued >= cap) {
-      deps.logger.info({ enqueued, cap, remaining: candidates.length - enqueued }, 'rate-cap-reached');
+      deps.logger.info(
+        { enqueued, cap, remaining: candidates.length - enqueued },
+        'rate-cap-reached',
+      );
       break;
     }
     if (!Number.isFinite(c.lat) || !Number.isFinite(c.lon)) {
@@ -167,12 +174,20 @@ export async function runSatelliteTrigger(
       await deps.satellite.request(request);
       enqueued++;
     } catch (err) {
-      deps.logger.error({ err, project_id: c.project_id }, 'satellite-trigger-publish-failed');
+      // Tier-64 log-convention sweep: err_name/err_message.
+      const e = err instanceof Error ? err : new Error(String(err));
+      deps.logger.error(
+        { err_name: e.name, err_message: e.message, project_id: c.project_id },
+        'satellite-trigger-publish-failed',
+      );
       failed++;
     }
   }
 
-  deps.logger.info({ enqueued, skipped, failed, total: candidates.length }, 'satellite-trigger-tick');
+  deps.logger.info(
+    { enqueued, skipped, failed, total: candidates.length },
+    'satellite-trigger-tick',
+  );
   return { enqueued, skipped, failed };
 }
 
@@ -184,8 +199,13 @@ export function defaultProviderChain(): ReadonlyArray<
     return raw
       .split(',')
       .map((s) => s.trim().toLowerCase())
-      .filter((s): s is 'nicfi' | 'sentinel-2' | 'sentinel-1' | 'maxar' | 'airbus' =>
-        s === 'nicfi' || s === 'sentinel-2' || s === 'sentinel-1' || s === 'maxar' || s === 'airbus',
+      .filter(
+        (s): s is 'nicfi' | 'sentinel-2' | 'sentinel-1' | 'maxar' | 'airbus' =>
+          s === 'nicfi' ||
+          s === 'sentinel-2' ||
+          s === 'sentinel-1' ||
+          s === 'maxar' ||
+          s === 'airbus',
       );
   }
   // Free-first chain. NICFI requires PLANET_API_KEY; the worker drops it

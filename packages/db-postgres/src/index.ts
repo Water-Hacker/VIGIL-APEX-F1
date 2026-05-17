@@ -6,6 +6,7 @@
  * that undoes (per SRD §07.1).
  */
 export * from './client.js';
+export * from './limit-cap.js';
 export * as schema from './schema/index.js';
 export * from './repos/audit.js';
 export * from './repos/dossier.js';

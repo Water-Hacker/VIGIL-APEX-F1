@@ -119,6 +119,18 @@ export class SafeLlmRouter {
     const outputHash = createHash('sha256').update(outputText).digest('hex');
     const triggered = canaryTriggered(outputText, today);
     void canary; // retain reference for explicit closure
+    // Tier-57 audit closure: pull the cost the inner router computed
+    // (via the provider's per-call accounting) so the call-record sink
+    // gets the actual USD, not 0. Pre-fix the sink stored cost_usd=0
+    // for every safe-routed call — the AI-Safety dashboard's cost
+    // panel silently under-reported every closed-context call by
+    // exactly its cost. The CostTracker's own ceiling enforcement was
+    // unaffected (it reads from a separate counter at the router
+    // layer), but the per-call audit row was wrong.
+    const innerCostUsd =
+      typeof (result as { costUsd?: number }).costUsd === 'number'
+        ? (result as { costUsd: number }).costUsd
+        : 0;
 
     // Tier-10 LLM-pipeline audit closure: persist the call-record
     // BEFORE attempting schema validation. Pre-fix, a schema failure
@@ -170,11 +182,17 @@ export class SafeLlmRouter {
           canary_triggered: triggered,
           schema_valid: schemaValid,
           latency_ms: latency,
-          cost_usd: 0,
+          cost_usd: innerCostUsd,
           called_at: new Date().toISOString(),
         });
       } catch (err) {
-        this.logger.warn({ err }, 'safe-router-sink-write-failed');
+        // Tier-57: structured err_name / err_message matches the
+        // convention from T13/T15/T16/T17/T19/T21/T24/T29/T35/T46/T49.
+        const e = err instanceof Error ? err : new Error(String(err));
+        this.logger.warn(
+          { err_name: e.name, err_message: e.message },
+          'safe-router-sink-write-failed',
+        );
       }
     }
 

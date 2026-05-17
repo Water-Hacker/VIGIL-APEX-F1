@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { AUDIT_PUBLIC_RATE_LIMIT, createPerKeyRateLimiter } from '../../../../lib/rate-limit';
+import { getTrustedClientIp } from '../../../../lib/trusted-client-ip';
 
 /**
  * GET /api/audit/aggregate — TAL-PA aggregate counts (events per role per
@@ -17,12 +18,10 @@ const zIsoDatetime = z.string().datetime();
 // AUDIT-037: per-IP rate limit, same defaults as /api/audit/public.
 const limiter = createPerKeyRateLimiter(AUDIT_PUBLIC_RATE_LIMIT);
 
+// Tier-55: see lib/trusted-client-ip.ts for the rationale. Gated on
+// TRUST_PROXY_HEADERS / NODE_ENV=production.
 function clientKey(req: NextRequest): string {
-  return (
-    req.headers.get('cf-connecting-ip') ??
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return getTrustedClientIp(req) ?? 'unknown';
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

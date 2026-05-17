@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as al from '../schema/audit-log.js';
 
 import type { Db } from '../client.js';
@@ -30,9 +31,7 @@ export class UserActionEventRepo {
    * used by `@vigil/audit-log/emit()` to compute prior_event_id without
    * scanning the entire chain.
    */
-  async latestForActor(
-    actorId: string,
-  ): Promise<{ eventId: string; eventHash: string } | null> {
+  async latestForActor(actorId: string): Promise<{ eventId: string; eventHash: string } | null> {
     const rows = await this.db
       .select()
       .from(al.userActionChain)
@@ -98,16 +97,13 @@ export class UserActionEventRepo {
     });
   }
 
-  async listByActor(
-    actorId: string,
-    limit = 100,
-  ): Promise<readonly UserActionEventRow[]> {
+  async listByActor(actorId: string, limit = 100): Promise<readonly UserActionEventRow[]> {
     return this.db
       .select()
       .from(al.userActionEvent)
       .where(eq(al.userActionEvent.actor_id, actorId))
       .orderBy(desc(al.userActionEvent.timestamp_utc))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   async listByCategory(
@@ -119,7 +115,7 @@ export class UserActionEventRepo {
       .from(al.userActionEvent)
       .where(eq(al.userActionEvent.category, category))
       .orderBy(desc(al.userActionEvent.timestamp_utc))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   /** Page through events for the public API. The PII-redaction step is the
@@ -156,7 +152,7 @@ export class UserActionEventRepo {
         ),
       )
       .orderBy(al.userActionEvent.timestamp_utc)
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   async setAnchorTx(eventId: string, polygonTxHash: string): Promise<void> {
@@ -233,7 +229,7 @@ export class AnomalyAlertRepo {
       .from(al.anomalyAlert)
       .where(eq(al.anomalyAlert.state, 'open'))
       .orderBy(desc(al.anomalyAlert.detected_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   async setState(
@@ -251,9 +247,7 @@ export class RedactionRepo {
     await this.db.insert(al.auditRedaction).values(row);
   }
 
-  async listForEvent(
-    eventId: string,
-  ): Promise<readonly (typeof al.auditRedaction.$inferSelect)[]> {
+  async listForEvent(eventId: string): Promise<readonly (typeof al.auditRedaction.$inferSelect)[]> {
     return this.db
       .select()
       .from(al.auditRedaction)
@@ -274,6 +268,6 @@ export class PublicExportRepo {
       .select()
       .from(al.publicExport)
       .orderBy(desc(al.publicExport.exported_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 }

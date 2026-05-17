@@ -1,5 +1,6 @@
 import { desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as dossierSchema from '../schema/dossier.js';
 
 import type { Db } from '../client.js';
@@ -43,7 +44,7 @@ export class DossierOutcomeRepo {
       .from(dossierSchema.dossierOutcome)
       .where(eq(dossierSchema.dossierOutcome.dossier_id, dossierId))
       .orderBy(desc(dossierSchema.dossierOutcome.matched_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   /**
@@ -59,7 +60,7 @@ export class DossierOutcomeRepo {
         sql`${dossierSchema.dossierOutcome.is_high_confidence} = true AND ${dossierSchema.dossierOutcome.matched_at} >= ${sinceIso}::timestamptz`,
       )
       .orderBy(desc(dossierSchema.dossierOutcome.matched_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 }
 

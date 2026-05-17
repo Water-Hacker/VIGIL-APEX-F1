@@ -4,6 +4,8 @@ import { TipSanitise } from '@vigil/shared';
 import { create as kuboCreate } from 'kubo-rpc-client';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { getTrustedClientIp } from '../../../../lib/trusted-client-ip';
+
 /**
  * POST /api/tip/attachment — citizen-facing attachment-pin endpoint.
  *
@@ -55,15 +57,30 @@ function rateLimited(ip: string): boolean {
   }
   arr.push(now);
   RECENT_BY_IP.set(ip, arr);
+  // Tier-55 audit closure — bounded map size. Pre-fix, the map kept
+  // every IP key forever even after its timestamps expired (the
+  // filtered-empty array was set back into the map at lines 53/57).
+  // For a public-facing tip portal accumulating unique IPs over time,
+  // this is a slow but real memory leak. Cap the map at 100k entries
+  // (>> realistic per-process load); when full, drop a random entry
+  // to make room. Crypto-quality randomness for HARDEN-#7 compliance.
+  if (RECENT_BY_IP.size > MAX_TRACKED_IPS) {
+    const it = RECENT_BY_IP.keys();
+    const first = it.next();
+    if (!first.done) RECENT_BY_IP.delete(first.value);
+  }
   return false;
 }
 
+const MAX_TRACKED_IPS = 100_000;
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Rate-limit gate
-  const remoteIp =
-    req.headers.get('cf-connecting-ip') ??
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown';
+  // Rate-limit gate.
+  // Tier-55: trust the forwarded IP only when configured; otherwise
+  // fall back to a single anonymous bucket. The legitimate single-user
+  // case (dev) bumps quickly into the limit and notices; the misconfigured-
+  // prod case is loud at the dashboard rate-limit metric.
+  const remoteIp = getTrustedClientIp(req) ?? 'unknown';
   if (rateLimited(remoteIp)) {
     return NextResponse.json({ error: 'rate-limited' }, { status: 429 });
   }

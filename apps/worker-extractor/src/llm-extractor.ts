@@ -95,8 +95,31 @@ const MODEL_ID = 'claude-haiku-4-5-20251001';
 const TEMPERATURE = 0.0; // SRD §20: extraction = 0.0
 const MIN_CONFIDENCE_TO_ACCEPT = 0.6;
 
+/**
+ * Tier-61 audit closure — surface input truncation so operators know
+ * whether the LLM extracted from the full document or just the first
+ * 50k chars. Pre-fix the slice was silent: a 200k-char document was
+ * extracted from only its first quarter, producing "no value found"
+ * for fields buried deeper. Operators saw the extraction outcome but
+ * not the truncation, blaming the LLM for a budget-imposed blind spot.
+ *
+ * 50k is the established cap; we keep it (matches the worker-tip-triage
+ * 4k paraphrase budget pattern) but emit the warning via the optional
+ * logger so callers can route it.
+ */
+const RAW_TEXT_BUDGET_CHARS = 50_000;
+
+export interface SafeLlmExtractorOptions {
+  readonly logger?: {
+    warn(obj: Record<string, unknown>, msg: string): void;
+  };
+}
+
 export class SafeLlmExtractor implements LlmExtractor {
-  constructor(private readonly router: SafeLlmRouterLike) {}
+  constructor(
+    private readonly router: SafeLlmRouterLike,
+    private readonly opts: SafeLlmExtractorOptions = {},
+  ) {}
 
   async extract(req: LlmExtractorRequest): Promise<LlmExtractionResult> {
     const requestedList = req.requestedFields.join(', ');
@@ -107,8 +130,26 @@ export class SafeLlmExtractor implements LlmExtractor {
       'If the listing does not contain a value for a field, omit that field. ' +
       'If you cannot answer from the provided source, return {"status":"insufficient_evidence","items":[]}.';
 
+    // Tier-61: surface truncation before the call.
+    const truncated = req.rawText.length > RAW_TEXT_BUDGET_CHARS;
+    if (truncated) {
+      this.opts.logger?.warn(
+        {
+          finding_id: req.findingId,
+          assessment_id: req.assessmentId,
+          full_length: req.rawText.length,
+          budget: RAW_TEXT_BUDGET_CHARS,
+          dropped: req.rawText.length - RAW_TEXT_BUDGET_CHARS,
+        },
+        'llm-extractor-raw-text-truncated',
+      );
+    }
     const sources = [
-      { id: 'listing', label: 'procurement listing', text: req.rawText.slice(0, 50_000) },
+      {
+        id: 'listing',
+        label: 'procurement listing',
+        text: truncated ? req.rawText.slice(0, RAW_TEXT_BUDGET_CHARS) : req.rawText,
+      },
     ];
     const result = await this.router.call({
       findingId: req.findingId,

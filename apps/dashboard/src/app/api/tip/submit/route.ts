@@ -3,6 +3,8 @@ import { tipTurnstileVerifyTotal } from '@vigil/observability';
 import { Schemas, TipSanitise } from '@vigil/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { getTrustedClientIp } from '../../../../lib/trusted-client-ip';
+
 /**
  * POST /api/tip/submit — server-side persistence of an already-encrypted tip.
  *
@@ -144,10 +146,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Anti-bot gate (SRD §28.5). Caddy already enforces a 5/min/IP burst
     // limit upstream; this is the per-submission proof-of-human check.
-    const remoteIp =
-      req.headers.get('cf-connecting-ip') ??
-      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-      null;
+    // Tier-55: only pass the IP to Turnstile when proxy-header trust
+    // is in effect. Cloudflare treats omission as "I don't know" rather
+    // than a hint; passing a spoofed IP would bias the risk score.
+    const remoteIp = getTrustedClientIp(req);
     const ok = await verifyTurnstile(parsed.data.turnstile_token, remoteIp);
     if (!ok) {
       return NextResponse.json({ error: 'turnstile-failed' }, { status: 403 });

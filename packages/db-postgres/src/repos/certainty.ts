@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as cs from '../schema/certainty.js';
 
 import type { Db } from '../client.js';
@@ -22,9 +23,7 @@ export class CertaintyRepo {
       .onConflictDoNothing({ target: cs.assessment.id });
   }
 
-  async latestForFinding(
-    findingId: string,
-  ): Promise<typeof cs.assessment.$inferSelect | null> {
+  async latestForFinding(findingId: string): Promise<typeof cs.assessment.$inferSelect | null> {
     const rows = await this.db
       .select()
       .from(cs.assessment)
@@ -43,7 +42,7 @@ export class CertaintyRepo {
       .from(cs.assessment)
       .where(eq(cs.assessment.tier, tier))
       .orderBy(desc(cs.assessment.computed_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 }
 
@@ -178,14 +177,12 @@ export class CalibrationAuditRepo {
       });
   }
 
-  async listRuns(
-    limit = 12,
-  ): Promise<readonly (typeof cs.auditRun.$inferSelect)[]> {
+  async listRuns(limit = 12): Promise<readonly (typeof cs.auditRun.$inferSelect)[]> {
     return this.db
       .select()
       .from(cs.auditRun)
       .orderBy(desc(cs.auditRun.period_start))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   async listBands(

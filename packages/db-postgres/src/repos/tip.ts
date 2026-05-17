@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { desc, eq, sql } from 'drizzle-orm';
 
+import { clampRepoLimit } from '../limit-cap.js';
 import * as tipSchema from '../schema/tip.js';
 
 import type { Db } from '../client.js';
@@ -60,7 +61,7 @@ export class TipRepo {
       .from(tipSchema.tip)
       .where(sql`disposition IN ('NEW','IN_TRIAGE')`)
       .orderBy(desc(tipSchema.tip.received_at))
-      .limit(limit);
+      .limit(clampRepoLimit(limit));
   }
 
   /**

@@ -122,6 +122,70 @@ async function main(): Promise<void> {
     logger.error({ err_name: err.name, err_message: err.message }, 'high-sig-loop-fatal');
   });
 
+  // Tier-53 audit closure — boot-time chain↔DB cursor reconciliation.
+  //
+  // The Tier-11 audit flag at the commit-loop body documented a class
+  // of bug where `anchor.commit()` succeeds on-chain but the
+  // subsequent DB INSERT into `audit.anchor_commitment` fails (DB
+  // outage, connection drop, SERIALIZABLE conflict). The on-chain
+  // contract's contiguity guard (`fromSeq != lastToSeq + 1`) prevents
+  // a true duplicate-commit on retry — instead the retry REVERTS, the
+  // catch block logs an error, the loop backs off, and ultimately
+  // wedges: every subsequent attempt reverts with the same reason.
+  //
+  // This is operationally silent without manual log inspection. The
+  // detector below reads the on-chain lastToSeq (via totalCommitments
+  // + getCommitment) and compares to the DB's max(seq_to). If they
+  // diverge, a fatal-level structured log fires WITH BOTH VALUES so
+  // the on-call operator sees the divergence + the exact reconciliation
+  // command they need to run.
+  //
+  // We do NOT auto-backfill — the recovery requires architect review
+  // of which on-chain commitments to import (an attacker who gained
+  // committer access could have written spurious rows). The detector
+  // is the gate; the recovery is a manual ceremony.
+  try {
+    const chainTotal = await anchor.totalCommitments();
+    let chainLastToSeq = 0;
+    if (chainTotal > 0) {
+      const lastCommit = await anchor.getCommitment(chainTotal - 1);
+      chainLastToSeq = lastCommit.toSeq;
+    }
+    const dbCursor = await pool.query<{ max: number | null }>(
+      `SELECT MAX(seq_to)::bigint AS max FROM audit.anchor_commitment
+        WHERE polygon_tx_hash IS NOT NULL`,
+    );
+    const dbLastToSeq = dbCursor.rows[0]?.max ? Number(dbCursor.rows[0].max) : 0;
+    if (chainLastToSeq !== dbLastToSeq) {
+      logger.fatal(
+        {
+          chain_last_to_seq: chainLastToSeq,
+          db_last_to_seq: dbLastToSeq,
+          chain_total_commitments: chainTotal,
+          divergence: chainLastToSeq - dbLastToSeq,
+        },
+        'anchor-cursor-divergence; manual reconciliation required before steady-state loop is safe',
+      );
+      // Stay alive so the operator can investigate via logs + metrics;
+      // do NOT throw — exiting the worker would just hide the alert.
+      // The loop below WILL keep trying and reverting until the
+      // reconciliation is done, which is the correct fail-loud posture.
+    } else {
+      logger.info(
+        { chain_last_to_seq: chainLastToSeq, db_last_to_seq: dbLastToSeq },
+        'anchor-cursor-reconciled',
+      );
+    }
+  } catch (e) {
+    // Reconciliation read failed (RPC down, etc.). Log warn and
+    // proceed — the loop's own error handling covers the steady state.
+    const err = e instanceof Error ? e : new Error(String(e));
+    logger.warn(
+      { err_name: err.name, err_message: err.message },
+      'anchor-cursor-reconciliation-skipped',
+    );
+  }
+
   await guard.markBootSuccess();
   logger.info({ intervalMs, highSigIntervalMs, contract: polygonContract }, 'worker-anchor-ready');
 
