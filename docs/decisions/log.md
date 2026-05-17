@@ -3985,7 +3985,7 @@ commit: c3920d1
 
 ## DECISION-021 Server-Sent Events over Socket.io for the operator dashboard
 
-**Status:** FINAL.
+**Status:** FINAL. (AUDIT-100)
 
 **Date:** 2026-05-17.
 
@@ -4015,6 +4015,8 @@ connection pool exhaustion above ~2 k concurrent operators.
 
 Full rationale + implementation contract in
 `decision-021-sse-over-socket-io.md`.
+
+commit: 7853635
 
 ---
 

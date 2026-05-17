@@ -187,18 +187,35 @@ describe('listAlerts (production path) — synth-flag absence', () => {
     else process.env.VIGIL_UI_ONLY = originalFlag;
   });
 
-  it('attempts to reach Postgres when VIGIL_UI_ONLY is unset', async () => {
-    // No Postgres in the test env; the function should throw. The
-    // test passes by virtue of the throw — confirming it took the
-    // production branch rather than silently returning the synth
-    // dataset.
-    let threw = false;
+  it('takes the production branch when VIGIL_UI_ONLY is unset', async () => {
+    // The branch is identifiable by the absence of synth rows: the
+    // synthetic dataset has 7 specific IDs (000…0001..000…0007).
+    // If CI provides Postgres (the ci.yml job DOES — empty
+    // `audit.anomaly_alert` table), production returns 0 rows. If
+    // CI does not (local dev without a DB), the call throws. EITHER
+    // is acceptable — the assertion is "we did NOT silently fall to
+    // the synth branch".
     try {
-      await listAlerts();
+      const out = await listAlerts();
+      // Empty (CI Postgres path) is acceptable; non-zero
+      // CONTAINING any of the synth IDs is NOT — that would mean
+      // VIGIL_UI_ONLY leaked through.
+      const synthIds = new Set([
+        '00000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000002',
+        '00000000-0000-0000-0000-000000000003',
+        '00000000-0000-0000-0000-000000000004',
+        '00000000-0000-0000-0000-000000000005',
+        '00000000-0000-0000-0000-000000000006',
+        '00000000-0000-0000-0000-000000000007',
+      ]);
+      for (const row of out) {
+        expect(synthIds.has(row.id)).toBe(false);
+      }
     } catch {
-      threw = true;
+      // No Postgres → throw is the expected production-branch
+      // failure mode. Pass.
     }
-    expect(threw).toBe(true);
   });
 
   it('rejects unknown state values BEFORE issuing SQL', async () => {

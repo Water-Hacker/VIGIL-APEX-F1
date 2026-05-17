@@ -107,16 +107,22 @@ describe('aggregateByRegion (production path) — synth-flag absence', () => {
     else process.env.VIGIL_UI_ONLY = originalFlag;
   });
 
-  it('attempts to reach Postgres when VIGIL_UI_ONLY is unset', async () => {
-    // We expect this to throw (no Postgres in the test env). The
-    // test passes by virtue of the throw — confirming the function
-    // takes the production branch, not the synth branch.
-    let threw = false;
+  it('takes the production branch when VIGIL_UI_ONLY is unset', async () => {
+    // The branch is identifiable by the absence of synth totals: the
+    // synthetic distribution produces total > 0 against a known
+    // max_weighted_score (198 from the Centre region's seeding). If
+    // CI provides Postgres (the ci.yml job DOES — empty
+    // `finding.finding` table), production returns total = 0 and
+    // max_weighted_score = 0. If CI does not (local dev without a
+    // DB), the call throws. EITHER is acceptable — the assertion is
+    // "we did NOT silently fall to the synth branch".
     try {
-      await aggregateByRegion();
+      const out = await aggregateByRegion();
+      // Empty (CI Postgres path) is acceptable; synth max is 198.
+      expect(out.max_weighted_score).not.toBe(198);
     } catch {
-      threw = true;
+      // No Postgres → throw is the expected production-branch
+      // failure mode. Pass.
     }
-    expect(threw).toBe(true);
   });
 });
