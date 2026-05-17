@@ -3,7 +3,7 @@
 **Severity:** CRITICAL — operator intervention required
 **Pages:** the architect via Alertmanager `audit.reconciliation_divergence` route
 **Owner:** the architect (solo); audit chain integrity is platform-critical
-**Last updated:** 2026-05-15 (hardening mode 3.4 closure)
+**Last updated:** 2026-05-17 (T5 of TODO.md sweep — recompute-body-hash CLI landed)
 
 ## When this runbook applies
 
@@ -94,8 +94,16 @@ psql "${POSTGRES_URL}" -c \
 # Pull the Fabric-side row.
 pnpm --filter audit-verifier exec node dist/cross-witness-cli.js --seq ${SEQ}
 
-# Recompute the canonical hash from the payload.
-pnpm --filter @vigil/audit-chain exec node dist/scripts/recompute-body-hash.js ${SEQ}
+# Recompute the canonical hash from the payload — the truth-test.
+# Reads audit.actions[seq], calls bodyHash + rowHash from canonical.ts,
+# prints "seq=N db_hash=... recomputed=... status=match|MISMATCH" per row.
+# Exit codes: 0 = all match, 2 = at least one mismatch, 1 = usage/DB error.
+DATABASE_URL="${POSTGRES_URL}" pnpm --filter @vigil/audit-chain exec \
+  tsx src/scripts/recompute-body-hash.ts --seq ${SEQ}
+
+# For a contiguous range:
+DATABASE_URL="${POSTGRES_URL}" pnpm --filter @vigil/audit-chain exec \
+  tsx src/scripts/recompute-body-hash.ts --from ${SEQ_LOW} --to ${SEQ_HIGH}
 ```
 
 The recompute step is the truth-test:
