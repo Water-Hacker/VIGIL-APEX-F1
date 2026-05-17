@@ -255,8 +255,17 @@ async function cliMain(): Promise<number> {
 //   pnpm --filter @vigil/audit-chain exec tsx
 //     src/scripts/recompute-body-hash.ts ...
 // per docs/runbooks/audit-chain-divergence.md step 3).
+//
+// Defence in depth: both the basename match AND an explicit
+// `VIGIL_RECOMPUTE_BODY_HASH_CLI=disable` opt-out must agree before
+// cliMain() runs. The basename check covers the canonical operator
+// invocation; the env opt-out covers (a) tests that intentionally
+// import the file and don't want CLI side-effects regardless of
+// their runner's basename, and (b) any future tooling that wraps the
+// helpers from a script that happens to be named the same thing.
 const SCRIPT_BASENAME = 'recompute-body-hash';
 const invokedAsScript = (() => {
+  if (process.env.VIGIL_RECOMPUTE_BODY_HASH_CLI === 'disable') return false;
   const argv1 = process.argv[1];
   if (typeof argv1 !== 'string') return false;
   const base = path.basename(argv1, path.extname(argv1));

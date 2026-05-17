@@ -188,19 +188,20 @@ function checkProdResourceLimits(prod: ValuesFile, base: ValuesFile): string[] {
       );
     }
   }
-  // workers[] in prod must each have resources.limits.memory.
-  const workers = get<unknown>(prod.data, 'workers');
-  if (Array.isArray(workers)) {
-    for (const w of workers) {
-      if (w && typeof w === 'object') {
-        const obj = w as Record<string, unknown>;
-        const name = String(obj.name ?? '<unnamed>');
-        const lim = get<unknown>(obj, 'resources.limits.memory');
-        if (lim === undefined) {
-          errors.push(
-            `${prod.basename}:worker:${name}: no resources.limits.memory (workload can OOM-saturate node)`,
-          );
-        }
+  // workers[] in prod must each have resources.limits.memory. Use
+  // effectiveWorkers() so the check survives the T11 model where prod
+  // inherits the workers list from values.yaml rather than enumerating
+  // locally.
+  const workers = effectiveWorkers(prod, base);
+  for (const w of workers) {
+    if (w && typeof w === 'object') {
+      const obj = w as Record<string, unknown>;
+      const name = String(obj.name ?? '<unnamed>');
+      const lim = get<unknown>(obj, 'resources.limits.memory');
+      if (lim === undefined) {
+        errors.push(
+          `${prod.basename}:worker:${name}: no resources.limits.memory (workload can OOM-saturate node)`,
+        );
       }
     }
   }
@@ -241,10 +242,30 @@ function checkProdStorageClass(prod: ValuesFile): string[] {
   return errors;
 }
 
-function checkWorkerParity(dev: ValuesFile, prod: ValuesFile): string[] {
+/**
+ * Resolve a file's effective `workers[]` per helm overlay semantics:
+ * an absent `workers:` block at the per-env level INHERITS the base's
+ * `workers:` block (helm only replaces a key when the per-env file
+ * declares one). The lint must compare the EFFECTIVE list — the same
+ * set helm would actually render — not the per-file decl alone.
+ *
+ * Pre-2026-05-17, this lint compared the per-env lists in isolation;
+ * that was correct only because both env files used to enumerate the
+ * full fleet locally. T11 of the TODO.md sweep dropped the
+ * values-prod.yaml workers[] override so prod inherits the canonical
+ * 25-worker fleet from values.yaml. The check now mirrors helm's
+ * actual merge.
+ */
+function effectiveWorkers(envFile: ValuesFile, base: ValuesFile): unknown[] {
+  const own = get<unknown[]>(envFile.data, 'workers');
+  if (Array.isArray(own)) return own;
+  return get<unknown[]>(base.data, 'workers') ?? [];
+}
+
+function checkWorkerParity(dev: ValuesFile, prod: ValuesFile, base: ValuesFile): string[] {
   const errors: string[] = [];
-  const devWorkers = get<unknown[]>(dev.data, 'workers') ?? [];
-  const prodWorkers = get<unknown[]>(prod.data, 'workers') ?? [];
+  const devWorkers = effectiveWorkers(dev, base);
+  const prodWorkers = effectiveWorkers(prod, base);
   const devNames = new Set<string>(
     devWorkers
       .filter((w): w is Record<string, unknown> => !!w && typeof w === 'object')
@@ -258,14 +279,14 @@ function checkWorkerParity(dev: ValuesFile, prod: ValuesFile): string[] {
   for (const name of devNames) {
     if (!prodNames.has(name)) {
       errors.push(
-        `worker-parity: "${name}" is in values-dev.yaml workers[] but NOT in values-prod.yaml — dev workloads must have prod counterparts`,
+        `worker-parity: "${name}" is in dev's effective workers[] but NOT in prod's — dev workloads must have prod counterparts (effective = per-env override OR inherited from values.yaml)`,
       );
     }
   }
   for (const name of prodNames) {
     if (!devNames.has(name)) {
       errors.push(
-        `worker-parity: "${name}" is in values-prod.yaml workers[] but NOT in values-dev.yaml — prod workloads must be exercisable in dev`,
+        `worker-parity: "${name}" is in prod's effective workers[] but NOT in dev's — prod workloads must be exercisable in dev (effective = per-env override OR inherited from values.yaml)`,
       );
     }
   }
@@ -300,7 +321,7 @@ function main(): number {
     ...checkProdResourceLimits(prod, base),
     ...checkProdCertIssuer(prod),
     ...checkProdStorageClass(prod),
-    ...checkWorkerParity(dev, prod),
+    ...checkWorkerParity(dev, prod, base),
     ...checkTopLevelKeyParity(dev, prod),
   ];
 

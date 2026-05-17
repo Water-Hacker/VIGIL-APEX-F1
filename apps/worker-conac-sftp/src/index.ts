@@ -26,6 +26,7 @@ import {
   resolveDeliveryTarget,
   type DeliveryTarget,
 } from './delivery-targets.js';
+import { isDevUnsignedFingerprint } from './dev-unsigned-guard.js';
 import { buildManifest, type RecipientBody } from './format-adapter.js';
 
 const logger = createLogger({ service: 'worker-conac-sftp' });
@@ -163,6 +164,36 @@ class ConacSftpWorker extends WorkerBase<Payload> {
         'awaiting-bilingual-pair',
       );
       return { kind: 'retry', reason: 'awaiting-sibling-language', delay_ms: 60_000 };
+    }
+
+    // T8.3 of TODO.md sweep (closes the false-claim in T2's commit
+    // message): worker-dossier emits a DEV-UNSIGNED-* signature
+    // fingerprint as its fallback when gpg-sign fails AND the operator
+    // has explicitly opted into the dev fallback (see
+    // apps/worker-dossier/src/libreoffice.ts computeDevUnsignedFingerprint
+    // + devUnsignedAllowed). Such dossiers MUST NOT reach an
+    // institutional SFTP target — dead-letter loudly so the operator
+    // sees the cause. Defence in depth: the dossier worker's
+    // devUnsignedAllowed gate already refuses the fallback in
+    // production, but the same compromise (an unsigned PDF reaching
+    // CONAC) is too severe to rely on a single guard.
+    if (
+      isDevUnsignedFingerprint(fr.signature_fingerprint) ||
+      isDevUnsignedFingerprint(en.signature_fingerprint)
+    ) {
+      logger.error(
+        {
+          finding_id: env.payload.finding_id,
+          fr_fingerprint: fr.signature_fingerprint,
+          en_fingerprint: en.signature_fingerprint,
+        },
+        'dossier-dev-unsigned-refuse',
+      );
+      return {
+        kind: 'dead-letter',
+        reason:
+          'dossier signed with DEV-UNSIGNED-* fingerprint; refusing to deliver to institutional recipient',
+      };
     }
 
     let frPdf: FetchedPdf;
