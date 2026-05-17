@@ -10,19 +10,19 @@
  * removes itself from the allowlist (by adding tests) it cannot
  * regress. Removing an app from the allowlist is a one-line PR.
  *
- * Currently allow-listed (zero-test apps as of 2026-05-01):
- *   - audit-verifier
- *   - worker-audit-watch
- *   - worker-conac-sftp
- *   - worker-counter-evidence
- *   - worker-dossier
- *   - worker-entity
- *   - worker-governance
- *   - worker-minfi-api
- *   - worker-tip-triage
+ * Currently allow-listed (zero-test apps as of 2026-05-17):
+ *   - worker-counter-evidence  (graduates with T2 of TODO.md)
+ *   - worker-dossier            (graduates with T3 of TODO.md)
  *
- * Graduated 2026-05-01: worker-score (ships __tests__/contract.test.ts
- * pinning DECISION-011 + STREAMS.SCORE_COMPUTE wiring; HARDEN-#3 / T1.12).
+ * Graduation log:
+ *   - 2026-05-01: worker-score graduated (HARDEN-#3 / T1.12).
+ *   - 2026-05-17 (T1 of TODO.md): 7 entries graduated after audit found
+ *     their tests had landed but the allowlist had drifted —
+ *     audit-verifier (2 test files), worker-audit-watch (1),
+ *     worker-conac-sftp (1), worker-entity (2), worker-governance (2),
+ *     worker-minfi-api (1), worker-tip-triage (3). The allowlist's
+ *     contract is monotonic-shrink: any worker that has tests must NOT
+ *     remain allowlisted, so that test-deletion regressions trip CI.
  *
  * Mirrors the existing scripts/check-migration-pairs.ts pattern.
  *
@@ -38,18 +38,7 @@ import process from 'node:process';
 const REPO_ROOT = process.cwd();
 const APPS_DIR = join(REPO_ROOT, 'apps');
 
-const LEGACY_ZERO_TEST = new Set([
-  'audit-verifier',
-  'worker-audit-watch',
-  'worker-conac-sftp',
-  'worker-counter-evidence',
-  'worker-dossier',
-  'worker-entity',
-  'worker-governance',
-  'worker-minfi-api',
-  // worker-score graduated 2026-05-01 (HARDEN-#3 / T1.12)
-  'worker-tip-triage',
-]);
+const LEGACY_ZERO_TEST = new Set(['worker-counter-evidence', 'worker-dossier']);
 
 function listAppDirs(): string[] {
   if (!existsSync(APPS_DIR)) return [];
