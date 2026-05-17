@@ -3983,6 +3983,41 @@ commit: c3920d1
 
 ---
 
+## DECISION-021 Server-Sent Events over Socket.io for the operator dashboard
+
+**Status:** FINAL.
+
+**Date:** 2026-05-17.
+
+**Thesis.** Every server-to-client real-time channel in the operator
+dashboard ships as Server-Sent Events (vanilla `EventSource`), not
+Socket.io. Supersedes the historical drift line in
+`docs/IMPLEMENTATION-PLAN.md` Phase C12 that mentioned Socket.io
+("Live heatmap (Mapbox GL + D3 + Socket.io for live updates)") — that
+line predated the SSE route at `apps/dashboard/src/app/api/realtime/`
+which has been the actual substrate all along. Rationale: every
+real-time surface is one-way (server-authoritative push); EventSource
+is a native browser API (no client dependency); SSE traverses Caddy +
+Tor + Cloudflare cleanly without WebSocket-upgrade negotiation; the
+audit chain stays HTTP-shaped (every SSE event is also queryable via
+the equivalent REST endpoint); `curl -N` debugs the stream.
+
+Standardised invariants for every SSE route: nodejs runtime,
+force-dynamic, 25 s heartbeat via `startSseHeartbeat`, abort-signal
+wiring on `ReadableStream.cancel()`, opaque error events on the wire
+with server-side structured logs (Hardening Mode 4.9). Two routes
+comply today: `/api/realtime` (Phase C12 fan-out) and
+`/api/alerts/stream` (R3.B alerts delta stream).
+
+Re-open triggers: bidirectional real-time need (e.g. collaborative
+annotation); Cloudflare/Tor SSE pass-through regression; per-
+connection pool exhaustion above ~2 k concurrent operators.
+
+Full rationale + implementation contract in
+`decision-021-sse-over-socket-io.md`.
+
+---
+
 ## Phase Pointer
 
 **Current phase: Phase 1 (data plane). Phase 0 closed 2026-04-28 with sign-off
