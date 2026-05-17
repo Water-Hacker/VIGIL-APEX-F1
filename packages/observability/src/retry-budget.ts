@@ -86,9 +86,23 @@ export class RetryBudget {
     if (opts.maxPerWindow <= 0) {
       throw new Error('RetryBudget: maxPerWindow must be positive');
     }
+    // Tier-54 audit closure — validate windowSeconds > 0. Pre-fix, a
+    // caller passing `{ windowSeconds: 0 }` produced `Math.floor(now /
+    // 0)` = Infinity, which then formed a constant Redis key
+    // (`vigil:retry-budget:<name>:Infinity`). ALL retries across ALL
+    // windows landed on that one key, so the ceiling exhausted
+    // globally and the budget appeared permanently dead from the
+    // caller's perspective. Reject at construction so the bug is loud
+    // at boot, not silent at first retry storm.
+    const windowSeconds = opts.windowSeconds ?? 60;
+    if (windowSeconds <= 0 || !Number.isFinite(windowSeconds) || !Number.isInteger(windowSeconds)) {
+      throw new Error(
+        `RetryBudget: windowSeconds must be a positive integer; got ${String(opts.windowSeconds)}`,
+      );
+    }
     this.name = opts.name;
     this.maxPerWindow = opts.maxPerWindow;
-    this.windowSeconds = opts.windowSeconds ?? 60;
+    this.windowSeconds = windowSeconds;
     this.nowMs = opts.nowMs ?? (() => Date.now());
   }
 
