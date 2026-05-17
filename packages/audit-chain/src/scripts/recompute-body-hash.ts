@@ -36,8 +36,8 @@
 
 /// <reference types="node" />
 
+import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
 import { bodyHash, rowHash } from '../canonical.js';
 
@@ -248,12 +248,19 @@ async function cliMain(): Promise<number> {
   }
 }
 
+// Avoid import.meta.url so the file compiles under CommonJS (Node16
+// module resolution per tsconfig.base.json). The pure helpers above
+// are safe to import from tests; the side-effect check below
+// activates only when this file is invoked as a script (via
+//   pnpm --filter @vigil/audit-chain exec tsx
+//     src/scripts/recompute-body-hash.ts ...
+// per docs/runbooks/audit-chain-divergence.md step 3).
+const SCRIPT_BASENAME = 'recompute-body-hash';
 const invokedAsScript = (() => {
-  try {
-    return process.argv[1] === fileURLToPath(import.meta.url);
-  } catch {
-    return false;
-  }
+  const argv1 = process.argv[1];
+  if (typeof argv1 !== 'string') return false;
+  const base = path.basename(argv1, path.extname(argv1));
+  return base === SCRIPT_BASENAME;
 })();
 
 if (invokedAsScript) {
