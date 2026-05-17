@@ -84,6 +84,8 @@ interface RouteRule {
  */
 export const ROUTE_RULES: ReadonlyArray<RouteRule> = [
   { prefix: '/findings', allow: ['operator', 'auditor', 'architect'] },
+  { prefix: '/regions', allow: ['operator', 'auditor', 'architect'] },
+  { prefix: '/alerts', allow: ['operator', 'auditor', 'architect'] },
   { prefix: '/dead-letter', allow: ['operator', 'architect'] },
   { prefix: '/calibration', allow: ['operator', 'architect'] },
   { prefix: '/council', allow: ['council_member', 'architect'] },

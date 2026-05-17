@@ -3,6 +3,8 @@
   "app.tagline": "Surveillance des finances publiques camerounaises",
 
   "nav.findings": "Constats",
+  "nav.regions": "Carte régionale",
+  "nav.alerts": "Alertes",
   "nav.council": "Conseil",
   "nav.dead_letter": "Lettres mortes",
   "nav.calibration": "Étalonnage",
@@ -10,6 +12,16 @@
   "nav.verify": "Vérifier",
   "nav.ledger": "Registre",
   "nav.logout": "Déconnexion",
+
+  "regions.title": "Carte régionale des constats",
+  "regions.subtitle": "Densité des constats pondérée par sévérité, par région administrative",
+  "regions.window_label": "Fenêtre temporelle",
+  "regions.window_30d": "30 jours",
+  "regions.window_90d": "90 jours",
+  "regions.window_180d": "180 jours",
+  "regions.window_365d": "12 mois",
+  "regions.empty_state": "Aucun constat enregistré sur la fenêtre choisie.",
+  "regions.click_hint": "Cliquez sur une région pour filtrer les constats correspondants.",
 
   "common.loading": "Chargement…",
   "common.error": "Une erreur est survenue.",

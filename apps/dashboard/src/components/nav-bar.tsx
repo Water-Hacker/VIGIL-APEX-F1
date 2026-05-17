@@ -17,6 +17,8 @@ import Link from 'next/link';
  */
 const OPERATOR_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: '/findings', label: 'Findings' },
+  { href: '/regions', label: 'Regional map' },
+  { href: '/alerts', label: 'Alerts' },
   { href: '/triage/tips', label: 'Tip triage' },
   { href: '/triage/adapter-repairs', label: 'Adapter repairs' },
   { href: '/dead-letter', label: 'Dead-letter' },
