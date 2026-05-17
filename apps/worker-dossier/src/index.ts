@@ -167,103 +167,133 @@ class DossierWorker extends WorkerBase<Payload> {
       throw new Error(`dossier path component contains a separator: env.id=${env.id} ref=${ref}`);
     }
     const dir = path.join(tmpdir(), `vigil-dossier-${safeEnvId}`);
+    // Tier-58 audit closure — wrap the rest of the handler in try/finally so
+    // the tmp dir is removed on EVERY exit path (success, throw, retry).
+    // Pre-fix, the `rm(dir)` call lived after the dossier-row insert + the
+    // queue.publish; any throw between mkdir and rm leaked the dir until
+    // worker restart. Over time the leak accumulated mode-0600 PDFs in
+    // /tmp; not catastrophic but unbounded.
     await mkdir(dir, { recursive: true });
-    const docxPath = path.join(dir, `${safeRef}.docx`);
-    await writeFile(docxPath, docxResult.docxBytes);
-    await runLibreOffice(docxPath, dir);
-    const pdfPath = docxPath.replace(/\.docx$/, '.pdf');
-    const pdfBytes = await readFile(pdfPath);
-    const pdfSha256 = createHash('sha256').update(pdfBytes).digest('hex');
-
-    // GPG sign — YubiKey-backed; gpg-agent prompts for touch.
-    // Production discipline: an unsigned dossier breaks chain-of-custody for
-    // CONAC delivery + Polygon anchor. We refuse to write the row unless
-    // signing succeeds, EXCEPT when the operator has explicitly opted into
-    // the dev fallback. The opt-in is scoped to non-production phases only.
-    let signature: Buffer;
-    let signatureFingerprint: string;
     try {
-      signature = await gpgDetachSign(pdfBytes, { fingerprint: this.gpgFingerprint });
-      signatureFingerprint = this.gpgFingerprint;
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      const devUnsignedAllowed =
-        process.env.VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER === 'true' &&
-        process.env.NODE_ENV !== 'production' &&
-        Number(process.env.VIGIL_PHASE ?? '0') < 1;
-      if (!devUnsignedAllowed) {
-        logger.error(
-          { err_name: err.name, err_message: err.message },
-          'gpg-sign-failed; refusing to write unsigned dossier',
+      const docxPath = path.join(dir, `${safeRef}.docx`);
+      await writeFile(docxPath, docxResult.docxBytes);
+      await runLibreOffice(docxPath, dir);
+      const pdfPath = docxPath.replace(/\.docx$/, '.pdf');
+      const pdfBytes = await readFile(pdfPath);
+      // Tier-58 audit closure — hard cap on PDF size. LibreOffice can produce
+      // pathologically large PDFs under font-fallback or embedded-image bugs;
+      // a 100 MB PDF would OOM the worker and stall the IPFS pin. 50 MiB is
+      // generous for a real bilingual dossier (typical: 200-500 KiB).
+      const MAX_PDF_BYTES = 50 * 1024 * 1024;
+      if (pdfBytes.byteLength > MAX_PDF_BYTES) {
+        throw new Error(
+          `LibreOffice produced an oversized PDF: ${pdfBytes.byteLength} bytes > cap ${MAX_PDF_BYTES}`,
         );
-        return { kind: 'retry', reason: 'gpg-sign-failed', delay_ms: 60_000 };
       }
-      logger.warn(
-        { err_name: err.name, err_message: err.message },
-        'gpg-sign-failed; continuing UNSIGNED — VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER opt-in',
-      );
-      signature = Buffer.alloc(0);
-      signatureFingerprint = `DEV-UNSIGNED-${this.gpgFingerprint}`;
-    }
+      const pdfSha256 = createHash('sha256').update(pdfBytes).digest('hex');
 
-    // IPFS pin
-    const kubo = kuboCreate({ url: this.ipfsApi });
-    const added = await kubo.add(pdfBytes, { pin: true, cidVersion: 1 });
-    const cid = added.cid.toString();
+      // GPG sign — YubiKey-backed; gpg-agent prompts for touch.
+      // Production discipline: an unsigned dossier breaks chain-of-custody for
+      // CONAC delivery + Polygon anchor. We refuse to write the row unless
+      // signing succeeds, EXCEPT when the operator has explicitly opted into
+      // the dev fallback. The opt-in is scoped to non-production phases only.
+      let signature: Buffer;
+      let signatureFingerprint: string;
+      try {
+        signature = await gpgDetachSign(pdfBytes, { fingerprint: this.gpgFingerprint });
+        signatureFingerprint = this.gpgFingerprint;
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        const devUnsignedAllowed =
+          process.env.VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER === 'true' &&
+          process.env.NODE_ENV !== 'production' &&
+          Number(process.env.VIGIL_PHASE ?? '0') < 1;
+        if (!devUnsignedAllowed) {
+          logger.error(
+            { err_name: err.name, err_message: err.message },
+            'gpg-sign-failed; refusing to write unsigned dossier',
+          );
+          return { kind: 'retry', reason: 'gpg-sign-failed', delay_ms: 60_000 };
+        }
+        logger.warn(
+          { err_name: err.name, err_message: err.message },
+          'gpg-sign-failed; continuing UNSIGNED — VIGIL_DEV_ALLOW_UNSIGNED_DOSSIER opt-in',
+        );
+        signature = Buffer.alloc(0);
+        signatureFingerprint = `DEV-UNSIGNED-${this.gpgFingerprint}`;
+      }
 
-    // Persist dossier row — sibling worker-conac-sftp reads this by finding_id
-    // to discover both language variants before delivery.
-    const signed = signature.length > 0;
-    await this.dossierRepo.insert({
-      id: randomUUID(),
-      ref,
-      finding_id: finding.id,
-      language: env.payload.language,
-      status: 'rendered',
-      pdf_sha256: pdfSha256,
-      pdf_cid: cid,
-      signature_fingerprint: signed ? signatureFingerprint : signatureFingerprint, // dev fallback prefixes "DEV-UNSIGNED-" so downstream can detect
-      signature_at: signed ? new Date() : null,
-      rendered_at: new Date(),
-      delivered_at: null,
-      acknowledged_at: null,
-      recipient_body_name: env.payload.recipient_body_name,
-      recipient_case_reference: null,
-      manifest_hash: null,
-      metadata: {
-        classification: env.payload.classification,
-        content_hash: docxResult.contentHash,
-        entity_count: entities.length,
-        signal_count: signals.length,
-        proposal_index: env.payload.proposal_index ?? null,
-      },
-    });
+      // IPFS pin
+      const kubo = kuboCreate({ url: this.ipfsApi });
+      const added = await kubo.add(pdfBytes, { pin: true, cidVersion: 1 });
+      const cid = added.cid.toString();
 
-    logger.info(
-      { ref, pdf_sha256: pdfSha256, cid, entities: entities.length, signals: signals.length },
-      'dossier-rendered',
-    );
-
-    // Push delivery envelope
-    await this.config.client.publish(
-      STREAMS.DOSSIER_DELIVER,
-      newEnvelope(
-        'worker-dossier',
-        {
-          finding_id: finding.id,
-          dossier_ref: ref,
-          pdf_cid: cid,
-          pdf_sha256: pdfSha256,
-          language: env.payload.language,
-          recipient_body_name: env.payload.recipient_body_name,
+      // Persist dossier row — sibling worker-conac-sftp reads this by finding_id
+      // to discover both language variants before delivery.
+      const signed = signature.length > 0;
+      await this.dossierRepo.insert({
+        id: randomUUID(),
+        ref,
+        finding_id: finding.id,
+        language: env.payload.language,
+        status: 'rendered',
+        pdf_sha256: pdfSha256,
+        pdf_cid: cid,
+        signature_fingerprint: signed ? signatureFingerprint : signatureFingerprint, // dev fallback prefixes "DEV-UNSIGNED-" so downstream can detect
+        signature_at: signed ? new Date() : null,
+        rendered_at: new Date(),
+        delivered_at: null,
+        acknowledged_at: null,
+        recipient_body_name: env.payload.recipient_body_name,
+        recipient_case_reference: null,
+        manifest_hash: null,
+        metadata: {
+          classification: env.payload.classification,
+          content_hash: docxResult.contentHash,
+          entity_count: entities.length,
+          signal_count: signals.length,
+          proposal_index: env.payload.proposal_index ?? null,
         },
-        `${ref}|${env.payload.language}|deliver`,
-        env.correlation_id,
-      ),
-    );
-    void signature;
-    await rm(dir, { recursive: true, force: true });
-    return { kind: 'ack' };
+      });
+
+      logger.info(
+        { ref, pdf_sha256: pdfSha256, cid, entities: entities.length, signals: signals.length },
+        'dossier-rendered',
+      );
+
+      // Push delivery envelope
+      await this.config.client.publish(
+        STREAMS.DOSSIER_DELIVER,
+        newEnvelope(
+          'worker-dossier',
+          {
+            finding_id: finding.id,
+            dossier_ref: ref,
+            pdf_cid: cid,
+            pdf_sha256: pdfSha256,
+            language: env.payload.language,
+            recipient_body_name: env.payload.recipient_body_name,
+          },
+          `${ref}|${env.payload.language}|deliver`,
+          env.correlation_id,
+        ),
+      );
+      void signature;
+      return { kind: 'ack' };
+    } finally {
+      // Tier-58: cleanup on EVERY exit path (success, throw, retry).
+      // best-effort — a leaked tmpdir is operationally harmless, but
+      // logging the failure helps catch a /tmp-permission regression.
+      try {
+        await rm(dir, { recursive: true, force: true });
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        logger.warn(
+          { err_name: err.name, err_message: err.message, dir },
+          'dossier-tmp-cleanup-failed',
+        );
+      }
+    }
   }
 }
 
@@ -292,6 +322,21 @@ function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
       outDir,
       docxPath,
     ]);
+    // Tier-58 audit closure — capture stderr so non-zero exit codes
+    // carry the soffice diagnostic message into the operator log.
+    // Pre-fix, the reject error was just "soffice exited N" with no
+    // signal about WHY (missing font, corrupt docx, fontconfig misuse).
+    // Bound the capture at 4 KB so a verbose-mode soffice can't blow
+    // up worker memory.
+    const STDERR_CAP_BYTES = 4096;
+    const stderrChunks: Buffer[] = [];
+    let stderrBytes = 0;
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderrBytes < STDERR_CAP_BYTES) {
+        stderrChunks.push(chunk);
+        stderrBytes += chunk.length;
+      }
+    });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -303,12 +348,17 @@ function runLibreOffice(docxPath: string, outDir: string): Promise<void> {
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      const stderrPreview = Buffer.concat(stderrChunks).toString('utf8').slice(0, STDERR_CAP_BYTES);
       if (timedOut) {
-        reject(new Error(`soffice exceeded ${LIBREOFFICE_TIMEOUT_MS}ms timeout (SIGKILLed)`));
+        reject(
+          new Error(
+            `soffice exceeded ${LIBREOFFICE_TIMEOUT_MS}ms timeout (SIGKILLed); stderr: ${stderrPreview || '<empty>'}`,
+          ),
+        );
         return;
       }
       if (code === 0) resolve();
-      else reject(new Error(`soffice exited ${code}`));
+      else reject(new Error(`soffice exited ${code}; stderr: ${stderrPreview || '<empty>'}`));
     });
   });
 }
