@@ -1,7 +1,10 @@
+{{- $disabled := .Values.workersDisabled | default list }}
 {{- range .Values.workers }}
 {{- $worker := . }}
 {{- $root := $ }}
-{{- if and $worker.autoscaling $worker.autoscaling.enabled }}
+{{- if has $worker.name $disabled }}
+{{/* worker '{{ $worker.name }}' disabled by .Values.workersDisabled */}}
+{{- else if and $worker.autoscaling $worker.autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

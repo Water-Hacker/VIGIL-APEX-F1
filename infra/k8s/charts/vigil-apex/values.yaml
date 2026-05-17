@@ -127,6 +127,24 @@ vault:
 # ----------------------------------------------------------------------
 # Worker plane (parametric fan-out)
 # ----------------------------------------------------------------------
+#
+# workersDisabled — opt-in subset mechanism for per-env partial
+# deployments. The default `[]` means every entry in `workers[]` is
+# instantiated; a per-env values file (e.g., values-dev.yaml) can
+# override to a list of worker.name strings, and the
+# worker-{deployment,service,hpa}.yaml templates skip those entries
+# while keeping the canonical workers[] list intact (so the
+# helm-values-drift worker-parity check stays clean — both prod and
+# dev share the SAME effective workers[] list; only the runtime
+# subset differs).
+#
+# Rationale: pre-2026-05-17 the chart used array-replacement on
+# workers[] for per-env subsets, which (a) broke worker-parity
+# checks and (b) silently dropped 24 workers from prod renders for
+# 16 days (see T11 of the TODO.md sweep). The disabled-list pattern
+# preserves the single canonical source.
+workersDisabled: []
+
 workers:
   # T11 of TODO.md sweep (2026-05-17) — populated the full worker fleet
   # from apps/worker-* + apps/audit-bridge + apps/adapter-runner. Replica
