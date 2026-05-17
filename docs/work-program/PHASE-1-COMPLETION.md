@@ -12,26 +12,30 @@
 
 ## Snapshot of state
 
-**Last refreshed: 2026-05-02 (Block-E E.5).** Counts move with every
-commit; the prior hand-maintained "46 packages / 712 tests" snapshot
-drifted. The numbers below come from a fresh sweep of the live tree.
+**Last refreshed: 2026-05-17 (T10 of TODO.md sweep).** Counts move with
+every commit; the prior hand-maintained "46 packages / 712 tests"
+snapshot drifted. The numbers below come from a fresh sweep of the
+live tree after T1–T11 of the autonomous gap-closure sweep.
 
-| Dimension                        | Status                                                                           |
-| -------------------------------- | -------------------------------------------------------------------------------- |
-| Build (`turbo run build`)        | 39/39 ✓                                                                          |
-| Typecheck                        | 56/56 ✓                                                                          |
-| Lint at `--max-warnings=0`       | 56/56 ✓                                                                          |
-| Tests (turbo)                    | 48/48 packages green                                                             |
-| Adapters in `infra/sources.json` | 29 (TRUTH §C and SRD §10.2 aligned per Block-A reconciliation §2.A.9)            |
-| Patterns built                   | 43 (target 43, 1:1 fixture coverage)                                             |
-| Phase-gate lints                 | 9 green + 1 surfacing pre-existing drift (`check-source-count` resolved 19e29ca) |
-| Weaknesses 🟩 closed             | 18 / 27 (no change since prior snapshot)                                         |
-| Weaknesses 🟧 in progress        | 2 (W-10, W-14 — corpus already at 224 rows; W-10 native helper M3-M4)            |
-| Weaknesses 🟦 architect-blocked  | 5                                                                                |
-| Weaknesses ⬛ deferred           | 1 (W-16, M2 exit)                                                                |
-| Decisions PROVISIONAL            | DECISION-012 + DECISION-013 + DECISION-014/14b/15/16 (read-through pending)      |
-| TRUTH.md open questions          | 6                                                                                |
-| In-code TODOs                    | 0 actionable (the two A7 refs are descriptive prose, not stale TODOs)            |
+| Dimension                        | Status                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Build (`turbo run build`)        | 39/39 ✓                                                                                                                    |
+| Typecheck                        | 60/60 ✓                                                                                                                    |
+| Lint at `--max-warnings=0`       | 60/60 ✓                                                                                                                    |
+| Tests (turbo)                    | 60/60 packages green (was 58; +2 for worker-counter-evidence + worker-dossier)                                             |
+| Adapters in `infra/sources.json` | 29 (TRUTH §C and SRD §10.2 aligned per Block-A reconciliation §2.A.9)                                                      |
+| Patterns built                   | 43 (target 43, 1:1 fixture coverage)                                                                                       |
+| Phase-gate lints                 | 10 green (10 lints in phase-gate.yml; all pass)                                                                            |
+| Weaknesses 🟩 closed             | 19 / 27 (was 18; W-14 graduated 2026-05-17 — corpus at 224 rows)                                                           |
+| Weaknesses 🟧 in progress        | 1 (W-10 native libykcs11 helper deferred M3-M4; WebAuthn fallback ships Phase-1)                                           |
+| Weaknesses 🟦 architect-blocked  | 5                                                                                                                          |
+| Weaknesses ⬛ deferred           | 1 (W-16, M2 exit)                                                                                                          |
+| Decisions PROVISIONAL            | DECISION-001..007 + 012 + 013 + 014/14b/14c/15 (architect read-through pending)                                            |
+| TRUTH.md open questions          | 6 (all institutional; no code-resolvable items)                                                                            |
+| In-code TODOs                    | 0 actionable                                                                                                               |
+| Test-coverage-floor allowlist    | 0 entries (was 9 on 2026-05-01; T1–T3 of TODO.md sweep graduated the last)                                                 |
+| Hardening 90-mode pass           | 82 CV + 6 N/A-Closed + 2 Code-CV-Ceremony-Pending = 90/90 at code layer                                                    |
+| Runbooks                         | 61 files (was 57; +4 from T9: worker-outcome-feedback, worker-tip-channels, worker-reconcil-audit, fabric-orderer-replace) |
 
 ---
 

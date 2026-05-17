@@ -128,10 +128,12 @@ vault:
 # Worker plane (parametric fan-out)
 # ----------------------------------------------------------------------
 workers:
+  # T11 of TODO.md sweep (2026-05-17) — populated the full worker fleet
+  # from apps/worker-* + apps/audit-bridge + apps/adapter-runner. Replica
+  # counts mirror the docker-compose entries; the worker-deployment.yaml
+  # template iterates so adding a worker is a values-only change.
   - name: worker-pattern
-    image:
-      repository: vigil-apex/worker-pattern
-      tag: '0.1.0'
+    image: { repository: vigil-apex/worker-pattern, tag: '0.1.0' }
     replicas: 3
     env:
       OTEL_SERVICE_NAME: worker-pattern
@@ -145,10 +147,298 @@ workers:
       minReplicas: 3
       maxReplicas: 10
       targetCPUUtilization: 70
-  # Add new workers here — the worker-deployment.yaml template iterates.
-  # Each worker's Deployment, Service, and (optional) HPA fall out for
-  # free; ExternalSecret reuse is automatic via the shared
-  # `vigil-apex-worker-secrets` reference.
+
+  - name: worker-pattern-discovery
+    image: { repository: vigil-apex/worker-pattern-discovery, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-pattern-discovery
+      WORKER_NAME: worker-pattern-discovery
+      PROMETHEUS_PORT: '9101'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 70 }
+
+  - name: worker-extractor
+    image: { repository: vigil-apex/worker-extractor, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-extractor
+      WORKER_NAME: worker-extractor
+      PROMETHEUS_PORT: '9102'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 8, targetCPUUtilization: 70 }
+
+  - name: worker-entity
+    image: { repository: vigil-apex/worker-entity, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-entity
+      WORKER_NAME: worker-entity
+      PROMETHEUS_PORT: '9103'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilization: 70 }
+
+  - name: worker-document
+    image: { repository: vigil-apex/worker-document, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-document
+      WORKER_NAME: worker-document
+      PROMETHEUS_PORT: '9104'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilization: 70 }
+
+  - name: worker-score
+    image: { repository: vigil-apex/worker-score, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-score
+      WORKER_NAME: worker-score
+      PROMETHEUS_PORT: '9105'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilization: 70 }
+
+  - name: worker-counter-evidence
+    image: { repository: vigil-apex/worker-counter-evidence, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-counter-evidence
+      WORKER_NAME: worker-counter-evidence
+      PROMETHEUS_PORT: '9106'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70 }
+
+  - name: worker-anchor
+    image: { repository: vigil-apex/worker-anchor, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-anchor
+      WORKER_NAME: worker-anchor
+      PROMETHEUS_PORT: '9107'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilization: 70 }
+
+  - name: worker-dossier
+    image: { repository: vigil-apex/worker-dossier, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-dossier
+      WORKER_NAME: worker-dossier
+      PROMETHEUS_PORT: '9108'
+      LIBREOFFICE_TIMEOUT_MS: '90000'
+    resources:
+      requests: { memory: '1Gi', cpu: '500m' }
+      limits: { memory: '4Gi', cpu: '2' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70 }
+
+  - name: worker-conac-sftp
+    image: { repository: vigil-apex/worker-conac-sftp, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-conac-sftp
+      WORKER_NAME: worker-conac-sftp
+      PROMETHEUS_PORT: '9109'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-governance
+    image: { repository: vigil-apex/worker-governance, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-governance
+      WORKER_NAME: worker-governance
+      PROMETHEUS_PORT: '9110'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70 }
+
+  - name: worker-tip-triage
+    image: { repository: vigil-apex/worker-tip-triage, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-tip-triage
+      WORKER_NAME: worker-tip-triage
+      PROMETHEUS_PORT: '9111'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70 }
+
+  - name: worker-tip-channels
+    image: { repository: vigil-apex/worker-tip-channels, tag: '0.1.0' }
+    replicas: 2
+    env:
+      OTEL_SERVICE_NAME: worker-tip-channels
+      WORKER_NAME: worker-tip-channels
+      PROMETHEUS_PORT: '9112'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70 }
+
+  - name: worker-audit-watch
+    image: { repository: vigil-apex/worker-audit-watch, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-audit-watch
+      WORKER_NAME: worker-audit-watch
+      PROMETHEUS_PORT: '9113'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-reconcil-audit
+    image: { repository: vigil-apex/worker-reconcil-audit, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-reconcil-audit
+      WORKER_NAME: worker-reconcil-audit
+      PROMETHEUS_PORT: '9114'
+      RECONCIL_AUDIT_INTERVAL_MS: '3600000'
+      RECONCIL_AUDIT_WINDOW_SEQS: '10000'
+      RECONCIL_AUDIT_MAX_REPUBLISH: '100'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 1, targetCPUUtilization: 70 }
+
+  - name: worker-fabric-bridge
+    image: { repository: vigil-apex/worker-fabric-bridge, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-fabric-bridge
+      WORKER_NAME: worker-fabric-bridge
+      PROMETHEUS_PORT: '9115'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-federation-agent
+    image: { repository: vigil-apex/worker-federation-agent, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-federation-agent
+      WORKER_NAME: worker-federation-agent
+      PROMETHEUS_PORT: '9116'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-federation-receiver
+    image: { repository: vigil-apex/worker-federation-receiver, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-federation-receiver
+      WORKER_NAME: worker-federation-receiver
+      PROMETHEUS_PORT: '9117'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-outcome-feedback
+    image: { repository: vigil-apex/worker-outcome-feedback, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-outcome-feedback
+      WORKER_NAME: worker-outcome-feedback
+      PROMETHEUS_PORT: '9118'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-adapter-repair
+    image: { repository: vigil-apex/worker-adapter-repair, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-adapter-repair
+      WORKER_NAME: worker-adapter-repair
+      PROMETHEUS_PORT: '9119'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-minfi-api
+    image: { repository: vigil-apex/worker-minfi-api, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-minfi-api
+      WORKER_NAME: worker-minfi-api
+      PROMETHEUS_PORT: '9120'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-satellite
+    image: { repository: vigil-apex/worker-satellite, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-satellite
+      WORKER_NAME: worker-satellite
+      PROMETHEUS_PORT: '9121'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: worker-image-forensics
+    image: { repository: vigil-apex/worker-image-forensics, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: worker-image-forensics
+      WORKER_NAME: worker-image-forensics
+      PROMETHEUS_PORT: '9122'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: audit-bridge
+    image: { repository: vigil-apex/audit-bridge, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: audit-bridge
+      WORKER_NAME: audit-bridge
+      PROMETHEUS_PORT: '9123'
+    resources:
+      requests: { memory: '256Mi', cpu: '100m' }
+      limits: { memory: '1Gi', cpu: '500m' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
+
+  - name: adapter-runner
+    image: { repository: vigil-apex/adapter-runner, tag: '0.1.0' }
+    replicas: 1
+    env:
+      OTEL_SERVICE_NAME: adapter-runner
+      WORKER_NAME: adapter-runner
+      PROMETHEUS_PORT: '9124'
+    resources:
+      requests: { memory: '512Mi', cpu: '250m' }
+      limits: { memory: '2Gi', cpu: '1' }
+    autoscaling: { enabled: false, minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 70 }
 
 # ----------------------------------------------------------------------
 # UI plane
