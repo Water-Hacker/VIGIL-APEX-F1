@@ -33,20 +33,41 @@ vault:
   persistence:
     size: 1Gi
 
-# T11 follow-up of TODO.md sweep (2026-05-17) — workers list inherited
-# from values.yaml (full 25-worker fleet). Pre-T11 this block overrode
-# workers[] to a single entry (worker-pattern); after T11 the symmetric
-# override was removed from values-prod.yaml. Helm overlay semantics
-# replace arrays, so keeping a dev override would force the
-# helm-values-drift gate's worker-parity check (T11-aware: walks
-# effective workers per file) to flag 24 workers as "in prod but not
-# in dev". Dev inherits the canonical fleet for the same reason.
+# Concern 1 of the post-#69 followup (2026-05-17) — dev runs ONLY
+# worker-pattern for fast-iteration loops. The other 24 workers stay
+# in the canonical values.yaml workers[] list (so the
+# helm-values-drift worker-parity check sees both envs sharing the
+# SAME workers[] decl), but they're disabled at render time via the
+# `workersDisabled[]` mechanism the worker-{deployment,service,hpa}
+# templates honour.
 #
-# Per-worker dev tuning (smaller resources, dev image tag) is achievable
-# via additional override files or a future per-worker overlay mechanism.
-# For now, dev runs the same 25-worker fleet as prod with values.yaml's
-# defaults (each worker has resources.limits.memory <= 2 GiB; the
-# 25-worker total is well within a kind/minikube budget on a workstation).
+# To run a different subset in dev, edit this list. To run ALL
+# workers in dev, set `workersDisabled: []` (or delete this block).
+workersDisabled:
+  - worker-pattern-discovery
+  - worker-extractor
+  - worker-entity
+  - worker-document
+  - worker-score
+  - worker-counter-evidence
+  - worker-anchor
+  - worker-dossier
+  - worker-conac-sftp
+  - worker-governance
+  - worker-tip-triage
+  - worker-tip-channels
+  - worker-audit-watch
+  - worker-reconcil-audit
+  - worker-fabric-bridge
+  - worker-federation-agent
+  - worker-federation-receiver
+  - worker-outcome-feedback
+  - worker-adapter-repair
+  - worker-minfi-api
+  - worker-satellite
+  - worker-image-forensics
+  - audit-bridge
+  - adapter-runner
 
 dashboard:
   replicas: 1

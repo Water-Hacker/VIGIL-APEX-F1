@@ -1,6 +1,10 @@
+{{- $disabled := .Values.workersDisabled | default list }}
 {{- range .Values.workers }}
 {{- $worker := . }}
 {{- $root := $ }}
+{{- if has $worker.name $disabled }}
+{{/* worker '{{ $worker.name }}' disabled by .Values.workersDisabled */}}
+{{- else }}
 ---
 apiVersion: v1
 kind: Service
@@ -16,4 +20,5 @@ spec:
     - name: metrics
       port: {{ $root.Values.observability.prometheusPort }}
       targetPort: metrics
+{{- end }}
 {{- end }}

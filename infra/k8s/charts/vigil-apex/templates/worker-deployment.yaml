@@ -5,10 +5,19 @@ its `autoscaling.enabled` flag is set). Any new worker is one values
 entry, not a new template. Keep this template in lock-step with
 `apps/worker-*` — config conventions are identical (env-driven,
 metrics on PROMETHEUS_PORT, vault token at /run/secrets/vault_token_*).
+
+`workersDisabled[]` (top-level values) is the per-env opt-in subset
+mechanism. The canonical workers[] list stays intact (worker-parity
+lint stays happy); a per-env file can list worker names to skip
+without touching workers[].
 */}}
+{{- $disabled := .Values.workersDisabled | default list }}
 {{- range .Values.workers }}
 {{- $worker := . }}
 {{- $root := $ }}
+{{- if has $worker.name $disabled }}
+{{/* worker '{{ $worker.name }}' disabled by .Values.workersDisabled */}}
+{{- else }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -117,4 +126,5 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
+{{- end }}
 {{- end }}
