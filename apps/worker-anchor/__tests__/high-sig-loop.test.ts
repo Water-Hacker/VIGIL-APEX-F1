@@ -80,9 +80,13 @@ describe('processHighSigBatch (DECISION-012 fast-lane)', () => {
     ];
     const { deps, spies } = makeDeps(events);
 
-    const count = await processHighSigBatch(deps);
+    const result = await processHighSigBatch(deps);
 
-    expect(count).toBe(3);
+    // Tier-53: result is now a structured shape, not a bare count.
+    expect(result.succeeded).toBe(3);
+    expect(result.failed).toBe(0);
+    expect(result.attempted).toBe(3);
+    expect(result.bailedOut).toBe(false);
     expect(spies.anchor.commit).toHaveBeenCalledTimes(3);
     expect(spies.publicAnchorRepo.record).toHaveBeenCalledTimes(3);
     expect(spies.userActionRepo.setAnchorTx).toHaveBeenCalledTimes(3);
@@ -113,10 +117,12 @@ describe('processHighSigBatch (DECISION-012 fast-lane)', () => {
     const { deps, spies } = makeDeps(events);
 
     const first = await processHighSigBatch(deps);
-    expect(first).toBe(1);
+    expect(first.succeeded).toBe(1);
+    expect(first.attempted).toBe(1);
 
     const second = await processHighSigBatch(deps);
-    expect(second).toBe(0);
+    expect(second.succeeded).toBe(0);
+    expect(second.attempted).toBe(0);
     // anchor.commit not invoked again
     expect(spies.anchor.commit).toHaveBeenCalledTimes(1);
     expect(spies.publicAnchorRepo.record).toHaveBeenCalledTimes(1);
@@ -136,9 +142,12 @@ describe('processHighSigBatch (DECISION-012 fast-lane)', () => {
       return `0x${h.slice(0, 64).padEnd(64, '0')}`;
     });
 
-    const count = await processHighSigBatch(deps);
+    const result = await processHighSigBatch(deps);
 
-    expect(count).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.attempted).toBe(2);
+    expect(result.bailedOut).toBe(false);
     expect(spies.publicAnchorRepo.record).toHaveBeenCalledTimes(1);
     expect(spies.userActionRepo.setAnchorTx).toHaveBeenCalledTimes(1);
     // Failure was logged

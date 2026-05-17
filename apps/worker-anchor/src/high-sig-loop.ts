@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { LoopBackoff } from '@vigil/observability';
+import { LoopBackoff, type Logger } from '@vigil/observability';
 
 import type { PolygonAnchor } from '@vigil/audit-chain';
 import type { PublicAnchorRepo, UserActionEventRepo } from '@vigil/db-postgres';
@@ -15,20 +15,43 @@ export interface HighSigAnchorDeps {
   readonly anchor: PolygonAnchor;
   readonly userActionRepo: UserActionEventRepo;
   readonly publicAnchorRepo: PublicAnchorRepo;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly logger: any;
+  readonly logger: Logger;
   readonly intervalMs: number;
 }
 
 /**
- * Run one batch of high-sig events through the anchor. Returns the count
- * processed. Used by both the driver loop and the unit tests.
+ * Tier-53 audit closure — bail-out threshold for consecutive per-event
+ * failures within a single batch. Pre-fix, a hard outage (signer down,
+ * Polygon RPC partitioned) hit all 50 events in the batch one-by-one;
+ * each event burned a network round-trip + emitted an error log. With
+ * 50 events × ~5s each, one batch could spend 4+ minutes on a doomed
+ * pass. Bail at the first 5 consecutive failures so the LoopBackoff
+ * at the driver level can apply a real backoff instead of being reset
+ * by partial success on every batch.
+ */
+const MAX_CONSECUTIVE_BATCH_FAILURES = 5;
+
+export interface HighSigBatchResult {
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly attempted: number;
+  /** True when the batch was cut short by consecutive failures. */
+  readonly bailedOut: boolean;
+}
+
+/**
+ * Run one batch of high-sig events through the anchor. Returns a
+ * structured result so the driver loop can route on succeeded vs
+ * failed (the previous shape returned ONLY count of successes, which
+ * masked partial-failure storms).
  */
 export async function processHighSigBatch(
   deps: Omit<HighSigAnchorDeps, 'intervalMs'>,
-): Promise<number> {
+): Promise<HighSigBatchResult> {
   const pending = await deps.userActionRepo.listPendingHighSig(50);
-  let count = 0;
+  let succeeded = 0;
+  let failed = 0;
+  let consecutiveFailures = 0;
   for (const ev of pending) {
     try {
       const ts = Math.floor(new Date(ev.timestamp_utc).getTime() / 1000);
@@ -80,7 +103,8 @@ export async function processHighSigBatch(
         { event_id: ev.event_id, event_type: ev.event_type, txHash },
         'high-sig-anchored',
       );
-      count++;
+      succeeded++;
+      consecutiveFailures = 0;
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       deps.logger.error(
@@ -92,9 +116,36 @@ export async function processHighSigBatch(
         },
         'high-sig-anchor-failed',
       );
+      failed++;
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) {
+        // Tier-53: bail out so the driver loop's LoopBackoff applies a
+        // real backoff instead of being reset by partial success on
+        // every batch. The unprocessed events stay in
+        // `listPendingHighSig` for the next driver-loop iteration.
+        deps.logger.error(
+          {
+            consecutiveFailures,
+            threshold: MAX_CONSECUTIVE_BATCH_FAILURES,
+            pendingRemaining: pending.length - succeeded - failed,
+          },
+          'high-sig-batch-bail-out; driver loop will back off',
+        );
+        return {
+          succeeded,
+          failed,
+          attempted: succeeded + failed,
+          bailedOut: true,
+        };
+      }
     }
   }
-  return count;
+  return {
+    succeeded,
+    failed,
+    attempted: succeeded + failed,
+    bailedOut: false,
+  };
 }
 
 /**
@@ -110,12 +161,28 @@ export async function runHighSigAnchorLoop(
   const backoff = new LoopBackoff({ initialMs: 1_000, capMs: deps.intervalMs });
   while (!isStopping()) {
     try {
-      await processHighSigBatch(deps);
-      backoff.onSuccess();
+      const result = await processHighSigBatch(deps);
+      // Tier-53: route on the structured result, not just the absence
+      // of a throw. A batch that bailed-out OR a batch where >50% of
+      // attempts failed should count as a failure for the LoopBackoff,
+      // even though no exception escaped.
+      if (result.bailedOut || (result.attempted > 0 && result.failed > result.succeeded)) {
+        backoff.onError();
+      } else {
+        backoff.onSuccess();
+      }
     } catch (err) {
       backoff.onError();
+      // Tier-53: structured err_name / err_message rather than the raw
+      // err object, matching the convention enforced elsewhere
+      // (T13/T15/T16/T17/T19/T21/T24/T29/T35/T46/T49).
+      const e = err instanceof Error ? err : new Error(String(err));
       deps.logger.error(
-        { err, consecutiveFailures: backoff.consecutiveFailureCount },
+        {
+          err_name: e.name,
+          err_message: e.message,
+          consecutiveFailures: backoff.consecutiveFailureCount,
+        },
         'high-sig-anchor-loop-error',
       );
     }
